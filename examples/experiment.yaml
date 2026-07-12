@@ -1,0 +1,40 @@
+data:
+  library: s2mpj
+  problem_names: [BEALE, CUBE, HIMMELBB, JENSMP, ROSENBR]
+  split:
+    hidden_fraction: 0.2
+    smoke_count: 1
+    seed: 20260713
+
+evaluation:
+  backend: docker
+  docker_image: optiprofiler-evolve-evaluator:latest
+  feedback_mode: agent
+  benchmark:
+    max_eval_factor: 20
+    n_jobs: 2
+    score_only: true
+  smoke_overrides:
+    max_eval_factor: 5
+
+evolution:
+  rounds: 1
+  islands: 1
+  population_per_island: 2
+
+workers:
+  max_parallel: 1
+  timeout_seconds: 900
+  pool:
+    - harness: claude
+      model: ${OPTIPROFILER_EVOLVE_MODEL}
+      pass_env: [ANTHROPIC_API_KEY]
+  tools:
+    preset: research
+    web_search: true
+    network: true
+    communication: none
+
+sandbox:
+  backend: docker
+  worker_image: optiprofiler-evolve-worker:latest

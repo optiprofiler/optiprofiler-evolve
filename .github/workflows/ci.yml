@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -e '.[dev]'
+      - run: ruff check src tests scripts examples
+      - run: python scripts/check_markdown_links.py
+      - run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - run: python -m build
+      - run: python scripts/check_wheel.py "$(find dist -name '*.whl' -print -quit)"
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f docker/worker/Dockerfile -t optiprofiler-evolve-worker:ci .
+      - run: docker build -f docker/evaluator/Dockerfile -t optiprofiler-evolve-evaluator:ci .
+      - run: >-
+          docker run --rm --entrypoint sh optiprofiler-evolve-worker:ci -lc
+          'codex --version && claude --version && python3 -c "import numpy, scipy"'
+      - run: >-
+          docker run --rm --entrypoint python optiprofiler-evolve-evaluator:ci -c
+          'import optiprofiler, optiprofiler_evolve, yaml'
