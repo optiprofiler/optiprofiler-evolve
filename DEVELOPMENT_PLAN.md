@@ -11,13 +11,17 @@ Implemented in `0.1.0a0`:
 - Codex and Claude Code worker harnesses without provider hard-coding;
 - Docker worker/evaluator boundaries and quota-limited public tools;
 - bounded islands, migration, checkpoints, fixed finalists, hidden reranking;
+- collaborator quick starts, complete API/config references, a checked-in JSON
+  Schema, and Claude/Codex/multi-file examples;
 - tests for source isolation, split integrity, broker capabilities, population
-  flow, package surface, and a real S2MPJ benchmark tie.
+  flow, package surface, documentation drift, and a real S2MPJ benchmark tie.
 
 ## P1: Stabilize for team experiments
 
 1. Add resume/retry semantics and deterministic run fingerprints.
-2. Add the MATLAB evaluator without changing the public API.
+2. Add the host-MATLAB evaluator without changing the public API. The user owns
+   MATLAB installation/licensing; the adapter owns process invocation, exact
+   problem manifests, and candidate/reference path isolation.
 3. Integrate OptiProfiler's planned agent-oriented output mode so workers receive
    compact profile, per-problem, history-plot, and failure evidence rather than
    only scalar fitness.

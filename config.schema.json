@@ -1,0 +1,462 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/optiprofiler/optiprofiler-evolve/blob/main/config.schema.json",
+  "title": "OptiProfiler Evolve experiment",
+  "description": "Strict configuration for one solver-evolution experiment.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/DataConfig"
+    },
+    "evaluation": {
+      "$ref": "#/$defs/EvaluationConfig"
+    },
+    "evolution": {
+      "$ref": "#/$defs/EvolutionConfig"
+    },
+    "workers": {
+      "$ref": "#/$defs/WorkersConfig"
+    },
+    "sandbox": {
+      "$ref": "#/$defs/SandboxConfig"
+    }
+  },
+  "required": [
+    "evaluation",
+    "workers"
+  ],
+  "$defs": {
+    "DataConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "library": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "default": "s2mpj"
+        },
+        "selection": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": true
+        },
+        "problem_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "custom_problem_libraries_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "split": {
+          "$ref": "#/$defs/SplitConfig"
+        }
+      }
+    },
+    "SplitConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hidden_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 1,
+          "default": 0.2
+        },
+        "smoke_count": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3
+        },
+        "seed": {
+          "type": "integer",
+          "default": 0
+        },
+        "public": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "hidden": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": []
+        }
+      },
+      "dependentRequired": {
+        "public": [
+          "hidden"
+        ],
+        "hidden": [
+          "public"
+        ]
+      }
+    },
+    "EvaluationConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "benchmark": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": true,
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "load"
+                ]
+              },
+              {
+                "required": [
+                  "solvers_to_load"
+                ]
+              }
+            ]
+          }
+        },
+        "smoke_overrides": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": true,
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "load"
+                ]
+              },
+              {
+                "required": [
+                  "solvers_to_load"
+                ]
+              }
+            ]
+          }
+        },
+        "backend": {
+          "type": "string",
+          "enum": [
+            "docker",
+            "local"
+          ],
+          "default": "docker"
+        },
+        "docker_image": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3600
+        },
+        "cpus": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 4.0
+        },
+        "memory": {
+          "type": "string",
+          "minLength": 1,
+          "default": "8g"
+        },
+        "pids_limit": {
+          "type": "integer",
+          "minimum": 16,
+          "default": 512
+        },
+        "feedback_mode": {
+          "type": "string",
+          "enum": [
+            "summary",
+            "agent"
+          ],
+          "default": "summary"
+        },
+        "max_smoke_calls_per_worker": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 20
+        },
+        "max_public_calls_per_worker": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 5
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "backend": {
+                "const": "docker"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "docker_image"
+            ],
+            "properties": {
+              "docker_image": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "EvolutionConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rounds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3
+        },
+        "islands": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4
+        },
+        "population_per_island": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4
+        },
+        "migration_interval": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 2
+        },
+        "random_seed": {
+          "type": "integer",
+          "default": 0
+        },
+        "finalists_per_island": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        }
+      }
+    },
+    "WorkersConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pool": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkerConfig"
+          },
+          "minItems": 1
+        },
+        "max_parallel": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1800
+        },
+        "token_budget": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "default": null
+        },
+        "max_budget_usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "default": null
+        },
+        "tools": {
+          "$ref": "#/$defs/ToolConfig"
+        }
+      },
+      "required": [
+        "pool"
+      ]
+    },
+    "WorkerConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "harness": {
+          "type": "string",
+          "enum": [
+            "codex",
+            "claude"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "profile": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "pass_env": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "uniqueItems": true,
+          "default": []
+        }
+      },
+      "required": [
+        "harness",
+        "model"
+      ]
+    },
+    "ToolConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preset": {
+          "type": "string",
+          "enum": [
+            "minimal",
+            "research",
+            "custom"
+          ],
+          "default": "research"
+        },
+        "web_search": {
+          "type": "boolean",
+          "default": true
+        },
+        "network": {
+          "type": "boolean",
+          "default": true
+        },
+        "shell": {
+          "type": "boolean",
+          "default": true
+        },
+        "python": {
+          "type": "boolean",
+          "default": true
+        },
+        "git": {
+          "type": "boolean",
+          "default": true
+        },
+        "compilers": {
+          "type": "boolean",
+          "default": true
+        },
+        "package_install": {
+          "type": "boolean",
+          "default": false
+        },
+        "communication": {
+          "type": "string",
+          "enum": [
+            "none",
+            "controller_summary",
+            "island",
+            "global"
+          ],
+          "default": "none"
+        }
+      }
+    },
+    "SandboxConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": [
+            "docker",
+            "unsafe_local"
+          ],
+          "default": "docker"
+        },
+        "worker_image": {
+          "type": "string",
+          "minLength": 1,
+          "default": "optiprofiler-evolve-worker:latest"
+        },
+        "cpus": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 2.0
+        },
+        "memory": {
+          "type": "string",
+          "minLength": 1,
+          "default": "4g"
+        },
+        "pids_limit": {
+          "type": "integer",
+          "minimum": 16,
+          "default": 512
+        },
+        "max_candidate_files": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2000
+        },
+        "max_candidate_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 200000000
+        }
+      }
+    }
+  }
+}

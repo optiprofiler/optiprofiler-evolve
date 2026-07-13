@@ -9,7 +9,7 @@ result = evolve(
     initial=HERE / "solver",
     interface="solver.py:solver",
     editable=["."],
-    config=HERE / "experiment.yaml",
+    config=HERE / "experiment-codex.yaml",
 )
 
 print(result.run_dir)

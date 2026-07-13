@@ -53,6 +53,10 @@ python examples/run.py
 Provider base URLs and CLI-specific options belong in the worker entry of the
 YAML config. The engine does not hard-code model providers.
 
+The quick start is intentionally small and is not a performance experiment.
+Start with [Getting started](docs/getting-started.md), then copy the closest
+example from [the examples index](examples/README.md).
+
 ## Fitness and data
 
 Candidate and immutable initial solver are always passed together to the same
@@ -73,5 +77,21 @@ reference, candidate snapshots and lineage, worker transcripts, public
 evaluation output, generation checkpoints, fixed finalists, final reranking,
 and a materialized `final_solver/` directory.
 
-See [Configuration](docs/configuration.md), [Architecture](docs/architecture.md),
-and the [development plan](DEVELOPMENT_PLAN.md).
+## Documentation map
+
+- [Getting started](docs/getting-started.md): install, run, and adapt a solver.
+- [Public API reference](docs/api-reference.md): every `evolve(...)` argument and
+  return field.
+- [Configuration guide](docs/configuration.md): how the major experiment choices
+  fit together.
+- [Configuration reference](docs/config-reference.md): every YAML field, type,
+  default, allowed value, and constraint.
+- [JSON Schema](config.schema.json): editor completion and structural validation.
+- [Examples](examples/README.md): Claude, Codex, and multi-file repository inputs.
+- [Architecture](docs/architecture.md): execution flow and module boundaries.
+- [Security](docs/security.md): enforced boundaries and current threat model.
+- [MATLAB evaluator design](docs/matlab-evaluator-design.md): planned host-MATLAB
+  adapter and candidate/reference path isolation.
+- [Contributing](CONTRIBUTING.md): where to change the package and which checks to
+  run.
+- [Development plan](DEVELOPMENT_PLAN.md): current implementation milestones.

@@ -28,9 +28,9 @@ workers:
   max_parallel: 1
   timeout_seconds: 900
   pool:
-    - harness: claude
-      model: ${OPTIPROFILER_EVOLVE_MODEL}
-      pass_env: [ANTHROPIC_API_KEY]
+    - harness: codex
+      model: ${OPTIPROFILER_EVOLVE_CODEX_MODEL}
+      pass_env: [OPENAI_API_KEY]
   tools:
     preset: research
     web_search: true

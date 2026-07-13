@@ -6,9 +6,9 @@ from optiprofiler_evolve import evolve
 HERE = Path(__file__).resolve().parent
 
 result = evolve(
-    initial=HERE / "solver",
+    initial=HERE / "repository_solver",
     interface="solver.py:solver",
-    editable=["."],
+    editable=["*.py"],
     config=HERE / "experiment.yaml",
 )
 

@@ -4,6 +4,12 @@ The config is strict: misspelled or unknown keys fail before a run starts.
 Strings of the form `${ENV_NAME}` are resolved from the environment. Credential
 values are redacted in `resolved_config.json`.
 
+This page explains how the major choices fit together. Use the
+[configuration reference](config-reference.md) for every field and the checked-in
+[JSON Schema](../config.schema.json) for editor completion and structural
+validation. Runnable Claude, Codex, and multi-file inputs are indexed under
+[Examples](../examples/README.md).
+
 ```yaml
 data:
   library: s2mpj
