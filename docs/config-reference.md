@@ -37,8 +37,8 @@ positive.
 | `evaluation.backend` | `docker` or `local` | `docker` | Execution boundary for Python candidate code. `local` is trusted-development only. |
 | `evaluation.docker_image` | string or `null` | `null` | Evaluator image; **required** when backend is `docker`. |
 | `evaluation.timeout_seconds` | positive integer | `3600` | Wall-time limit for one Docker evaluator process; the trusted local backend has no process timeout. |
-| `evaluation.cpus` | positive number | `4.0` | CPU limit passed to the evaluator container; ignored by the local backend. |
-| `evaluation.memory` | Docker memory string | `8g` | Evaluator-container memory limit; ignored by the local backend. |
+| `evaluation.cpus` | positive number | `2.0` | CPU limit passed to the evaluator container; ignored by the local backend. |
+| `evaluation.memory` | Docker memory string | `4g` | Evaluator-container memory limit; ignored by the local backend. |
 | `evaluation.pids_limit` | integer at least `16` | `512` | Evaluator-container process limit; ignored by the local backend. |
 | `evaluation.feedback_mode` | `summary` or `agent` | `summary` | Amount of structured benchmark feedback exposed after public evaluations. |
 | `evaluation.max_smoke_calls_per_worker` | nonnegative integer | `20` | Broker quota for worker `smoke_test` calls. |
@@ -121,7 +121,20 @@ OptiProfiler source, Docker socket, host home, or sibling repositories.
 
 The package passes model names, environment variables, profiles, and extra
 arguments to Codex or Claude Code. It does not maintain a vendor registry. A
-compatible provider can be configured in one worker entry, for example:
+compatible provider can be configured in one worker entry. For Claude Code,
+map host-side package variables to the names expected by the CLI:
+
+```yaml
+workers:
+  pool:
+    - harness: claude
+      model: ${OPTIPROFILER_EVOLVE_MODEL}
+      env:
+        ANTHROPIC_BASE_URL: ${OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL}
+        ANTHROPIC_AUTH_TOKEN: ${OPTIPROFILER_EVOLVE_API_KEY}
+```
+
+The analogous Codex configuration is:
 
 ```yaml
 workers:
@@ -135,4 +148,5 @@ workers:
 
 Use the environment-variable names and model identifier expected by the
 installed CLI/provider. Provider support should be verified with that CLI
-before starting a multi-round experiment.
+before starting a multi-round experiment. See the checked-in
+`experiment-claude-compatible.yaml` example for a complete small run.

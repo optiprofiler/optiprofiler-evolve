@@ -171,12 +171,12 @@
         "cpus": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "default": 4.0
+          "default": 2.0
         },
         "memory": {
           "type": "string",
           "minLength": 1,
-          "default": "8g"
+          "default": "4g"
         },
         "pids_limit": {
           "type": "integer",

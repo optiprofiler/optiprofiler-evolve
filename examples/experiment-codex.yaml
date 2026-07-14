@@ -11,6 +11,9 @@ data:
 evaluation:
   backend: docker
   docker_image: optiprofiler-evolve-evaluator:latest
+  cpus: 1
+  memory: 2g
+  pids_limit: 256
   feedback_mode: agent
   benchmark:
     max_eval_factor: 20
@@ -40,3 +43,6 @@ workers:
 sandbox:
   backend: docker
   worker_image: optiprofiler-evolve-worker:latest
+  cpus: 1
+  memory: 2g
+  pids_limit: 256

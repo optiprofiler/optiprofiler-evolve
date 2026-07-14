@@ -98,10 +98,12 @@ Python wrapper may call compiled Fortran or C code.
 Provider-specific base URLs can be supplied through `env`, `pass_env`, or CLI
 `args`. The package does not enumerate model vendors.
 
-The built-in research image contains Python, Git, rg, C/C++ build tools, Codex,
-and Claude Code. For strict tool-ablation experiments, build separate
-`worker_image` variants; boolean tool fields configure harness-visible tools but
-cannot remove binaries already present in an image.
+The built-in research image contains Python, Git, rg, `ddgr`, C/C++ build tools,
+Codex, and Claude Code. `ddgr` is the fallback when a compatible model endpoint
+does not expose a harness-native web-search tool. For strict tool-ablation
+experiments, build separate `worker_image` variants; boolean tool fields
+configure harness-visible tools but cannot remove binaries already present in
+an image.
 
 With `tools.network: false`, an internal Docker network blocks external access.
 That mode requires a local/in-image model endpoint; a remote model API naturally

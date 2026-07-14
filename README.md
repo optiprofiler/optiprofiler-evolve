@@ -50,8 +50,17 @@ export ANTHROPIC_API_KEY='<provider-key>'
 python examples/run.py
 ```
 
+For an Anthropic-compatible endpoint, use the checked-in mapping example:
+
+```bash
+export OPTIPROFILER_EVOLVE_MODEL='<model-id>'
+export OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL='<anthropic-compatible-url>'
+export OPTIPROFILER_EVOLVE_API_KEY='<provider-key>'
+python examples/run_claude_compatible.py
+```
+
 Provider base URLs and CLI-specific options belong in the worker entry of the
-YAML config. The engine does not hard-code model providers.
+YAML config. The engine does not hard-code model providers or credentials.
 
 The quick start is intentionally small and is not a performance experiment.
 Start with [Getting started](docs/getting-started.md), then copy the closest

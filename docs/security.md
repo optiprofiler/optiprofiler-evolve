@@ -18,6 +18,13 @@
 - The evaluator is a separate no-network Docker container. Candidate and
   immutable reference mounts are read-only.
 
+Each attempt receives a distinct workspace, broker token, container, and
+temporary Docker network, including workers on the same island. Enabling web
+search deliberately gives that private network outbound access; it does not add
+host mounts or expose the controller-only data. Set both
+`workers.tools.web_search` and `workers.tools.network` to `false` for an
+internal, no-egress network.
+
 ## Current limitation
 
 The Python candidate function executes in the same interpreter as

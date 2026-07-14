@@ -11,7 +11,9 @@ def solver(fun, x0):
     x = np.asarray(x0, dtype=float).copy()
     value = fun(x)
     step = np.maximum(1.0, np.abs(x))
-    while True:
+    # The evaluator enforces its own budget; this finite loop also keeps ad hoc
+    # worker-written tests from waiting indefinitely.
+    for _ in range(200):
         improved = False
         for index in range(x.size):
             for sign in (-1.0, 1.0):
@@ -25,3 +27,4 @@ def solver(fun, x0):
             step *= 0.5
         if np.max(step) < 1e-8:
             return x
+    return x

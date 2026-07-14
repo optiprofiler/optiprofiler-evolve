@@ -8,6 +8,13 @@
   isolation boundary.
 - Added tests that keep config dataclasses, schema, reference docs, and example
   YAML files synchronized.
+- Fixed Docker prompt delivery and Claude Code stream-JSON compatibility, and
+  added a tested Anthropic-compatible provider example.
+- Gave every worker a dedicated temporary Docker network while preserving
+  outbound research access, and added `ddgr` as a provider-independent web
+  search fallback.
+- Reduced quick-start container defaults and bounded the example solvers so
+  local worker tests cannot wait indefinitely.
 
 ## 0.1.0a0
 

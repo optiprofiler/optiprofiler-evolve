@@ -65,8 +65,8 @@ class EvaluationConfig:
     backend: str = "docker"
     docker_image: str | None = None
     timeout_seconds: int = 3600
-    cpus: float = 4.0
-    memory: str = "8g"
+    cpus: float = 2.0
+    memory: str = "4g"
     pids_limit: int = 512
     feedback_mode: str = "summary"
     max_smoke_calls_per_worker: int = 20

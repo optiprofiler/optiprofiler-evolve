@@ -57,6 +57,7 @@ def build_harness_command(
             "bypassPermissions",
             "--no-session-persistence",
             "--bare",
+            "--verbose",
             "--output-format",
             "stream-json",
             "--tools",

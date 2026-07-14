@@ -7,7 +7,7 @@ ARG SCIPY_VERSION=1.17.1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential curl git python3 python3-pip ripgrep \
+        build-essential curl ddgr git python3 python3-pip python-is-python3 ripgrep \
     && python3 -m pip install --break-system-packages --no-cache-dir \
         "numpy==${NUMPY_VERSION}" "scipy==${SCIPY_VERSION}" \
     && npm install -g \

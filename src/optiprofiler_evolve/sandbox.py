@@ -36,21 +36,24 @@ def run_agent(
 
     transcript.parent.mkdir(parents=True, exist_ok=True)
     selected_values = _selected_worker_values(worker)
-    private_network: str | None = None
+    worker_network: str | None = None
     container_name: str | None = None
     if sandbox.backend == "docker":
-        container_name = f"ope-worker-{uuid.uuid4().hex[:12]}"
-        if not workers.tools.network:
-            private_network = f"ope-{uuid.uuid4().hex[:12]}"
-            subprocess.run(
-                ["docker", "network", "create", "--internal", private_network],
-                text=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                check=True,
-            )
         inner_workspace = Path("/workspace")
         harness = build_harness_command(worker, workers, workers.tools, inner_workspace)
+        container_name = f"ope-worker-{uuid.uuid4().hex[:12]}"
+        worker_network = f"ope-{uuid.uuid4().hex[:12]}"
+        network_command = ["docker", "network", "create"]
+        if not workers.tools.network:
+            network_command.append("--internal")
+        network_command.append(worker_network)
+        subprocess.run(
+            network_command,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
         command = _docker_command(
             workers=workers,
             sandbox=sandbox,
@@ -58,7 +61,7 @@ def run_agent(
             tools_dir=tools_dir,
             broker=broker,
             harness=harness,
-            network=private_network or "bridge",
+            network=worker_network,
             container_name=container_name,
             selected_values=selected_values,
         )
@@ -107,9 +110,9 @@ def run_agent(
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
-        if private_network is not None:
+        if worker_network is not None:
             subprocess.run(
-                ["docker", "network", "rm", private_network],
+                ["docker", "network", "rm", worker_network],
                 text=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -133,6 +136,7 @@ def _docker_command(
         "docker",
         "run",
         "--rm",
+        "--interactive",
         "--name",
         container_name,
         "--init",

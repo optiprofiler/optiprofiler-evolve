@@ -36,15 +36,31 @@ class DocumentationTests(unittest.TestCase):
         environment = {
             "OPTIPROFILER_EVOLVE_MODEL": "test-claude-model",
             "OPTIPROFILER_EVOLVE_CODEX_MODEL": "test-codex-model",
+            "OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL": "https://example.invalid/anthropic",
+            "OPTIPROFILER_EVOLVE_API_KEY": "test-secret",
         }
         with patch.dict(os.environ, environment):
             claude_path = ROOT / "examples" / "experiment.yaml"
+            compatible_path = ROOT / "examples" / "experiment-claude-compatible.yaml"
             codex_path = ROOT / "examples" / "experiment-codex.yaml"
             validator.validate(yaml.safe_load(claude_path.read_text(encoding="utf-8")))
+            validator.validate(yaml.safe_load(compatible_path.read_text(encoding="utf-8")))
             validator.validate(yaml.safe_load(codex_path.read_text(encoding="utf-8")))
             claude = load_config(claude_path)
+            compatible = load_config(compatible_path)
             codex = load_config(codex_path)
         self.assertEqual(claude.workers.pool[0].harness, "claude")
+        self.assertEqual(compatible.workers.pool[0].harness, "claude")
+        self.assertEqual(
+            compatible.workers.pool[0].env["ANTHROPIC_BASE_URL"],
+            "https://example.invalid/anthropic",
+        )
+        self.assertEqual(
+            compatible.redacted_dict()["workers"]["pool"][0]["env"][
+                "ANTHROPIC_AUTH_TOKEN"
+            ],
+            "<redacted>",
+        )
         self.assertEqual(codex.workers.pool[0].harness, "codex")
 
     def test_checked_in_solver_examples_declare_valid_interfaces(self) -> None:

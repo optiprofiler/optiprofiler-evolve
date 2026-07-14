@@ -33,7 +33,9 @@ workers:
   pool:
     - harness: claude
       model: ${OPTIPROFILER_EVOLVE_MODEL}
-      pass_env: [ANTHROPIC_API_KEY]
+      env:
+        ANTHROPIC_BASE_URL: ${OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL}
+        ANTHROPIC_AUTH_TOKEN: ${OPTIPROFILER_EVOLVE_API_KEY}
   tools:
     preset: research
     web_search: true

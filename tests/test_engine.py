@@ -65,6 +65,12 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(result.public_score, 0.7)
             self.assertEqual(result.final_score, 0.65)
             self.assertIn("improved", (result.best_solver / "solver.py").read_text())
+            first_workspace = result.run_dir / "workspaces" / "g001-i00"
+            second_workspace = result.run_dir / "workspaces" / "g001-i01"
+            self.assertTrue(first_workspace.is_dir())
+            self.assertTrue(second_workspace.is_dir())
+            self.assertNotEqual(first_workspace.resolve(), second_workspace.resolve())
+            self.assertNotEqual(first_workspace.resolve(), source.resolve())
             public_manifest = (result.run_dir / "public_data_manifest.json").read_text()
             self.assertNotIn("controller/data_manifest", public_manifest)
             self.assertTrue((result.run_dir / "checkpoints" / "generation_001.json").is_file())
