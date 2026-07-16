@@ -101,6 +101,13 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
             self.assertIn("/request/evaluation_request.json", joined)
             self.assertIn("/pycutest-cache:rw,exec,nosuid,nodev,size=2g", joined)
             self.assertIn("PYCUTEST_CACHE=/pycutest-cache", joined)
+            for variable in (
+                "OMP_NUM_THREADS=1",
+                "OPENBLAS_NUM_THREADS=1",
+                "MKL_NUM_THREADS=1",
+                "NUMEXPR_NUM_THREADS=1",
+            ):
+                self.assertIn(variable, joined)
             self.assertNotIn(str(output / "evaluation_request.json"), joined)
             self.assertNotIn("SECRET_NAME", joined)
 

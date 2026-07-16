@@ -25,6 +25,10 @@
   executable because CUTEst problems are compiled extension modules; it is not
   mounted from or persisted to the host. The remaining temporary filesystem is
   still `noexec`.
+- Evaluator containers pin common numerical-library thread pools to one thread.
+  OptiProfiler still controls experiment-level parallelism through `n_jobs`;
+  the pin prevents nested BLAS workers and parallel plotting from exhausting
+  the container PID budget.
 
 Each attempt receives a distinct workspace, broker token, container, and
 temporary Docker network, including workers on the same island. Enabling web
