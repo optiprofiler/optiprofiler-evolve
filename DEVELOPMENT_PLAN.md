@@ -6,11 +6,11 @@ Implemented in `0.1.0a0`:
 
 - one public `evolve(...)` API;
 - complete solver repository snapshots and editable scopes;
-- exact problem-library manifests with smoke/public/hidden splits;
-- normalized candidate-versus-initial OptiProfiler fitness;
+- exact problem-library manifests with smoke/public/validation/hidden splits;
+- normalized candidate-versus-fixed-reference OptiProfiler fitness;
 - Codex and Claude Code worker harnesses without provider hard-coding;
 - Docker worker/evaluator boundaries and quota-limited public tools;
-- bounded islands, migration, checkpoints, fixed finalists, hidden reranking;
+- bounded islands, migration, checkpoints, validation selection, and one hidden evaluation;
 - collaborator quick starts, complete API/config references, a checked-in JSON
   Schema, and Claude/Codex/multi-file examples;
 - tests for source isolation, split integrity, broker capabilities, population
@@ -31,7 +31,7 @@ Implemented in `0.1.0a0`:
 
 ## P2: Research system
 
-1. Freeze train/public-validation/hidden-test protocols for publishable studies.
+1. Validate the frozen public/validation/hidden protocol across problem libraries.
 2. Compare islands, memory, migration, feedback bundles, tools, worker harnesses,
    models, and budgets through ablations.
 3. Add richer parent selection and archive policies only when experiments show a

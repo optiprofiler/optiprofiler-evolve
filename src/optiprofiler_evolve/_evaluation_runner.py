@@ -18,7 +18,7 @@ def main() -> int:
     request_path.unlink(missing_ok=True)
     data_raw = request["data"]
     data_raw.pop("final", None)
-    for key in ("universe", "public", "hidden", "smoke"):
+    for key in ("universe", "public", "validation", "hidden", "smoke"):
         data_raw[key] = tuple(data_raw[key])
     data = DataPlan(**data_raw)
     evaluation = EvaluationConfig(**request["evaluation"])

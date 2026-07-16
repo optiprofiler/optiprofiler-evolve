@@ -19,20 +19,20 @@ writes an immutable manifest containing exact problem names and a deterministic
 split:
 
 - `smoke`: a small subset of public problems for rapid worker iteration;
-- `public`: the complete set used for evolutionary fitness;
-- `hidden`: withheld from workers and used only for final reranking.
+- `public`: worker-visible training fitness;
+- `validation`: controller-only fitness used to retain and select candidates;
+- `hidden`: a final holdout evaluated once on the selected champion.
 
-Smoke must be a subset of public. Public and hidden must be disjoint. Hidden
-reranking selects among already fixed finalists; if its result drives later
-generations, it is no longer hidden. A paper-grade unbiased estimate requires a
-third lockbox/test split that is never used for selection.
+Smoke must be a subset of public. Public, validation, and hidden are pairwise
+disjoint. Hidden results never drive later generations or choose between
+candidates.
 
 ## Evaluation contract
 
-Workers receive only `smoke_test` and public `evaluate`. The controller owns the
-final public+hidden evaluation. Candidate and immutable initial solver are
-passed together to `optiprofiler.benchmark`; normalized fitness is
-`(candidate - initial + 1) / 2`.
+Workers receive only `smoke_test` and public `evaluate`. The controller owns
+validation and hidden evaluation. Candidate and the configured fixed reference
+are passed together to `optiprofiler.benchmark`; normalized fitness is
+`(candidate - reference + 1) / 2`.
 
 The complete Python evaluator is implemented. `.m` entrypoints are recognized,
 but MATLAB evaluation must fail clearly until its adapter is implemented.
@@ -54,7 +54,8 @@ but MATLAB evaluation must fail clearly until its adapter is implemented.
 ## Evolution contract
 
 One round dispatches one coding worker per island. Each island keeps a bounded
-population selected by canonical public fitness. Champions migrate in a ring at
+population selected by controller-only validation fitness, with public fitness
+as a tie-breaker. Champions migrate in a ring at
 the configured interval. Workers edit full files in place; there is no
 LLM-returned diff protocol.
 
@@ -62,4 +63,4 @@ LLM-returned diff protocol.
 
 A run preserves the redacted config, full trusted data manifest, worker-visible
 manifest, solver contract, candidate lineage, transcripts, evaluation feedback,
-checkpoints, fixed finalists, final reranking report, and final solver tree.
+checkpoints, validation selection, hidden holdout report, and final solver tree.

@@ -52,13 +52,14 @@ oversized trees, missing entrypoints, and changes outside this scope.
 |---|---|
 | `run_dir` | Complete experiment state and artifacts. |
 | `best_solver` | Materialized `final_solver/` directory. |
-| `best_candidate_id` | Candidate lineage identifier selected by final reranking. |
+| `best_candidate_id` | Candidate lineage identifier selected by validation. |
 | `public_score` | Candidate fitness on the public evolution set. |
-| `final_score` | Fitness on public plus hidden problems after finalists are frozen. |
-| `finalists` | Controller-only final results for every fixed finalist. |
+| `validation_score` | Controller-only fitness used to select the champion. |
+| `final_score` | Fitness on the hidden holdout for the validation-selected champion. |
+| `finalists` | Final result tuple; the MVP evaluates exactly one selected champion on hidden. |
 
-Both scores use `(candidate_score - immutable_initial_score + 1) / 2`. A score
-of `0.5` is a tie with the initial solver.
+All fitness scores use `(candidate_score - reference_score + 1) / 2`. A score
+of `0.5` is a tie with the configured fixed reference solver.
 
 ## Stable and internal surfaces
 

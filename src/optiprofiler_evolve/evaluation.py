@@ -5,13 +5,15 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import mimetypes
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import types
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -73,15 +75,21 @@ class PythonOptiProfilerEvaluator:
                 score=0.0,
                 candidate_score=0.0,
                 reference_score=0.0,
-                problems=problems,
+                problem_count=len(problems),
                 output_dir=output_dir,
                 success=False,
-                error=f"{type(exc).__name__}: {exc}",
+                error=_redact_problem_names(f"{type(exc).__name__}: {exc}", self.data),
+            )
+        if result.profile_scores is not None:
+            (output_dir / "profile_scores.json").write_text(
+                json.dumps(_json_safe(result.profile_scores), indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
             )
         result_path.write_text(
             json.dumps(_json_safe(result.as_dict()), indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        _write_artifact_index(output_dir)
         _write_feedback(result, output_dir, self.config.feedback_mode)
         return result
 
@@ -101,21 +109,25 @@ class PythonOptiProfilerEvaluator:
         options = dict(self.config.benchmark)
         if mode == "smoke":
             options.update(self.config.smoke_overrides)
-        protected = {
-            "plibs": [self.data.library],
-            "problem_names": list(problems),
-            "solver_names": ["candidate", "initial"],
-            "normalized_scores": True,
-            "silent": True,
-        }
-        if self.data.custom_problem_libraries_path:
-            protected["custom_problem_libs_path"] = self.data.custom_problem_libraries_path
-        options.update(protected)
-        if not options.get("score_only", False):
-            options["savepath"] = str(output_dir / "benchmark")
-            options["benchmark_id"] = mode
+        with tempfile.TemporaryDirectory(prefix="ope-dataset-") as temporary:
+            opaque_root = Path(temporary)
+            opaque_library = _write_opaque_problem_library(self.data, problems, opaque_root)
+            protected = {
+                "plibs": [opaque_library],
+                "problem_names": [self.data.opaque_name(name) for name in problems],
+                "solver_names": ["candidate", "reference"],
+                "normalized_scores": True,
+                "silent": True,
+                "custom_problem_libs_path": str(opaque_root),
+            }
+            options.update(protected)
+            if not options.get("score_only", False):
+                options["savepath"] = str(output_dir / "benchmark")
+                options["benchmark_id"] = mode
 
-        scores, profile_scores, _curves = benchmark([candidate_solver, reference_solver], **options)
+            scores, profile_scores, _curves = benchmark(
+                [candidate_solver, reference_solver], **options
+            )
         if len(scores) != 2:
             raise RuntimeError(f"OptiProfiler returned {len(scores)} solver scores; expected 2.")
         candidate_score = float(scores[0])
@@ -128,7 +140,7 @@ class PythonOptiProfilerEvaluator:
             score=normalized,
             candidate_score=candidate_score,
             reference_score=reference_score,
-            problems=problems,
+            problem_count=len(problems),
             output_dir=output_dir,
             profile_scores=_json_safe(profile_scores),
         )
@@ -156,7 +168,7 @@ class DockerOptiProfilerEvaluator:
         candidate = candidate.resolve()
         output_dir = output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
-        data_manifest = self.data.full_manifest()
+        data_manifest = _scoped_data_manifest(self.data, mode)
         if self.data.custom_problem_libraries_path:
             data_manifest["custom_problem_libraries_path"] = "/problem-libraries"
         request = {
@@ -168,35 +180,37 @@ class DockerOptiProfilerEvaluator:
             "data": data_manifest,
             "evaluation": asdict(self.config) | {"backend": "local"},
         }
-        request_path = output_dir / "evaluation_request.json"
-        request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
         container_name = f"ope-evaluator-{uuid.uuid4().hex[:12]}"
-        command = self.command(candidate, output_dir, container_name)
-        try:
-            completed = subprocess.run(
-                command,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                timeout=self.config.timeout_seconds,
-                check=False,
-            )
-            log = completed.stdout
-            returncode = completed.returncode
-        except subprocess.TimeoutExpired as exc:
-            log = exc.stdout or ""
-            if isinstance(log, bytes):
-                log = log.decode("utf-8", errors="replace")
-            log += "\n[controller] evaluator timed out\n"
-            returncode = 124
-        finally:
-            subprocess.run(
-                ["docker", "rm", "-f", container_name],
-                text=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
+        with tempfile.TemporaryDirectory(prefix="ope-evaluator-request-") as request_dir:
+            request_path = Path(request_dir) / "evaluation_request.json"
+            request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+            command = self.command(candidate, output_dir, container_name, request_path)
+            try:
+                completed = subprocess.run(
+                    command,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    timeout=self.config.timeout_seconds,
+                    check=False,
+                )
+                log = completed.stdout
+                returncode = completed.returncode
+            except subprocess.TimeoutExpired as exc:
+                log = exc.stdout or ""
+                if isinstance(log, bytes):
+                    log = log.decode("utf-8", errors="replace")
+                log += "\n[controller] evaluator timed out\n"
+                returncode = 124
+            finally:
+                subprocess.run(
+                    ["docker", "rm", "-f", container_name],
+                    text=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+        log = _redact_problem_names(log, self.data)
         (output_dir / "evaluator.log").write_text(log, encoding="utf-8")
         result_path = output_dir / "result.json"
         if returncode != 0 or not result_path.is_file():
@@ -206,18 +220,35 @@ class DockerOptiProfilerEvaluator:
                 score=0.0,
                 candidate_score=0.0,
                 reference_score=0.0,
-                problems=_problems_for_mode(self.data, mode),
+                problem_count=len(_problems_for_mode(self.data, mode)),
                 output_dir=output_dir,
                 success=False,
                 error=error,
             )
             result_path.write_text(json.dumps(result.as_dict(), indent=2) + "\n", encoding="utf-8")
+            _write_artifact_index(output_dir)
             _write_feedback(result, output_dir, self.config.feedback_mode)
             return result
         result = _read_result(result_path)
-        return EvaluationResult(**(result.as_dict() | {"output_dir": output_dir}))
+        result = replace(
+            result,
+            output_dir=output_dir,
+            error=_redact_problem_names(result.error, self.data),
+        )
+        result_path.write_text(
+            json.dumps(_json_safe(result.as_dict()), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        _write_artifact_index(output_dir)
+        return result
 
-    def command(self, candidate: Path, output_dir: Path, container_name: str) -> list[str]:
+    def command(
+        self,
+        candidate: Path,
+        output_dir: Path,
+        container_name: str,
+        request_path: Path,
+    ) -> list[str]:
         command = [
             "docker",
             "run",
@@ -242,16 +273,22 @@ class DockerOptiProfilerEvaluator:
             self.config.memory,
             "--tmpfs",
             "/tmp:rw,noexec,nosuid,size=1g",
+            "--tmpfs",
+            "/pycutest-cache:rw,exec,nosuid,nodev,size=2g",
             "--env",
             "HOME=/tmp/home",
             "--env",
             "MPLCONFIGDIR=/tmp/matplotlib",
+            "--env",
+            "PYCUTEST_CACHE=/pycutest-cache",
             "--mount",
             f"type=bind,src={candidate},dst=/candidate,readonly",
             "--mount",
             f"type=bind,src={self.reference},dst=/reference,readonly",
             "--mount",
             f"type=bind,src={output_dir},dst=/output",
+            "--mount",
+            f"type=bind,src={request_path.parent},dst=/request",
         ]
         if self.data.custom_problem_libraries_path:
             custom = Path(self.data.custom_problem_libraries_path).expanduser().resolve()
@@ -264,7 +301,7 @@ class DockerOptiProfilerEvaluator:
                 "python",
                 "-m",
                 "optiprofiler_evolve._evaluation_runner",
-                "/output/evaluation_request.json",
+                "/request/evaluation_request.json",
             ]
         )
         return command
@@ -296,9 +333,97 @@ def _problems_for_mode(data: DataPlan, mode: str) -> tuple[str, ...]:
         return data.smoke
     if mode == "public":
         return data.public
-    if mode == "final":
-        return data.final
+    if mode == "validation":
+        return data.selection_problems
+    if mode == "hidden":
+        return data.hidden
     raise ValueError(f"Unsupported evaluation mode: {mode!r}")
+
+
+def _scoped_data_manifest(data: DataPlan, mode: str) -> dict[str, Any]:
+    """Give an evaluator only the names required by its current capability."""
+
+    problems = _problems_for_mode(data, mode)
+    aliases = {name: data.opaque_name(name) for name in problems}
+    return {
+        "library": data.library,
+        "selection": {},
+        "universe": list(problems),
+        "public": list(problems),
+        "validation": list(problems) if mode == "validation" else [],
+        "hidden": list(problems) if mode == "hidden" else [],
+        "smoke": list(problems) if mode == "smoke" else [],
+        "split_seed": data.split_seed,
+        "manifest_hash": data.manifest_hash,
+        "custom_problem_libraries_path": data.custom_problem_libraries_path,
+        "aliases": aliases,
+    }
+
+
+def _write_opaque_problem_library(
+    data: DataPlan,
+    problems: tuple[str, ...],
+    root: Path,
+) -> str:
+    """Create a temporary proxy so every benchmark artifact uses opaque IDs."""
+
+    library_name = "ope_dataset"
+    library_dir = root / library_name
+    library_dir.mkdir(parents=True)
+    mapping = {data.opaque_name(name): name for name in problems}
+    source = f'''"""Ephemeral trusted problem-name proxy."""
+
+import importlib
+
+try:
+    from optiprofiler.problem_libraries import (
+        _resolve_problem_library_options,
+        load_problem_library,
+        resolve_problem_library,
+    )
+except ImportError:
+    _HAS_PLUGIN_PROTOCOL = False
+else:
+    _HAS_PLUGIN_PROTOCOL = True
+
+_MAPPING = {mapping!r}
+_SOURCE_LIBRARY = {data.library!r}
+_SOURCE_CUSTOM_PATH = {data.custom_problem_libraries_path!r}
+_PLUGIN = None
+_OPTIONS = None
+
+
+def _source_plugin():
+    global _PLUGIN, _OPTIONS
+    if _PLUGIN is None:
+        if _HAS_PLUGIN_PROTOCOL:
+            reference = resolve_problem_library(_SOURCE_LIBRARY, _SOURCE_CUSTOM_PATH)
+            _PLUGIN = load_problem_library(reference)
+            _OPTIONS = _resolve_problem_library_options(_PLUGIN, {{}})
+        elif _SOURCE_CUSTOM_PATH is None:
+            _PLUGIN = importlib.import_module(
+                f"optiprofiler.problem_libs.{{_SOURCE_LIBRARY}}"
+            )
+    return _PLUGIN, _OPTIONS
+
+
+def {library_name}_select(_options):
+    return list(_MAPPING)
+
+
+def {library_name}_load(problem_name):
+    plugin, options = _source_plugin()
+    source_name = _MAPPING[problem_name]
+    if _HAS_PLUGIN_PROTOCOL:
+        return plugin.load(source_name, options)
+    if plugin is None:
+        raise RuntimeError(
+            "Custom problem libraries require the current OptiProfiler plugin protocol."
+        )
+    return getattr(plugin, f"{{_SOURCE_LIBRARY}}_load")(source_name)
+'''
+    (library_dir / f"{library_name}_tools.py").write_text(source, encoding="utf-8")
+    return library_name
 
 
 def _load_python_solver(root: Path, interface: InterfaceSpec, label: str) -> tuple[Any, set[str]]:
@@ -375,57 +500,46 @@ def _write_feedback(result: EvaluationResult, output_dir: Path, feedback_mode: s
             f"# Evaluation: {result.mode}\n\n"
             f"- normalized fitness: `{result.score:.6f}`\n"
             f"- candidate OptiProfiler score: `{result.candidate_score:.6f}`\n"
-            f"- immutable initial score: `{result.reference_score:.6f}`\n"
-            f"- problems: `{len(result.problems)}`\n\n"
-            "The normalized fitness is `(candidate - initial + 1) / 2`; "
-            "`0.5` is a tie with the initial solver.\n"
+            f"- fixed reference score: `{result.reference_score:.6f}`\n"
+            f"- problems: `{result.problem_count}`\n\n"
+            "The normalized fitness is `(candidate - reference + 1) / 2`; "
+            "`0.5` is a tie with the fixed reference solver.\n"
         )
         if feedback_mode == "agent":
-            numbers = list(_finite_numbers(result.profile_scores))
-            text += "\n## Profile signal\n\n"
-            if numbers:
-                text += (
-                    f"- profile values: `{len(numbers)}`\n"
-                    f"- range: `[{min(numbers):.6g}, {max(numbers):.6g}]`\n"
-                    f"- mean: `{sum(numbers) / len(numbers):.6g}`\n"
-                )
-            else:
-                text += "No finite profile-level values were returned.\n"
-            artifacts = [
-                path.relative_to(output_dir).as_posix()
-                for path in sorted(output_dir.rglob("*"))
-                if path.is_file() and path.name not in {"result.json", "feedback.md"}
-            ]
-            if artifacts:
-                text += "\n## Benchmark artifacts\n\n"
-                text += "\n".join(f"- `{name}`" for name in artifacts[:80]) + "\n"
-                if len(artifacts) > 80:
-                    text += f"- ... and {len(artifacts) - 80} more files\n"
+            text += (
+                "\n## Benchmark artifacts\n\n"
+                "Read `artifact_index.json` to discover the complete benchmark bundle. "
+                "Problem identifiers in every worker-visible file are opaque and stable "
+                "within this run. `profile_scores.json` contains the structured "
+                "profile-level output when available.\n"
+            )
     else:
         text = f"# Evaluation failed\n\n`{result.error}`\n"
     (output_dir / "feedback.md").write_text(text, encoding="utf-8")
 
 
-def _finite_numbers(value: Any):
-    if isinstance(value, bool) or value is None:
-        return
-    if isinstance(value, (int, float)):
-        number = float(value)
-        if math.isfinite(number):
-            yield number
-        return
-    if isinstance(value, dict):
-        for item in value.values():
-            yield from _finite_numbers(item)
-        return
-    if isinstance(value, (list, tuple)):
-        for item in value:
-            yield from _finite_numbers(item)
+def _write_artifact_index(output_dir: Path) -> None:
+    entries = []
+    excluded = {"artifact_index.json", "feedback.md", "result.json"}
+    for path in sorted(output_dir.rglob("*")):
+        if not path.is_file() or path.name in excluded:
+            continue
+        media_type, _encoding = mimetypes.guess_type(path.name)
+        entries.append(
+            {
+                "path": path.relative_to(output_dir).as_posix(),
+                "bytes": path.stat().st_size,
+                "media_type": media_type or "application/octet-stream",
+            }
+        )
+    (output_dir / "artifact_index.json").write_text(
+        json.dumps({"artifacts": entries}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _read_result(path: Path) -> EvaluationResult:
     raw = json.loads(path.read_text(encoding="utf-8"))
-    raw["problems"] = tuple(raw["problems"])
     raw["output_dir"] = Path(raw["output_dir"])
     return EvaluationResult(**raw)
 
@@ -442,6 +556,15 @@ def _json_safe(value: Any) -> Any:
     if hasattr(value, "tolist"):
         return _json_safe(value.tolist())
     return repr(value)
+
+
+def _redact_problem_names(value: str | None, data: DataPlan) -> str | None:
+    if value is None:
+        return None
+    redacted = value
+    for problem_name in sorted(data.universe, key=len, reverse=True):
+        redacted = redacted.replace(problem_name, data.opaque_name(problem_name))
+    return redacted
 
 
 __all__: list[str] = []

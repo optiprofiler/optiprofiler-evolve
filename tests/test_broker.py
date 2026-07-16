@@ -16,7 +16,7 @@ from optiprofiler_evolve.models import EvaluationResult
 class FakeEvaluator:
     def evaluate(self, candidate: Path, mode: str, output_dir: Path) -> EvaluationResult:
         output_dir.mkdir(parents=True, exist_ok=True)
-        result = EvaluationResult(mode, 0.6, 0.7, 0.5, ("P1",), output_dir)
+        result = EvaluationResult(mode, 0.6, 0.7, 0.5, 1, output_dir)
         (output_dir / "result.json").write_text(json.dumps(result.as_dict(), default=str))
         (output_dir / "feedback.md").write_text("ok")
         return result
@@ -57,6 +57,21 @@ class BrokerTests(unittest.TestCase):
             )
             payload = json.loads(completed.stdout)
             self.assertTrue(payload["success"])
+            self.assertEqual(payload["problem_count"], 1)
+            self.assertNotIn("problems", payload)
+            validation_id = uuid.uuid4().hex
+            validation_request = broker.exchange / "requests" / f"{validation_id}.json"
+            validation_response = broker.exchange / "responses" / f"{validation_id}.json"
+            validation_request.write_text(
+                json.dumps(
+                    {"id": validation_id, "token": connection.token, "mode": "validation"}
+                )
+            )
+            for _ in range(100):
+                if validation_response.exists():
+                    break
+                time.sleep(0.01)
+            self.assertEqual(json.loads(validation_response.read_text())["status"], 403)
             request_id = uuid.uuid4().hex
             request = broker.exchange / "requests" / f"{request_id}.json"
             victim = root / "victim.txt"

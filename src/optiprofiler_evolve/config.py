@@ -18,24 +18,44 @@ _T = TypeVar("_T")
 
 @dataclasses.dataclass(frozen=True)
 class SplitConfig:
-    """Deterministic public/hidden/smoke split settings."""
+    """Deterministic public/validation/hidden/smoke split settings."""
 
+    validation_fraction: float = 0.2
     hidden_fraction: float = 0.2
     smoke_count: int = 3
     seed: int = 0
     public: tuple[str, ...] = ()
+    validation: tuple[str, ...] = ()
     hidden: tuple[str, ...] = ()
+    smoke: tuple[str, ...] = ()
 
     def validate(self) -> None:
+        if not 0 <= self.validation_fraction < 1:
+            raise ValueError("data.split.validation_fraction must be in [0, 1).")
         if not 0 <= self.hidden_fraction < 1:
             raise ValueError("data.split.hidden_fraction must be in [0, 1).")
+        if self.validation_fraction + self.hidden_fraction >= 1:
+            raise ValueError(
+                "data.split.validation_fraction + hidden_fraction must be less than 1."
+            )
         if self.smoke_count < 1:
             raise ValueError("data.split.smoke_count must be positive.")
-        if bool(self.public) != bool(self.hidden):
-            raise ValueError("Explicit data.split.public and hidden must be provided together.")
-        overlap = set(self.public).intersection(self.hidden)
-        if overlap:
-            raise ValueError(f"Explicit public and hidden sets overlap: {sorted(overlap)!r}")
+        explicit = bool(self.public) or bool(self.validation) or bool(self.hidden)
+        if explicit and not self.public:
+            raise ValueError("An explicit data split must provide a nonempty public set.")
+        groups = {
+            "public": set(self.public),
+            "validation": set(self.validation),
+            "hidden": set(self.hidden),
+        }
+        for left, right in (("public", "validation"), ("public", "hidden"), ("validation", "hidden")):
+            overlap = groups[left].intersection(groups[right])
+            if overlap:
+                raise ValueError(
+                    f"Explicit {left} and {right} sets overlap: {sorted(overlap)!r}"
+                )
+        if self.smoke and not set(self.smoke).issubset(groups["public"]):
+            raise ValueError("Explicit data.split.smoke must be a subset of public.")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -69,6 +89,7 @@ class EvaluationConfig:
     memory: str = "4g"
     pids_limit: int = 512
     feedback_mode: str = "summary"
+    reference: str = "initial"
     max_smoke_calls_per_worker: int = 20
     max_public_calls_per_worker: int = 5
 
@@ -85,6 +106,8 @@ class EvaluationConfig:
             )
         if self.feedback_mode not in {"summary", "agent"}:
             raise ValueError("evaluation.feedback_mode must be 'summary' or 'agent'.")
+        if self.reference not in {"initial", "scipy_powell"}:
+            raise ValueError("evaluation.reference must be 'initial' or 'scipy_powell'.")
         if self.max_smoke_calls_per_worker < 0 or self.max_public_calls_per_worker < 0:
             raise ValueError("Evaluation call quotas cannot be negative.")
         forbidden = {"load", "solvers_to_load"}

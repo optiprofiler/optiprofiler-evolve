@@ -16,6 +16,7 @@ from .data import DataPlan, resolve_data_plan, write_data_manifests
 from .evaluation import Evaluator, create_evaluator
 from .models import CandidateRecord, EvolveResult, FinalistResult
 from .prompt import build_worker_prompt
+from .references import materialize_reference
 from .sandbox import AgentRunResult, run_agent
 from .solver import (
     InterfaceSpec,
@@ -69,9 +70,14 @@ class EvolutionEngine:
 
     def run(self) -> EvolveResult:
         self._initialize_run_directory()
-        reference = copy_initial_source(self.initial, self.run_dir / "controller" / "reference")
+        reference = materialize_reference(
+            initial=self.initial,
+            destination=self.run_dir / "controller" / "reference",
+            interface=self.interface,
+            config=self.config.evaluation,
+        )
         seed_path = self.run_dir / "candidates" / "seed"
-        copy_solver_tree(reference, seed_path)
+        copy_initial_source(self.initial, seed_path)
         self._validate_candidate(seed_path)
 
         data = resolve_data_plan(self.config.data)
@@ -99,6 +105,13 @@ class EvolutionEngine:
         )
         if not seed_eval.success:
             raise RuntimeError(f"Initial solver evaluation failed: {seed_eval.error}")
+        seed_validation = evaluator.evaluate(
+            seed_path,
+            "validation",
+            self.run_dir / "controller" / "evaluations" / "seed" / "validation",
+        )
+        if not seed_validation.success:
+            raise RuntimeError(f"Initial solver validation failed: {seed_validation.error}")
         seed = CandidateRecord(
             candidate_id="seed",
             island=-1,
@@ -106,7 +119,8 @@ class EvolutionEngine:
             parent_id=None,
             path=seed_path,
             tree_hash=tree_hash(seed_path),
-            public_score=0.5,
+            public_score=seed_eval.score,
+            validation_score=seed_validation.score,
         )
         self.candidates[seed.candidate_id] = seed
         populations = [[seed] for _ in range(self.config.evolution.islands)]
@@ -152,6 +166,7 @@ class EvolutionEngine:
                             path=self.run_dir / "workspaces" / candidate_id,
                             tree_hash="",
                             public_score=0.0,
+                            validation_score=0.0,
                             worker=f"{worker.harness}:{worker.model}",
                             valid=False,
                             error=f"{type(exc).__name__}: {exc}",
@@ -167,6 +182,7 @@ class EvolutionEngine:
                     "generation": record.generation,
                     "parent_id": record.parent_id,
                     "public_score": record.public_score,
+                    "validation_score": record.validation_score,
                     "valid": record.valid,
                     "error": record.error,
                     "changed_files": list(attempt.changed),
@@ -185,21 +201,26 @@ class EvolutionEngine:
                 populations = self._migrate(populations)
             self._write_checkpoint(generation, populations)
 
-        finalists = self._fixed_finalists(populations)
-        final_results = self._rerank_finalists(finalists, evaluator)
-        successful_finalists = [item for item in final_results if item.success]
-        if not successful_finalists:
-            raise RuntimeError("Every controller-only final evaluation failed.")
-        best_final = max(
-            successful_finalists,
-            key=lambda item: (item.final_score, item.public_score, item.candidate_id),
+        validation_finalists = self._fixed_finalists(populations)
+        champion_island, champion = max(
+            validation_finalists,
+            key=lambda item: (
+                item[1].validation_score,
+                item[1].public_score,
+                item[1].generation,
+                item[1].candidate_id,
+            ),
         )
+        best_final = self._evaluate_hidden_champion(champion_island, champion, evaluator, data)
+        final_results = [best_final]
+        if not best_final.success:
+            raise RuntimeError(f"Controller-only hidden evaluation failed: {best_final.error}")
         best_record = self.candidates[best_final.candidate_id]
         final_solver = self.run_dir / "final_solver"
         copy_solver_tree(best_record.path, final_solver)
         _write_json(
             self.run_dir / "final_ranking.json",
-            [item.as_dict() for item in sorted(final_results, key=lambda x: -x.final_score)],
+            [best_final.as_dict()],
         )
         self._write_final_report(best_final, final_results, final_solver)
         return EvolveResult(
@@ -207,6 +228,7 @@ class EvolutionEngine:
             best_solver=final_solver,
             best_candidate_id=best_final.candidate_id,
             public_score=best_final.public_score,
+            validation_score=best_final.validation_score,
             final_score=best_final.final_score,
             finalists=tuple(final_results),
         )
@@ -279,6 +301,17 @@ class EvolutionEngine:
             )
             if not canonical.success:
                 raise RuntimeError(canonical.error or "canonical public evaluation failed")
+            validation = evaluator.evaluate(
+                workspace,
+                "validation",
+                self.run_dir
+                / "controller"
+                / "evaluations"
+                / candidate_id
+                / "validation",
+            )
+            if not validation.success:
+                raise RuntimeError(validation.error or "controller validation evaluation failed")
             snapshot = self.run_dir / "candidates" / candidate_id
             copy_solver_tree(workspace, snapshot)
             digest = tree_hash(snapshot)
@@ -290,6 +323,7 @@ class EvolutionEngine:
                 path=snapshot,
                 tree_hash=digest,
                 public_score=canonical.score,
+                validation_score=validation.score,
                 worker=f"{worker.harness}:{worker.model}",
             )
         except Exception as exc:
@@ -301,6 +335,7 @@ class EvolutionEngine:
                 path=workspace,
                 tree_hash="",
                 public_score=0.0,
+                validation_score=0.0,
                 worker=f"{worker.harness}:{worker.model}",
                 valid=False,
                 error=f"{type(exc).__name__}: {exc}",
@@ -319,7 +354,7 @@ class EvolutionEngine:
         ordered = self._trim_population(population)
         if len(ordered) == 1 or self.rng.random() < 0.7:
             return ordered[0]
-        weights = [max(record.public_score, 1e-6) for record in ordered]
+        weights = [max(record.validation_score, 1e-6) for record in ordered]
         return self.rng.choices(ordered, weights=weights, k=1)[0]
 
     def _select_worker(self) -> WorkerConfig:
@@ -330,7 +365,12 @@ class EvolutionEngine:
         unique = {record.candidate_id: record for record in population}
         ordered = sorted(
             unique.values(),
-            key=lambda record: (-record.public_score, -record.generation, record.candidate_id),
+            key=lambda record: (
+                -record.validation_score,
+                -record.public_score,
+                -record.generation,
+                record.candidate_id,
+            ),
         )
         return ordered[: self.config.evolution.population_per_island]
 
@@ -355,33 +395,34 @@ class EvolutionEngine:
                     seen.add(record.candidate_id)
         return fixed
 
-    def _rerank_finalists(
-        self, finalists: list[tuple[int, CandidateRecord]], evaluator: Evaluator
-    ) -> list[FinalistResult]:
-        def evaluate(item: tuple[int, CandidateRecord]) -> FinalistResult:
-            island, record = item
-            result = evaluator.evaluate(
-                record.path,
-                "final",
-                self.run_dir / "controller" / "final_evaluations" / record.candidate_id,
-            )
-            if not result.success:
-                score = 0.0
-            else:
-                score = result.score
-            return FinalistResult(
-                candidate_id=record.candidate_id,
-                island=island,
-                public_score=record.public_score,
-                final_score=score,
-                output_dir=result.output_dir,
-                success=result.success,
-                error=result.error,
-            )
-
-        max_workers = min(self.config.workers.max_parallel, len(finalists))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            return list(executor.map(evaluate, finalists))
+    def _evaluate_hidden_champion(
+        self,
+        island: int,
+        record: CandidateRecord,
+        evaluator: Evaluator,
+        data: DataPlan,
+    ) -> FinalistResult:
+        output_dir = self.run_dir / "controller" / "final_evaluations" / record.candidate_id
+        if data.hidden:
+            result = evaluator.evaluate(record.path, "hidden", output_dir)
+            final_score = result.score if result.success else 0.0
+            success = result.success
+            error = result.error
+        else:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            final_score = record.validation_score
+            success = True
+            error = None
+        return FinalistResult(
+            candidate_id=record.candidate_id,
+            island=island,
+            public_score=record.public_score,
+            validation_score=record.validation_score,
+            final_score=final_score,
+            output_dir=output_dir,
+            success=success,
+            error=error,
+        )
 
     def _memory_for(self, island: int) -> str | None:
         mode = self.config.workers.tools.communication
@@ -400,7 +441,15 @@ class EvolutionEngine:
             history = successful + failed
         else:
             history = history[-10:]
-        return json.dumps(history, indent=2, sort_keys=True)
+        worker_visible = [
+            {
+                key: value
+                for key, value in item.items()
+                if key not in {"validation_score"}
+            }
+            for item in history
+        ]
+        return json.dumps(worker_visible, indent=2, sort_keys=True)
 
     def _initialize_run_directory(self) -> None:
         if self.initial.is_dir():
@@ -436,18 +485,20 @@ class EvolutionEngine:
             "",
             f"- Best candidate: `{best.candidate_id}`",
             f"- Public fitness: `{best.public_score:.6f}`",
-            f"- Final public+hidden fitness: `{best.final_score:.6f}`",
+            f"- Validation fitness: `{best.validation_score:.6f}`",
+            f"- Hidden fitness: `{best.final_score:.6f}`",
             f"- Materialized solver: `{final_solver}`",
             "",
-            "## Fixed Finalists",
+            "## Validation-selected champion",
             "",
-            "| Candidate | Island | Public | Final | Status |",
-            "|---|---:|---:|---:|---|",
+            "| Candidate | Island | Public | Validation | Hidden | Status |",
+            "|---|---:|---:|---:|---:|---|",
         ]
         for item in sorted(finalists, key=lambda value: -value.final_score):
             lines.append(
                 f"| `{item.candidate_id}` | {item.island} | "
-                f"{item.public_score:.6f} | {item.final_score:.6f} | "
+                f"{item.public_score:.6f} | {item.validation_score:.6f} | "
+                f"{item.final_score:.6f} | "
                 f"{'ok' if item.success else item.error or 'failed'} |"
             )
         (self.run_dir / "FINAL_REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

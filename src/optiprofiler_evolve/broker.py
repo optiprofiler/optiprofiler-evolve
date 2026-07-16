@@ -153,7 +153,7 @@ class EvaluationBroker:
                 self._respond(request_id, 401, {"error": "unauthorized"})
                 return
             mode = request.get("mode")
-            if mode in {"hidden", "final"}:
+            if mode in {"validation", "hidden", "final"}:
                 self._respond(request_id, 403, {"error": "controller-only"})
                 return
             if mode not in self.quotas:
@@ -238,14 +238,12 @@ def latest_workspace_result(workspace: Path, mode: str) -> EvaluationResult | No
             "score",
             "candidate_score",
             "reference_score",
-            "problems",
+            "problem_count",
             "output_dir",
             "success",
             "error",
-            "profile_scores",
         }
     }
-    raw["problems"] = tuple(raw["problems"])
     raw["output_dir"] = Path(raw["output_dir"])
     return EvaluationResult(**raw)
 

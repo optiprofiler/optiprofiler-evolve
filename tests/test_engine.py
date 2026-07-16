@@ -15,13 +15,18 @@ from test_config import minimal_config
 
 
 class FakeEvaluator:
+    calls: list[str] = []
+
     def evaluate(self, candidate: Path, mode: str, output_dir: Path) -> EvaluationResult:
+        self.calls.append(mode)
         output_dir.mkdir(parents=True, exist_ok=True)
         improved = "improved" in (candidate / "solver.py").read_text()
         score = 0.7 if improved else 0.5
-        if mode == "final" and improved:
+        if mode == "validation" and improved:
+            score = 0.68
+        if mode == "hidden" and improved:
             score = 0.65
-        result = EvaluationResult(mode, score, score, 0.5, ("P1",), output_dir)
+        result = EvaluationResult(mode, score, score, 0.5, 1, output_dir)
         (output_dir / "result.json").write_text(json.dumps(result.as_dict(), default=str))
         (output_dir / "feedback.md").write_text("ok")
         return result
@@ -42,8 +47,9 @@ def fake_agent_runner(**kwargs) -> AgentRunResult:
 
 
 class EngineTests(unittest.TestCase):
-    def test_population_loop_preserves_source_and_reranks_fixed_finalists(self) -> None:
+    def test_population_loop_preserves_source_and_tests_one_validated_champion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
+            FakeEvaluator.calls = []
             root = Path(directory)
             source = root / "source"
             source.mkdir()
@@ -63,7 +69,9 @@ class EngineTests(unittest.TestCase):
             result = engine.run()
             self.assertEqual(tree_hash(source), original_hash)
             self.assertEqual(result.public_score, 0.7)
+            self.assertEqual(result.validation_score, 0.68)
             self.assertEqual(result.final_score, 0.65)
+            self.assertEqual(FakeEvaluator.calls.count("hidden"), 1)
             self.assertIn("improved", (result.best_solver / "solver.py").read_text())
             first_workspace = result.run_dir / "workspaces" / "g001-i00"
             second_workspace = result.run_dir / "workspaces" / "g001-i01"
@@ -73,6 +81,7 @@ class EngineTests(unittest.TestCase):
             self.assertNotEqual(first_workspace.resolve(), source.resolve())
             public_manifest = (result.run_dir / "public_data_manifest.json").read_text()
             self.assertNotIn("controller/data_manifest", public_manifest)
+            self.assertNotIn("P1", public_manifest)
             self.assertTrue((result.run_dir / "checkpoints" / "generation_001.json").is_file())
 
 

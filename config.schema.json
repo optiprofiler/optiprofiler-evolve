@@ -65,6 +65,12 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "validation_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 1,
+          "default": 0.2
+        },
         "hidden_fraction": {
           "type": "number",
           "minimum": 0,
@@ -88,6 +94,14 @@
           "uniqueItems": true,
           "default": []
         },
+        "validation": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
         "hidden": {
           "type": "array",
           "items": {
@@ -95,15 +109,15 @@
           },
           "uniqueItems": true,
           "default": []
+        },
+        "smoke": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": []
         }
-      },
-      "dependentRequired": {
-        "public": [
-          "hidden"
-        ],
-        "hidden": [
-          "public"
-        ]
       }
     },
     "EvaluationConfig": {
@@ -190,6 +204,14 @@
             "agent"
           ],
           "default": "summary"
+        },
+        "reference": {
+          "type": "string",
+          "enum": [
+            "initial",
+            "scipy_powell"
+          ],
+          "default": "initial"
         },
         "max_smoke_calls_per_worker": {
           "type": "integer",

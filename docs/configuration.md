@@ -18,6 +18,7 @@ data:
     mindim: 1
     maxdim: 10
   split:
+    validation_fraction: 0.2
     hidden_fraction: 0.2
     smoke_count: 5
     seed: 20260713
@@ -30,6 +31,7 @@ evaluation:
   memory: 8g
   pids_limit: 512
   feedback_mode: agent
+  reference: scipy_powell
   max_smoke_calls_per_worker: 20
   max_public_calls_per_worker: 5
   benchmark:
@@ -86,8 +88,9 @@ sandbox:
 ```
 
 `data.problem_names` can replace dynamic library selection. Explicit
-`data.split.public` and `data.split.hidden` can replace the random split, but
-together they must contain the exact selected universe.
+`data.split.public`, `data.split.validation`, and `data.split.hidden` can
+replace the random split. They must be disjoint and together contain the exact
+selected universe. An explicit `data.split.smoke` may freeze a public subset.
 
 `runtime="auto"` in `evolve(...)` uses the interface suffix: `.py` selects the
 Python adapter and `.m` selects the future MATLAB adapter. It describes the

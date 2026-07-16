@@ -17,16 +17,20 @@ usable default for a real run.
 | `data.selection` | mapping | `{}` | Arguments passed to `<library>_select(...)` when exact names are not supplied. |
 | `data.problem_names` | list of strings | `[]` | Exact selected universe; replaces dynamic selection when nonempty. |
 | `data.custom_problem_libraries_path` | path or `null` | `null` | Directory containing an additional OptiProfiler problem-library implementation. |
-| `data.split.hidden_fraction` | float in `[0, 1)` | `0.2` | Fraction withheld from workers when the split is generated. |
+| `data.split.validation_fraction` | float in `[0, 1)` | `0.2` | Controller-only fraction used to select and retain candidates. |
+| `data.split.hidden_fraction` | float in `[0, 1)` | `0.2` | Final holdout fraction evaluated once after champion selection. |
 | `data.split.smoke_count` | positive integer | `3` | Number of public problems in the fast `smoke_test` subset. |
 | `data.split.seed` | integer | `0` | Deterministic split and smoke-sampling seed. |
-| `data.split.public` | list of strings | `[]` | Explicit public names. Must be supplied together with `hidden`. |
-| `data.split.hidden` | list of strings | `[]` | Explicit hidden names. Must be supplied together with `public`. |
+| `data.split.public` | list of strings | `[]` | Explicit worker-facing training set. A nonempty value enables explicit splitting. |
+| `data.split.validation` | list of strings | `[]` | Explicit controller-only selection set. |
+| `data.split.hidden` | list of strings | `[]` | Explicit controller-only final holdout set. |
+| `data.split.smoke` | list of strings | `[]` | Optional explicit fast subset; it must be contained in `public`. |
 
-Explicit public and hidden lists must be disjoint and together contain the
-entire selected universe. Smoke is always sampled from public. If the selected
-universe contains one problem, hidden is empty even when `hidden_fraction` is
-positive.
+Explicit public, validation, and hidden lists must be pairwise disjoint and
+together contain the entire selected universe. Smoke is always a public subset.
+Workers receive only the two evaluation capabilities and an anonymous count/hash
+manifest; names, aliases, validation results, and hidden results remain in the
+controller directory.
 
 ## Evaluation
 
@@ -41,11 +45,12 @@ positive.
 | `evaluation.memory` | Docker memory string | `4g` | Evaluator-container memory limit; ignored by the local backend. |
 | `evaluation.pids_limit` | integer at least `16` | `512` | Evaluator-container process limit; ignored by the local backend. |
 | `evaluation.feedback_mode` | `summary` or `agent` | `summary` | Amount of structured benchmark feedback exposed after public evaluations. |
+| `evaluation.reference` | `initial` or `scipy_powell` | `initial` | Fixed reference solver paired with every candidate benchmark. |
 | `evaluation.max_smoke_calls_per_worker` | nonnegative integer | `20` | Broker quota for worker `smoke_test` calls. |
 | `evaluation.max_public_calls_per_worker` | nonnegative integer | `5` | Broker quota for worker `evaluate` calls. |
 
 `load` and `solvers_to_load` are rejected in both benchmark mappings. Candidate
-and immutable initial solver must be executed together in each canonical
+and the fixed reference solver must be executed together in each canonical
 benchmark call. The controller overrides `plibs`, `problem_names`, solver names,
 normalization, and other identity-sensitive fields.
 
@@ -58,7 +63,7 @@ normalization, and other identity-sensitive fields.
 | `evolution.population_per_island` | positive integer | `4` | Maximum retained candidates in each island. |
 | `evolution.migration_interval` | nonnegative integer | `2` | Champion ring-migration interval; `0` disables migration. |
 | `evolution.random_seed` | integer | `0` | Reproducible controller sampling seed. |
-| `evolution.finalists_per_island` | positive integer | `1` | Fixed candidates per island sent to controller-only final evaluation. |
+| `evolution.finalists_per_island` | positive integer | `1` | Validation-ranked candidates per island considered when selecting one champion. |
 
 `finalists_per_island` cannot exceed `population_per_island`.
 

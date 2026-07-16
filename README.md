@@ -18,15 +18,17 @@ result = evolve(
 ```
 
 The controller copies `initial` and never edits it. Coding workers receive
-independent solver workspaces, the public experiment manifest, and two tools:
+independent solver workspaces, an anonymous experiment manifest, and two tools:
 `smoke_test` for a small public subset and `evaluate` for all public problems.
-Hidden problems are evaluated only after the island finalists have been fixed.
+Validation selects one champion inside the controller; hidden problems evaluate
+that fixed champion once and never influence the worker or population loop.
 
 ## Alpha status
 
 The Python path is an end-to-end MVP: repository candidates, deterministic data
 splits, OptiProfiler scoring, Codex/Claude workers, Docker isolation, four-island
-population evolution, checkpoints, migration, and final public+hidden reranking.
+population evolution, checkpoints, migration, validation selection, and a final
+hidden holdout evaluation.
 
 MATLAB entrypoints are detected from `.m` files but the MATLAB evaluator is not
 implemented yet. Deliberately adversarial candidate code is also outside the
@@ -59,6 +61,13 @@ export OPTIPROFILER_EVOLVE_API_KEY='<provider-key>'
 python examples/run_claude_compatible.py
 ```
 
+External problem libraries such as PyCUTEst use OptiProfiler's current
+problem-library plugin protocol and must be installed separately in the
+evaluator environment. Until the corresponding OptiProfiler release is on
+PyPI, install the current OptiProfiler source before this package or build an
+experiment image from clean source checkouts. Bundled legacy libraries remain
+compatible with OptiProfiler 1.3.x.
+
 Provider base URLs and CLI-specific options belong in the worker entry of the
 YAML config. The engine does not hard-code model providers or credentials.
 
@@ -68,22 +77,23 @@ example from [the examples index](examples/README.md).
 
 ## Fitness and data
 
-Candidate and immutable initial solver are always passed together to the same
+Candidate and the configured fixed reference solver are always passed together to the same
 `optiprofiler.benchmark` call. Fitness is
 
 ```text
-(candidate OptiProfiler score - initial OptiProfiler score + 1) / 2
+(candidate OptiProfiler score - reference OptiProfiler score + 1) / 2
 ```
 
-so `0.5` is a tie, values above `0.5` improve on the initial solver, and values
-below `0.5` regress. The run manifest freezes exact smoke, public, and hidden
-problem names before any worker starts.
+so `0.5` is a tie, values above `0.5` improve on the reference solver, and values
+below `0.5` regress. The trusted run manifest freezes exact smoke, public,
+validation, and hidden problem names before any worker starts. Worker-visible
+artifacts use opaque problem identifiers.
 
 ## Run artifacts
 
 Each run keeps the resolved redacted config, exact data manifest, immutable
 reference, candidate snapshots and lineage, worker transcripts, public
-evaluation output, generation checkpoints, fixed finalists, final reranking,
+evaluation output, generation checkpoints, validation selection, hidden evaluation,
 and a materialized `final_solver/` directory.
 
 ## Documentation map

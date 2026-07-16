@@ -103,23 +103,23 @@ result = evolve(
 ```
 
 Use relative imports such as `from .search import step` inside a multi-file
-Python solver. The evaluator loads candidate and immutable reference under
+Python solver. The evaluator loads candidate and the fixed reference under
 separate module namespaces during the same OptiProfiler benchmark call.
 
 ## 4. Scale deliberately
 
 Before increasing model spend:
 
-1. Confirm the seed evaluates successfully against itself.
+1. Confirm the seed evaluates successfully against the configured fixed reference.
 2. Keep `rounds: 1`, `islands: 1`, and a small explicit problem list.
 3. Inspect `public_data_manifest.json`, `resolved_config.json`, worker
    transcripts, and evaluation feedback in the run directory.
 4. Increase problem count and evaluation budget.
 5. Increase islands, rounds, and worker parallelism last.
 
-The hidden split is not exposed through worker tools. It is used only after the
-finalist set has been fixed. Do not use final reranking repeatedly as worker
-feedback.
+Validation and hidden splits are not exposed through worker tools. Validation
+selects candidates inside the controller. Hidden is evaluated once after one
+champion has been fixed and is never used as worker feedback.
 
 ## 5. Understand search and isolation
 
@@ -136,7 +136,7 @@ With the default Docker backend, every attempt gets a separate writable copy of
 its parent solver, container, broker token, and temporary Docker network. A
 worker can see that copy, read-only evaluation artifacts, and its private
 `smoke_test`/`evaluate` broker. It cannot see the original solver, immutable
-reference, hidden manifest, host home, sibling repositories, other worker
+reference, validation/hidden manifests, host home, sibling repositories, other worker
 networks, or Docker socket. The container root is read-only and Linux
 capabilities are dropped. `sandbox.backend: unsafe_local` removes these
 boundaries and should be used only for trusted package tests.

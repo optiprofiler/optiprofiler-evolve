@@ -5,9 +5,9 @@
 ```text
 evolve(...)
   -> validate config and solver interface
-  -> copy immutable reference and seed candidate
-  -> resolve exact problem names and freeze smoke/public/hidden split
-  -> evaluate seed against itself (fitness 0.5)
+  -> copy the seed and materialize the configured fixed reference
+  -> resolve exact problem names and freeze smoke/public/validation/hidden split
+  -> evaluate seed on public and controller-only validation sets
   -> repeat for each generation
        -> select one parent per island
        -> copy each parent to a private worker workspace
@@ -15,10 +15,10 @@ evolve(...)
        -> expose smoke_test and public evaluate through a bounded broker
        -> validate the complete edited solver tree
        -> run one canonical public evaluation
-       -> record candidate and trim each island population
+       -> run controller-only validation and trim each island population
        -> migrate champions at the configured interval
-  -> freeze finalist set
-  -> controller evaluates each finalist on public + hidden
+  -> select one champion using validation fitness (public is a tie-breaker)
+  -> controller evaluates that fixed champion once on hidden
   -> materialize final_solver and reports
 ```
 
@@ -31,11 +31,11 @@ evolve(...)
 | `solver.py` | Repository copies, interface checks, edit scope, tree safety |
 | `data.py` | Problem-library selection and immutable split manifest |
 | `evaluation.py` | Python OptiProfiler adapter and evaluation Docker boundary |
-| `broker.py` | Quota-limited smoke/public tools; no hidden capability |
+| `broker.py` | Quota-limited smoke/public tools; no validation or hidden capability |
 | `harness.py` | Codex and Claude Code argv construction |
 | `sandbox.py` | Worker Docker process, resources, mounts, environment |
 | `prompt.py` | DFO solver task card and public feedback context |
-| `engine.py` | Islands, scheduling, population, migration, checkpoints, rerank |
+| `engine.py` | Islands, scheduling, validation selection, migration, checkpoints, holdout |
 | `models.py` | Internal immutable result records |
 
 No module copies or modifies OptiProfiler source. `optiprofiler` is a normal

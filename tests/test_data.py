@@ -16,15 +16,29 @@ class DataPlanTests(unittest.TestCase):
         )
         first = resolve_data_plan(config)
         second = resolve_data_plan(config)
-        self.assertEqual(first, second)
+        self.assertEqual(first.manifest_hash, second.manifest_hash)
+        self.assertEqual(first.public, second.public)
+        self.assertEqual(first.validation, second.validation)
+        self.assertEqual(first.hidden, second.hidden)
+        self.assertFalse(set(first.public).intersection(first.validation))
         self.assertFalse(set(first.public).intersection(first.hidden))
+        self.assertFalse(set(first.validation).intersection(first.hidden))
         self.assertTrue(set(first.smoke).issubset(first.public))
-        self.assertEqual(set(first.final), set(first.universe))
+        self.assertEqual(
+            set(first.public).union(first.validation).union(first.hidden),
+            set(first.universe),
+        )
 
     def test_worker_manifest_does_not_contain_hidden_names(self) -> None:
         config = DataConfig(
-            problem_names=("PUBLIC", "HIDDEN"),
-            split=SplitConfig(public=("PUBLIC",), hidden=("HIDDEN",), smoke_count=1),
+            problem_names=("PUBLIC", "VALIDATION", "HIDDEN"),
+            split=SplitConfig(
+                public=("PUBLIC",),
+                validation=("VALIDATION",),
+                hidden=("HIDDEN",),
+                smoke=("PUBLIC",),
+                smoke_count=1,
+            ),
         )
         plan = resolve_data_plan(config)
         with tempfile.TemporaryDirectory() as directory:
@@ -33,7 +47,23 @@ class DataPlanTests(unittest.TestCase):
             visible = (run_dir / "public_data_manifest.json").read_text(encoding="utf-8")
             trusted = (run_dir / "controller" / "data_manifest.json").read_text(encoding="utf-8")
         self.assertNotIn("HIDDEN", visible)
+        self.assertNotIn("VALIDATION", visible)
+        self.assertNotIn("PUBLIC", visible)
         self.assertIn("HIDDEN", trusted)
+        self.assertIn("VALIDATION", trusted)
+
+    def test_explicit_smoke_must_stay_inside_public(self) -> None:
+        config = DataConfig(
+            problem_names=("PUBLIC", "VALIDATION", "HIDDEN"),
+            split=SplitConfig(
+                public=("PUBLIC",),
+                validation=("VALIDATION",),
+                hidden=("HIDDEN",),
+                smoke=("VALIDATION",),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "smoke must be a subset"):
+            config.validate()
 
 
 if __name__ == "__main__":

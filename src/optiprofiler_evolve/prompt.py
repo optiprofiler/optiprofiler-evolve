@@ -41,18 +41,22 @@ Contract
 - Required OptiProfiler entrypoint: {interface.file}:{interface.function}
 - Editable paths/globs: {json.dumps(list(editable))}
 - Generation: {generation}; island: {island}
-- Parent public fitness: {parent_score:.6f}; 0.5 means tied with the immutable initial solver
+- Parent public fitness: {parent_score:.6f}; 0.5 means tied with the fixed reference solver
 - Advisory token budget: {budget}
 
 Evaluation tools
 - Run `smoke_test` for rapid checks on a small public subset.
 - Run `evaluate` for the canonical full public fitness.
-- Read the result.json and feedback.md paths printed by those tools.
+- Read the result.json, feedback.md, and benchmark_artifacts paths printed by those tools.
+- In agent-feedback experiments, inspect artifact_index.json and then open the useful
+  benchmark logs, profile plots, and per-problem history plots. Opaque problem IDs are
+  stable within the run, but their source-library names are intentionally unavailable.
 - Prefer these bounded tools over calling the solver directly.
 - MANDATORY: every local command that invokes the solver must cap objective evaluations
   and use a wall-clock guard such as `timeout 30s python test_solver.py`. Never launch an
   unbounded solver test or a bare Python command that may wait for solver convergence.
-- Hidden problems and final evaluation are controller-only. Do not try to discover them.
+- Validation and hidden problems, scores, and mappings are controller-only. Do not try to
+  discover them. Selection happens outside your workspace after public evaluation.
 
 Required work order
 1. Read the solver files needed to understand the current algorithm.

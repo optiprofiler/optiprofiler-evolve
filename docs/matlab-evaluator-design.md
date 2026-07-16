@@ -25,14 +25,14 @@ interface suffix/runtime
 ```
 
 Both adapters must return the same internal `EvaluationResult` and preserve the
-same smoke/public/final boundaries. Data manifests contain problem names and
+same smoke/public/validation/hidden boundaries. Trusted manifests contain problem names and
 selection options; the runtime adapter validates that its installed problem
 library can load them.
 
 ## Fixed reference
 
-The initial solver remains immutable for the complete run. Every candidate and
-that same reference solver enter one OptiProfiler `benchmark` call. The MATLAB
+The configured reference remains immutable for the complete run. Every candidate
+and that same reference solver enter one OptiProfiler `benchmark` call. The MATLAB
 adapter must not precompute one score independently because profile scores are
 coupled across the solver list.
 

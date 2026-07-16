@@ -15,15 +15,17 @@ class EvaluationResult:
     score: float
     candidate_score: float
     reference_score: float
-    problems: tuple[str, ...]
+    problem_count: int
     output_dir: Path
     success: bool = True
     error: str | None = None
     profile_scores: Any = None
 
-    def as_dict(self) -> dict[str, Any]:
+    def as_dict(self, *, include_profile_scores: bool = False) -> dict[str, Any]:
         value = dataclasses.asdict(self)
         value["output_dir"] = str(self.output_dir)
+        if not include_profile_scores:
+            value.pop("profile_scores", None)
         return value
 
 
@@ -38,6 +40,7 @@ class CandidateRecord:
     path: Path
     tree_hash: str
     public_score: float
+    validation_score: float
     worker: str | None = None
     valid: bool = True
     error: str | None = None
@@ -55,6 +58,7 @@ class FinalistResult:
     candidate_id: str
     island: int
     public_score: float
+    validation_score: float
     final_score: float
     output_dir: Path
     success: bool = True
@@ -74,6 +78,7 @@ class EvolveResult:
     best_solver: Path
     best_candidate_id: str
     public_score: float
+    validation_score: float
     final_score: float
     finalists: tuple[FinalistResult, ...]
 
