@@ -11,6 +11,7 @@ from optiprofiler_evolve.data import DataPlan
 from optiprofiler_evolve.evaluation import (
     DockerOptiProfilerEvaluator,
     PythonOptiProfilerEvaluator,
+    _problems_for_mode,
     _scoped_data_manifest,
 )
 from optiprofiler_evolve.solver import InterfaceSpec
@@ -132,6 +133,7 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
         self.assertIn("PUBLIC", serialized)
         self.assertNotIn("VALIDATION", serialized)
         self.assertNotIn("HIDDEN", serialized)
+        self.assertEqual(_problems_for_mode(data, "public_score"), ("PUBLIC",))
 
 
 if __name__ == "__main__":

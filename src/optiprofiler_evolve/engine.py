@@ -101,7 +101,9 @@ class EvolutionEngine:
             config=self.config.evaluation,
         )
         seed_eval = evaluator.evaluate(
-            seed_path, "public", self.run_dir / "controller" / "evaluations" / "seed" / "public"
+            seed_path,
+            "public_score",
+            self.run_dir / "controller" / "evaluations" / "seed" / "public",
         )
         if not seed_eval.success:
             raise RuntimeError(f"Initial solver evaluation failed: {seed_eval.error}")
@@ -296,7 +298,7 @@ class EvolutionEngine:
             validate_edit_scope(changed, self.editable)
             canonical = evaluator.evaluate(
                 workspace,
-                "public",
+                "public_score",
                 self.run_dir / "controller" / "evaluations" / candidate_id / "public",
             )
             if not canonical.success:

@@ -41,6 +41,11 @@ evolve(...)
 No module copies or modifies OptiProfiler source. `optiprofiler` is a normal
 runtime dependency and remains a separate package.
 
+Controller seed, canonical-public, and validation comparisons use an internal
+score-only mode. Worker `smoke_test`/`evaluate` calls retain the configured full
+feedback bundle, and the final hidden champion keeps its full audit artifacts.
+This avoids regenerating profile PDFs that no worker or selection rule reads.
+
 ## Repository candidates
 
 `initial` may be a single file or a directory. A directory is treated as the

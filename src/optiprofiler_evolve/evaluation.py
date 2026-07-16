@@ -109,6 +109,9 @@ class PythonOptiProfilerEvaluator:
         options = dict(self.config.benchmark)
         if mode == "smoke":
             options.update(self.config.smoke_overrides)
+        if mode in {"public_score", "validation"}:
+            options["score_only"] = True
+            options["draw_hist_plots"] = "none"
         with tempfile.TemporaryDirectory(prefix="ope-dataset-") as temporary:
             opaque_root = Path(temporary)
             opaque_library = _write_opaque_problem_library(self.data, problems, opaque_root)
@@ -339,7 +342,7 @@ def create_evaluator(
 def _problems_for_mode(data: DataPlan, mode: str) -> tuple[str, ...]:
     if mode == "smoke":
         return data.smoke
-    if mode == "public":
+    if mode in {"public", "public_score"}:
         return data.public
     if mode == "validation":
         return data.selection_problems

@@ -71,6 +71,7 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(result.public_score, 0.7)
             self.assertEqual(result.validation_score, 0.68)
             self.assertEqual(result.final_score, 0.65)
+            self.assertEqual(FakeEvaluator.calls.count("public_score"), 3)
             self.assertEqual(FakeEvaluator.calls.count("hidden"), 1)
             self.assertIn("improved", (result.best_solver / "solver.py").read_text())
             first_workspace = result.run_dir / "workspaces" / "g001-i00"
