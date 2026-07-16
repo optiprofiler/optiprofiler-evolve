@@ -270,6 +270,8 @@ class EvolutionEngine:
             parent_score=parent.public_score,
             controller_memory=self._memory_for(island),
             token_budget=self.config.workers.token_budget,
+            max_smoke_calls=self.config.evaluation.max_smoke_calls_per_worker,
+            max_public_calls=self.config.evaluation.max_public_calls_per_worker,
         )
         run_result = AgentRunResult(1, transcript)
         changed: tuple[str, ...] = ()

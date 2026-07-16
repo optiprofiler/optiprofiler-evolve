@@ -59,6 +59,20 @@ class BrokerTests(unittest.TestCase):
             self.assertTrue(payload["success"])
             self.assertEqual(payload["problem_count"], 1)
             self.assertNotIn("problems", payload)
+            exhausted = subprocess.run(
+                [str(tools / "smoke_test")],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=environment,
+                check=False,
+                timeout=10,
+            )
+            exhausted_payload = json.loads(exhausted.stdout)
+            self.assertNotEqual(exhausted.returncode, 0)
+            self.assertEqual(exhausted_payload["error"], "evaluation quota exhausted")
+            self.assertFalse(exhausted_payload["retryable"])
+            self.assertEqual(exhausted_payload["remaining"], 0)
             validation_id = uuid.uuid4().hex
             validation_request = broker.exchange / "requests" / f"{validation_id}.json"
             validation_response = broker.exchange / "responses" / f"{validation_id}.json"

@@ -20,6 +20,8 @@ def build_worker_prompt(
     parent_score: float,
     controller_memory: str | None,
     token_budget: int | None,
+    max_smoke_calls: int,
+    max_public_calls: int,
 ) -> str:
     """Describe one bounded mutation job without exposing hidden data."""
 
@@ -45,8 +47,14 @@ Contract
 - Advisory token budget: {budget}
 
 Evaluation tools
-- Run `smoke_test` for rapid checks on a small public subset.
-- Run `evaluate` for the canonical full public fitness.
+- Run `smoke_test` for rapid checks on a small public subset (at most
+  {max_smoke_calls} calls in this job).
+- Run `evaluate` for the canonical full public fitness (at most
+  {max_public_calls} calls in this job).
+- Each call permanently consumes one job-local quota slot, including a failed
+  evaluation. If a tool reports `evaluation quota exhausted` or
+  `retryable: false`, waiting cannot restore it: do not sleep or retry. Keep the
+  best current solver and finish the job.
 - Read the result.json, feedback.md, and benchmark_artifacts paths printed by those tools.
 - In agent-feedback experiments, inspect artifact_index.json and then open the useful
   benchmark logs, profile plots, and per-problem history plots. Opaque problem IDs are

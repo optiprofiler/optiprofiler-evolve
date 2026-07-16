@@ -49,6 +49,10 @@ controller directory.
 | `evaluation.max_smoke_calls_per_worker` | nonnegative integer | `20` | Broker quota for worker `smoke_test` calls. |
 | `evaluation.max_public_calls_per_worker` | nonnegative integer | `5` | Broker quota for worker `evaluate` calls. |
 
+Evaluation quotas are local to one worker job and each invocation consumes one
+slot, including a failed evaluation. An exhausted quota is non-retryable;
+waiting does not restore it.
+
 `load` and `solvers_to_load` are rejected in both benchmark mappings. Candidate
 and the fixed reference solver must be executed together in each canonical
 benchmark call. The controller overrides `plibs`, `problem_names`, solver names,

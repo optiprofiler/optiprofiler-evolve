@@ -160,7 +160,15 @@ class EvaluationBroker:
                 self._respond(request_id, 404, {"error": "unknown capability"})
                 return
             if self.counts[mode] >= self.quotas[mode]:
-                self._respond(request_id, 429, {"error": "quota exceeded"})
+                self._respond(
+                    request_id,
+                    403,
+                    {
+                        "error": "evaluation quota exhausted",
+                        "retryable": False,
+                        "remaining": 0,
+                    },
+                )
                 return
             self.counts[mode] += 1
             call = self.counts[mode]
