@@ -129,6 +129,80 @@ def validate_interface(root: Path, interface: InterfaceSpec, runtime: str) -> No
         raise ValueError(f"Unsupported runtime: {runtime}")
 
 
+def validate_candidate_imports(
+    root: Path,
+    *,
+    runtime: str,
+    forbidden: Iterable[str],
+) -> None:
+    """Enforce an auditable dependency ablation on Python candidate source.
+
+    This is an experiment-policy check, not a security sandbox. The Docker boundary
+    remains responsible for isolating untrusted worker execution.
+    """
+
+    blocked = tuple(sorted(set(forbidden)))
+    if not blocked:
+        return
+    if runtime != "python":
+        raise ValueError("Candidate import restrictions currently support Python only.")
+
+    violations: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root)
+        if _ignored_relative(relative):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for name, line in _import_references(tree):
+            if any(name == prefix or name.startswith(prefix + ".") for prefix in blocked):
+                violations.append(f"{relative.as_posix()}:{line}:{name}")
+    if violations:
+        raise ValueError(
+            "Candidate uses imports forbidden by this experiment: " + ", ".join(violations)
+        )
+
+
+def _import_references(tree: ast.AST) -> set[tuple[str, int]]:
+    references: set[tuple[str, int]] = set()
+    imported_import_module = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            references.update((alias.name, node.lineno) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            references.add((node.module, node.lineno))
+            references.update((f"{node.module}.{alias.name}", node.lineno) for alias in node.names)
+            if node.module == "importlib" and any(
+                alias.name == "import_module" for alias in node.names
+            ):
+                imported_import_module = True
+        elif isinstance(node, ast.Attribute):
+            dotted = _dotted_attribute(node)
+            if dotted:
+                references.add((dotted, node.lineno))
+        elif isinstance(node, ast.Call) and node.args:
+            argument = node.args[0]
+            if not isinstance(argument, ast.Constant) or not isinstance(argument.value, str):
+                continue
+            function = _dotted_attribute(node.func)
+            if function in {"__import__", "importlib.import_module"} or (
+                function == "import_module" and imported_import_module
+            ):
+                references.add((argument.value, node.lineno))
+    return references
+
+
+def _dotted_attribute(node: ast.AST) -> str | None:
+    parts: list[str] = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        parts.append(current.id)
+        return ".".join(reversed(parts))
+    return None
+
+
 def validate_tree_safety(root: Path, *, max_files: int, max_bytes: int) -> None:
     """Reject links, special files, and oversized worker output before host reads it."""
 

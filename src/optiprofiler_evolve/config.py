@@ -90,6 +90,7 @@ class EvaluationConfig:
     pids_limit: int = 512
     feedback_mode: str = "summary"
     reference: str = "initial"
+    forbidden_candidate_imports: tuple[str, ...] = ()
     max_smoke_calls_per_worker: int = 20
     max_public_calls_per_worker: int = 5
 
@@ -108,6 +109,12 @@ class EvaluationConfig:
             raise ValueError("evaluation.feedback_mode must be 'summary' or 'agent'.")
         if self.reference not in {"initial", "scipy_powell"}:
             raise ValueError("evaluation.reference must be 'initial' or 'scipy_powell'.")
+        for name in self.forbidden_candidate_imports:
+            if not name or any(not part.isidentifier() for part in name.split(".")):
+                raise ValueError(
+                    "evaluation.forbidden_candidate_imports must contain dotted "
+                    "Python module names."
+                )
         if self.max_smoke_calls_per_worker < 0 or self.max_public_calls_per_worker < 0:
             raise ValueError("Evaluation call quotas cannot be negative.")
         forbidden = {"load", "solvers_to_load"}

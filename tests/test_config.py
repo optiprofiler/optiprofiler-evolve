@@ -42,6 +42,18 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cannot load previous"):
             load_config(raw)
 
+    def test_forbidden_candidate_imports_are_typed_and_validated(self) -> None:
+        raw = minimal_config()
+        raw["evaluation"]["forbidden_candidate_imports"] = ["scipy.optimize", "pdfo"]
+        config = load_config(raw)
+        self.assertEqual(
+            config.evaluation.forbidden_candidate_imports,
+            ("scipy.optimize", "pdfo"),
+        )
+        raw["evaluation"]["forbidden_candidate_imports"] = ["not valid"]
+        with self.assertRaisesRegex(ValueError, "dotted Python module names"):
+            load_config(raw)
+
     def test_environment_reference_is_resolved_then_redacted(self) -> None:
         raw = minimal_config()
         raw["workers"]["pool"][0]["env"] = {

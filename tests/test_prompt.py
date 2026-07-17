@@ -33,12 +33,15 @@ class PromptTests(unittest.TestCase):
             token_budget=1000,
             max_smoke_calls=3,
             max_public_calls=1,
+            forbidden_candidate_imports=("scipy.optimize",),
         )
 
         self.assertIn("at most\n  3 calls", prompt)
         self.assertIn("at most\n  1 calls", prompt)
         self.assertIn("waiting cannot restore it", prompt)
         self.assertIn("do not sleep or retry", prompt)
+        self.assertIn("render_pdf", prompt)
+        self.assertIn("scipy.optimize", prompt)
 
 
 if __name__ == "__main__":

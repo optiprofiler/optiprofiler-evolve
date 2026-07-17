@@ -8,6 +8,7 @@ from optiprofiler_evolve.solver import (
     InterfaceSpec,
     changed_files,
     copy_initial_source,
+    validate_candidate_imports,
     validate_edit_scope,
     validate_interface,
     validate_tree_safety,
@@ -48,6 +49,34 @@ class SolverTests(unittest.TestCase):
             (after / "escape").symlink_to("/etc/passwd")
             with self.assertRaisesRegex(ValueError, "symbolic link"):
                 validate_tree_safety(after, max_files=20, max_bytes=10000)
+
+    def test_candidate_import_ablation_rejects_static_and_dynamic_solver_apis(self) -> None:
+        samples = (
+            "from scipy.optimize import minimize\n",
+            "import scipy.optimize as so\n",
+            "import scipy\nx = scipy.optimize.minimize\n",
+            "import importlib\nx = importlib.import_module('pdfo')\n",
+        )
+        for source in samples:
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "solver.py").write_text(source)
+                with self.assertRaisesRegex(ValueError, "forbidden by this experiment"):
+                    validate_candidate_imports(
+                        root,
+                        runtime="python",
+                        forbidden=("scipy.optimize", "pdfo"),
+                    )
+
+    def test_candidate_import_ablation_allows_numerical_building_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "solver.py").write_text("import numpy as np\nfrom scipy import linalg\n")
+            validate_candidate_imports(
+                root,
+                runtime="python",
+                forbidden=("scipy.optimize", "pdfo"),
+            )
 
 
 if __name__ == "__main__":

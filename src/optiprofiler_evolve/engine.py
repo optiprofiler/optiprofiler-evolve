@@ -24,6 +24,7 @@ from .solver import (
     copy_initial_source,
     copy_solver_tree,
     tree_hash,
+    validate_candidate_imports,
     validate_edit_scope,
     validate_interface,
     validate_tree_safety,
@@ -272,6 +273,7 @@ class EvolutionEngine:
             token_budget=self.config.workers.token_budget,
             max_smoke_calls=self.config.evaluation.max_smoke_calls_per_worker,
             max_public_calls=self.config.evaluation.max_public_calls_per_worker,
+            forbidden_candidate_imports=self.config.evaluation.forbidden_candidate_imports,
         )
         run_result = AgentRunResult(1, transcript)
         changed: tuple[str, ...] = ()
@@ -353,6 +355,11 @@ class EvolutionEngine:
             max_bytes=self.config.sandbox.max_candidate_bytes,
         )
         validate_interface(root, self.interface, self.runtime)
+        validate_candidate_imports(
+            root,
+            runtime=self.runtime,
+            forbidden=self.config.evaluation.forbidden_candidate_imports,
+        )
 
     def _select_parent(self, population: list[CandidateRecord]) -> CandidateRecord:
         ordered = self._trim_population(population)

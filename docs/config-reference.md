@@ -46,6 +46,7 @@ controller directory.
 | `evaluation.pids_limit` | integer at least `16` | `512` | Evaluator-container process limit; ignored by the local backend. |
 | `evaluation.feedback_mode` | `summary` or `agent` | `summary` | Amount of structured benchmark feedback exposed after public evaluations. |
 | `evaluation.reference` | `initial` or `scipy_powell` | `initial` | Fixed reference solver paired with every candidate benchmark. |
+| `evaluation.forbidden_candidate_imports` | list of dotted Python module names | `[]` | Reject candidate source that uses these imports. This is an auditable experiment ablation, not a security boundary. |
 | `evaluation.max_smoke_calls_per_worker` | nonnegative integer | `20` | Broker quota for worker `smoke_test` calls. |
 | `evaluation.max_public_calls_per_worker` | nonnegative integer | `5` | Broker quota for worker `evaluate` calls. |
 

@@ -22,11 +22,25 @@ def build_worker_prompt(
     token_budget: int | None,
     max_smoke_calls: int,
     max_public_calls: int,
+    forbidden_candidate_imports: Sequence[str],
 ) -> str:
     """Describe one bounded mutation job without exposing hidden data."""
 
     memory = controller_memory or "No cross-worker summary is available for this job."
     budget = str(token_budget) if token_budget is not None else "provider/default"
+    if forbidden_candidate_imports:
+        dependency_policy = (
+            "- This ablation forbids candidate imports from these existing solver APIs: "
+            f"{json.dumps(list(forbidden_candidate_imports))}. The controller enforces this "
+            "policy. You may use the Python standard library, NumPy, allowed numerical "
+            "building blocks, and solver code you implement inside the editable repository. "
+            "Do not evade the policy through dynamic imports or subprocesses."
+        )
+    else:
+        dependency_policy = (
+            "- Existing solver libraries installed in the worker environment may be used. "
+            "Keep their use explicit in the candidate source so the trace is auditable."
+        )
     return f"""You are improving a derivative-free optimization solver.
 
 Your job is to inspect and directly edit the solver repository in /workspace. Make a
@@ -45,6 +59,7 @@ Contract
 - Generation: {generation}; island: {island}
 - Parent public fitness: {parent_score:.6f}; 0.5 means tied with the fixed reference solver
 - Advisory token budget: {budget}
+{dependency_policy}
 
 Evaluation tools
 - Run `smoke_test` for rapid checks on a small public subset (at most
@@ -57,8 +72,12 @@ Evaluation tools
   best current solver and finish the job.
 - Read the result.json, feedback.md, and benchmark_artifacts paths printed by those tools.
 - In agent-feedback experiments, inspect artifact_index.json and then open the useful
-  benchmark logs, profile plots, and per-problem history plots. Opaque problem IDs are
-  stable within the run, but their source-library names are intentionally unavailable.
+  benchmark logs, profile plots, and per-problem history plots. Use `render_pdf` to convert
+  selected PDF pages to PNG, then open the PNG with the harness Read tool. At minimum, after
+  a successful `evaluate`, inspect one aggregate profile and two representative per-problem
+  history plots before your final edit. Record in your final response which files you read
+  and what algorithmic decision each one informed. Opaque problem IDs are stable within the
+  run, but their source-library names are intentionally unavailable.
 - Prefer these bounded tools over calling the solver directly.
 - MANDATORY: every local command that invokes the solver must cap objective evaluations
   and use a wall-clock guard such as `timeout 30s python test_solver.py`. Never launch an
@@ -71,6 +90,8 @@ Required work order
 2. Run `smoke_test` once to establish a baseline.
 3. Make a concrete solver edit before doing further exploratory experiments.
 4. Run `smoke_test` again, then use `evaluate` when the candidate is ready.
+5. Inspect the structured and visual benchmark artifacts, make any justified final edit,
+   and finish with a bounded smoke check when quota remains.
 Do not spend the worker budget only studying or reimplementing the public problem. The
 deliverable is an edited, valid solver in /workspace.
 

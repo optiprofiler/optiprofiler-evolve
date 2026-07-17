@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add an auditable `forbidden_candidate_imports` experiment policy for
+  external-solver-API ablations.
+- Require agent-feedback workers to inspect selected benchmark plots through a
+  raster-image tool before their final edit.
+
 - Added collaborator onboarding, complete public API and YAML configuration
   references, editor JSON Schema, and runnable Claude/Codex/multi-file examples.
 - Documented the planned host-MATLAB evaluator and its candidate/reference path
