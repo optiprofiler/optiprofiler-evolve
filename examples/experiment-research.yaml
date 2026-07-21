@@ -22,6 +22,9 @@ evaluation:
   pids_limit: 512
   feedback_mode: agent
   reference: initial
+  # Keep the post-selection PRIMA challenger unavailable to candidates.
+  forbidden_candidate_imports:
+    - prima
   benchmark:
     max_eval_factor: 200
     n_jobs: 4

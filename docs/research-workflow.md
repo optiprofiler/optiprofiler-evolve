@@ -118,6 +118,11 @@ challenger phase runs a separate public comparison against `scipy_powell`,
 independent PRIMA `prima_newuoa`, or the initial solver. It cannot affect selection. The report preserves both solver
 scores and warns that pairwise OptiProfiler scores depend on the competitor set,
 so candidate-vs-seed and candidate-vs-challenger numbers are not interchangeable.
+If the challenger package is present in the evaluator image but candidates must
+not call it, pair the challenger with the corresponding
+`evaluation.forbidden_candidate_imports` entry, for example `prima` for
+`prima_newuoa`. The import policy is recorded for auditability and is not a
+sandbox boundary.
 
 | Option | Default | Meaning |
 |---|---:|---|

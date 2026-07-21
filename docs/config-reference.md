@@ -55,6 +55,13 @@ Evaluation quotas are local to one worker job and each invocation consumes one
 slot, including a failed evaluation. An exhausted quota is non-retryable;
 waiting does not restore it.
 
+When a post-selection challenger such as `prima_newuoa` is installed in the
+evaluator image, add its import root (`prima`) to
+`evaluation.forbidden_candidate_imports` if candidates must remain independent
+of that implementation. Apply the same rule to any other installed solver API
+excluded by the experiment contract, such as `scipy.optimize`. This check makes
+the policy auditable; it is not a sandbox security boundary.
+
 `load` and `solvers_to_load` are rejected in both benchmark mappings. Candidate
 and the fixed reference solver must be executed together in each canonical
 benchmark call. The controller overrides `plibs`, `problem_names`, solver names,

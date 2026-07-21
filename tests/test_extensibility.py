@@ -73,6 +73,16 @@ class InspectStep:
         return StepResult(metrics={"custom_step": True})
 
 
+class NestedOptionsStep:
+    name = "nested_options"
+
+    def __init__(self, *, tools: object) -> None:
+        self.tools = tools
+
+    def run(self, _context: object) -> StepResult:
+        return StepResult()
+
+
 class StopAfterFirstIteration:
     name = "stop_after_first"
 
@@ -207,12 +217,20 @@ class ExtensibilityTests(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            config = load_config(minimal_config()).with_step(
+                ComponentConfig(
+                    "nested_options",
+                    {"tools": {"network": True, "web_search": False}},
+                    _factory=NestedOptionsStep,
+                ),
+                after="static_audit",
+            )
             engine = EvolutionEngine(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
                 editable=(".",),
-                config=load_config(minimal_config()),
+                config=config,
                 run_dir=root / "run",
                 agent_runner=agent_runner,
                 evaluator_factory=evaluator_factory,
@@ -234,6 +252,25 @@ class ExtensibilityTests(unittest.TestCase):
             provenance = json.loads((root / "run" / "provenance.json").read_text())
             self.assertIn("config_hash", provenance)
             self.assertIn("source_hash", provenance["components"]["attempt_steps"][0])
+            nested = next(
+                step
+                for step in provenance["components"]["attempt_steps"]
+                if step["name"] == "nested_options"
+            )
+            self.assertEqual(
+                nested["options"]["tools"],
+                {"network": True, "web_search": False},
+            )
+            run_started = next(event for event in events if event["kind"] == "run_started")
+            event_nested = next(
+                step
+                for step in run_started["data"]["components"]["attempt_steps"]
+                if step["name"] == "nested_options"
+            )
+            self.assertEqual(
+                event_nested["options"]["tools"],
+                {"network": True, "web_search": False},
+            )
             self.assertIsNotNone(provenance["components"]["worker"]["source_file_hash"])
             self.assertIsNotNone(provenance["components"]["evaluator"]["source_file_hash"])
             self.assertFalse(provenance["components"]["evaluator"]["declared_deterministic"])

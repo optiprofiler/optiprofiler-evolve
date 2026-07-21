@@ -4,6 +4,9 @@
 
 - Keep remote model-API transport enabled for strategy-analysis agents while
   leaving their web-search tools disabled by default.
+- Preserve nested component options as structured JSON in provenance and run
+  events.
+- Pair the PRIMA challenger example with an auditable candidate-import ban.
 - Add an auditable `forbidden_candidate_imports` experiment policy for
   external-solver-API ablations.
 - Require agent-feedback workers to inspect selected benchmark plots through a

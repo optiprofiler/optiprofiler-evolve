@@ -14,7 +14,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from .config import ComponentConfig, EvolveConfig
+from .config import ComponentConfig, EvolveConfig, plain_data
 from .prompt import WORKER_PROMPT_VERSION
 from .registry import resolve
 
@@ -77,7 +77,7 @@ def _component_table(kind: str, specs: Sequence[ComponentConfig]) -> list[dict[s
         {
             "position": index,
             "name": spec.name,
-            "options": dict(spec.options),
+            "options": plain_data(spec.options),
             **_callable_identity(spec._factory or resolve(kind, spec.name)),
         }
         for index, spec in enumerate(specs)
