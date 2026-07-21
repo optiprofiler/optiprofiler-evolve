@@ -26,7 +26,7 @@ class PromptTests(unittest.TestCase):
             runtime="python",
             editable=("*.py",),
             data=data,
-            generation=1,
+            iteration=1,
             island=0,
             parent_score=0.5,
             controller_memory=None,

@@ -28,7 +28,10 @@ that fixed champion once and never influence the worker or population loop.
 The Python path is an end-to-end MVP: repository candidates, deterministic data
 splits, OptiProfiler scoring, Codex/Claude workers, Docker isolation, four-island
 population evolution, checkpoints, migration, validation selection, and a final
-hidden holdout evaluation.
+hidden holdout evaluation. An optional full research workflow adds a direction
+scout, per-island strategy attribution with executable leave-one-out ablations,
+bounded cross-island recombination, and a post-selection strong-challenger
+report. These are configured phases, not additional public APIs.
 
 MATLAB entrypoints are detected from `.m` files but the MATLAB evaluator is not
 implemented yet. Deliberately adversarial candidate code is also outside the
@@ -70,10 +73,15 @@ compatible with OptiProfiler 1.3.x.
 
 Provider base URLs and CLI-specific options belong in the worker entry of the
 YAML config. The engine does not hard-code model providers or credentials.
+Read [Model providers and agent workers](docs/providers.md) before using a
+third-party endpoint: Claude-compatible and Codex Responses-compatible APIs use
+different configuration, and a base URL alone does not prove agent-tool support.
 
 The quick start is intentionally small and is not a performance experiment.
 Start with [Getting started](docs/getting-started.md), then copy the closest
-example from [the examples index](examples/README.md).
+example from [the examples index](examples/README.md). Use
+`examples/experiment-research.yaml` only after the small exploration-only run
+works; it is intentionally much more expensive.
 
 ## Fitness and data
 
@@ -93,11 +101,16 @@ artifacts use opaque problem identifiers.
 
 Each run keeps the resolved redacted config, exact data manifest, immutable
 reference, candidate snapshots and lineage, worker transcripts, public
-evaluation output, generation checkpoints, validation selection, hidden evaluation,
-and a materialized `final_solver/` directory.
+evaluation output, iteration checkpoints, validation selection, hidden evaluation,
+and a materialized `final_solver/` directory. Full research runs also preserve
+direction cards, per-island source diffs and strategy cards, executable ablation
+matrices, island bundles, recombination conflicts/results, and a challenger
+report under `research/`.
 
 ## Documentation map
 
+- [Agent guide](AGENTS.md): compact repository navigation, invariants, and
+  verification commands for coding agents working on the package.
 - [Getting started](docs/getting-started.md): install, run, and adapt a solver.
 - [Public API reference](docs/api-reference.md): every `evolve(...)` argument and
   return field.
@@ -105,9 +118,15 @@ and a materialized `final_solver/` directory.
   fit together.
 - [Configuration reference](docs/config-reference.md): every YAML field, type,
   default, allowed value, and constraint.
+- [Model providers and agent workers](docs/providers.md): Claude/Codex provider
+  compatibility, credential mapping, agent-mode probes, and search behavior.
 - [JSON Schema](config.schema.json): editor completion and structural validation.
 - [Examples](examples/README.md): Claude, Codex, and multi-file repository inputs.
 - [Architecture](docs/architecture.md): execution flow and module boundaries.
+- [Research workflow](docs/research-workflow.md): optional scout, attribution,
+  ablation, recombination, and challenger phases.
+- [Architecture constitution](docs/architecture-constitution.md): stable
+  ownership, extension, safety, and provenance rules.
 - [Security](docs/security.md): enforced boundaries and current threat model.
 - [MATLAB evaluator design](docs/matlab-evaluator-design.md): planned host-MATLAB
   adapter and candidate/reference path isolation.

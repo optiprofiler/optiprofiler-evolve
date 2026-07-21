@@ -1,14 +1,16 @@
 # Examples
 
 All examples use the public `evolve(...)` function. They intentionally run one
-small generation and demonstrate the interface rather than solver quality.
+small iteration and demonstrate the interface rather than solver quality.
 
 | Goal | Python file | Config | Required environment |
 |---|---|---|---|
 | Claude Code quick start | `run.py` | `experiment.yaml` | `OPTIPROFILER_EVOLVE_MODEL`, `ANTHROPIC_API_KEY` |
 | Claude-compatible provider | `run_claude_compatible.py` | `experiment-claude-compatible.yaml` | `OPTIPROFILER_EVOLVE_MODEL`, `OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL`, `OPTIPROFILER_EVOLVE_API_KEY` |
 | Codex quick start | `run_codex.py` | `experiment-codex.yaml` | `OPTIPROFILER_EVOLVE_CODEX_MODEL`, `OPENAI_API_KEY` |
+| Codex Responses-compatible provider | `run_codex_compatible.py` | `experiment-codex-compatible.yaml` | `OPTIPROFILER_EVOLVE_CODEX_MODEL`, `OPTIPROFILER_EVOLVE_OPENAI_BASE_URL`, `OPTIPROFILER_EVOLVE_API_KEY` |
 | Multi-file solver repository | `run_repository.py` | `experiment.yaml` | Same as Claude quick start |
+| Full research harness | `run.py` | `experiment-research.yaml` | Same as Claude quick start; edit `run.py` to point at this config |
 
 Build the worker and evaluator images once before running an example. See
 [Getting started](../docs/getting-started.md) for the commands.
@@ -20,3 +22,14 @@ so solver-internal Python imports should be relative whenever possible.
 The compatible-provider example maps package-prefixed host variables to the
 environment names expected by Claude Code. Keep credentials in `pass_env` or
 `${ENV_NAME}` references; do not write credential values into YAML.
+
+Run `python scripts/check_worker_setup.py <config>` from the repository root for
+a no-token static check. Add `--live` to prove that the configured model can use
+agent tools inside the worker sandbox before starting an evolution run. Provider
+protocol requirements are documented in
+[Model providers and agent workers](../docs/providers.md).
+
+`experiment-research.yaml` enables all optional phases. Its scout and analyst
+roles use isolated workspaces without `smoke_test` or `evaluate`; only the
+controller can materialize their proposed variants and run validation. Start
+with one iteration and two islands before using the checked-in research budgets.

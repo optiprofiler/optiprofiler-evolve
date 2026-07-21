@@ -12,6 +12,7 @@ from optiprofiler_evolve.evaluation import (
     DockerOptiProfilerEvaluator,
     PythonOptiProfilerEvaluator,
     _problems_for_mode,
+    _sanitize_worker_artifacts,
     _scoped_data_manifest,
 )
 from optiprofiler_evolve.solver import InterfaceSpec
@@ -46,7 +47,7 @@ class OptiProfilerEvaluationTests(unittest.TestCase):
                 aliases={"ROSENBR": "P_OPAQUE"},
             )
             config = EvaluationConfig(
-                backend="local",
+                backend="unsafe_local",
                 feedback_mode="agent",
                 benchmark={"score_only": False, "n_jobs": 1, "max_eval_factor": 5},
             )
@@ -70,6 +71,43 @@ class OptiProfilerEvaluationTests(unittest.TestCase):
 
 
 class DockerEvaluationBoundaryTests(unittest.TestCase):
+    def test_worker_artifacts_redact_text_and_withhold_matching_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = DataPlan(
+                library="s2mpj",
+                selection={},
+                universe=("SECRET_NAME",),
+                public=("SECRET_NAME",),
+                validation=(),
+                hidden=(),
+                smoke=("SECRET_NAME",),
+                split_seed=0,
+                manifest_hash="test",
+                aliases={"SECRET_NAME": "P_OPAQUE"},
+            )
+            leaked = root / "SECRET_NAME" / "details.txt"
+            leaked.parent.mkdir()
+            leaked.write_text("problem=SECRET_NAME", encoding="utf-8")
+            binary = root / "plot.bin"
+            binary.write_bytes(b"\xffSECRET_NAME\x00")
+            outside = root.parent / f"{root.name}-outside.txt"
+            outside.write_text("SECRET_NAME", encoding="utf-8")
+            link = root / "linked.txt"
+            link.symlink_to(outside)
+
+            _sanitize_worker_artifacts(root, data)
+
+            redacted = root / "P_OPAQUE" / "details.txt"
+            self.assertTrue(redacted.is_file())
+            self.assertEqual(redacted.read_text(encoding="utf-8"), "problem=P_OPAQUE")
+            self.assertFalse(binary.exists())
+            self.assertFalse(link.exists())
+            self.assertEqual(outside.read_text(encoding="utf-8"), "SECRET_NAME")
+            report = json.loads((root / "redaction_report.json").read_text())
+            self.assertEqual(report["removed_binary_artifacts"], 1)
+            outside.unlink()
+
     def test_trusted_request_is_mounted_outside_worker_visible_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

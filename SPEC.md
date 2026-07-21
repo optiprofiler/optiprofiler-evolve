@@ -24,7 +24,7 @@ split:
 - `hidden`: a final holdout evaluated once on the selected champion.
 
 Smoke must be a subset of public. Public, validation, and hidden are pairwise
-disjoint. Hidden results never drive later generations or choose between
+disjoint. Hidden results never drive later iterations or choose between
 candidates.
 
 ## Evaluation contract
@@ -64,3 +64,9 @@ LLM-returned diff protocol.
 A run preserves the redacted config, full trusted data manifest, worker-visible
 manifest, solver contract, candidate lineage, transcripts, evaluation feedback,
 checkpoints, validation selection, hidden holdout report, and final solver tree.
+
+Optional research phases add only versioned file-backed artifacts. A strategy
+may be labelled `Observed` only after its concrete patch or variant tree passes
+the mandatory solver gate and a real public ablation. Natural-language analysis
+alone remains `Inferred` or `Unverified`. Validation services return selected
+candidate IDs but never expose validation values to scout or analyst roles.

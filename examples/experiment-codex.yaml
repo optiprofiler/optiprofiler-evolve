@@ -23,7 +23,7 @@ evaluation:
     max_eval_factor: 5
 
 evolution:
-  rounds: 1
+  iterations: 1
   islands: 1
   population_per_island: 2
 

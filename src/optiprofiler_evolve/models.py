@@ -31,19 +31,36 @@ class EvaluationResult:
 
 @dataclasses.dataclass(frozen=True)
 class CandidateRecord:
-    """One immutable solver snapshot in the population database."""
+    """One immutable solver snapshot in the population database.
+
+    ``island`` is the attempt's origin island. Current population membership is
+    represented by the outer island position in ``IterationView.populations``;
+    migration does not rewrite candidate lineage.
+    """
 
     candidate_id: str
     island: int
-    generation: int
+    iteration: int
+    attempt_index: int
     parent_id: str | None
     path: Path
     tree_hash: str
     public_score: float
     validation_score: float
     worker: str | None = None
+    guidance: str | None = None
     valid: bool = True
     error: str | None = None
+
+    @property
+    def attempt_id(self) -> str:
+        return self.candidate_id
+
+    @property
+    def generation(self) -> int:
+        """Compatibility alias for older internal reports."""
+
+        return self.iteration
 
     def as_dict(self) -> dict[str, Any]:
         value = dataclasses.asdict(self)

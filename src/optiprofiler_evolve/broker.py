@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import shutil
 import stat
+import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -175,7 +177,7 @@ class EvaluationBroker:
             if self.candidate_validator is not None:
                 self.candidate_validator(self.workspace)
             output = self.artifacts / "evaluations" / mode / f"{call:03d}"
-            result = self.evaluator.evaluate(self.workspace, mode, output)
+            result = self._evaluate_and_publish(mode, output)
             payload = result.as_dict()
             relative = Path(".optiprofiler_evolve") / "evaluations" / mode / f"{call:03d}"
             feedback = output / "feedback.md"
@@ -196,6 +198,30 @@ class EvaluationBroker:
             self._respond(request_id, 500, {"error": f"{type(exc).__name__}: {exc}"})
         finally:
             request_path.unlink(missing_ok=True)
+
+    def _evaluate_and_publish(self, mode: str, output: Path) -> EvaluationResult:
+        """Publish one complete evaluation tree atomically after sanitization."""
+
+        staging_root = self.control_dir / "staging"
+        staging_root.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix="evaluation-", dir=staging_root))
+        try:
+            result = self.evaluator.evaluate(self.workspace, mode, staging)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            if output.exists():
+                raise FileExistsError(f"Evaluation output already exists: {output}")
+            staging.replace(output)
+            result = replace(result, output_dir=output)
+            result_path = output / "result.json"
+            if result_path.is_file():
+                result_path.write_text(
+                    json.dumps(result.as_dict(), indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+            return result
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
 
     def _respond(self, request_id: str, status: int, payload: dict[str, Any]) -> None:
         responses = self.exchange / "responses"

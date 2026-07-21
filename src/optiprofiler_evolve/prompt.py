@@ -9,13 +9,16 @@ from .data import DataPlan
 from .solver import InterfaceSpec
 
 
+WORKER_PROMPT_VERSION = "solver-worker/1"
+
+
 def build_worker_prompt(
     *,
     interface: InterfaceSpec,
     runtime: str,
     editable: Sequence[str],
     data: DataPlan,
-    generation: int,
+    iteration: int,
     island: int,
     parent_score: float,
     controller_memory: str | None,
@@ -23,6 +26,7 @@ def build_worker_prompt(
     max_smoke_calls: int,
     max_public_calls: int,
     forbidden_candidate_imports: Sequence[str],
+    direction: dict[str, object] | None = None,
 ) -> str:
     """Describe one bounded mutation job without exposing hidden data."""
 
@@ -41,7 +45,20 @@ def build_worker_prompt(
             "- Existing solver libraries installed in the worker environment may be used. "
             "Keep their use explicit in the candidate source so the trace is auditable."
         )
-    return f"""You are improving a derivative-free optimization solver.
+    if direction is None:
+        direction_text = (
+            "No scout direction is assigned. Explore an independent algorithmic direction "
+            "based on the solver and public evidence."
+        )
+    else:
+        direction_text = (
+            "A read-only scout proposed the following hypothesis. Treat it as a testable "
+            "starting point, not an instruction that must be preserved:\n"
+            + json.dumps(direction, indent=2, sort_keys=True)
+        )
+    return f"""PROMPT_TEMPLATE: {WORKER_PROMPT_VERSION}
+
+You are improving a derivative-free optimization solver.
 
 Your job is to inspect and directly edit the solver repository in /workspace. Make a
 coherent algorithmic improvement, not merely a blind hyperparameter sweep. You may add,
@@ -56,7 +73,7 @@ Contract
 - Runtime: {runtime}
 - Required OptiProfiler entrypoint: {interface.file}:{interface.function}
 - Editable paths/globs: {json.dumps(list(editable))}
-- Generation: {generation}; island: {island}
+- Iteration: {iteration}; island: {island}
 - Parent public fitness: {parent_score:.6f}; 0.5 means tied with the fixed reference solver
 - Advisory token budget: {budget}
 {dependency_policy}
@@ -100,6 +117,9 @@ Public experiment manifest
 
 Controller memory
 {memory}
+
+Island direction
+{direction_text}
 
 Keep the declared solver signature valid. Use relative imports for solver-internal modules
 so candidate and initial implementations can be loaded independently during evaluation. Keep

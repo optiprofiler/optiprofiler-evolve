@@ -38,17 +38,26 @@ class DocumentationTests(unittest.TestCase):
             "OPTIPROFILER_EVOLVE_CODEX_MODEL": "test-codex-model",
             "OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL": "https://example.invalid/anthropic",
             "OPTIPROFILER_EVOLVE_API_KEY": "test-secret",
+            "OPTIPROFILER_EVOLVE_OPENAI_BASE_URL": "https://example.invalid/v1",
         }
         with patch.dict(os.environ, environment):
             claude_path = ROOT / "examples" / "experiment.yaml"
             compatible_path = ROOT / "examples" / "experiment-claude-compatible.yaml"
             codex_path = ROOT / "examples" / "experiment-codex.yaml"
+            codex_compatible_path = ROOT / "examples" / "experiment-codex-compatible.yaml"
+            research_path = ROOT / "examples" / "experiment-research.yaml"
             validator.validate(yaml.safe_load(claude_path.read_text(encoding="utf-8")))
             validator.validate(yaml.safe_load(compatible_path.read_text(encoding="utf-8")))
             validator.validate(yaml.safe_load(codex_path.read_text(encoding="utf-8")))
+            validator.validate(
+                yaml.safe_load(codex_compatible_path.read_text(encoding="utf-8"))
+            )
+            validator.validate(yaml.safe_load(research_path.read_text(encoding="utf-8")))
             claude = load_config(claude_path)
             compatible = load_config(compatible_path)
             codex = load_config(codex_path)
+            codex_compatible = load_config(codex_compatible_path)
+            research = load_config(research_path)
         self.assertEqual(claude.workers.pool[0].harness, "claude")
         self.assertEqual(compatible.workers.pool[0].harness, "claude")
         self.assertEqual(
@@ -56,12 +65,20 @@ class DocumentationTests(unittest.TestCase):
             "https://example.invalid/anthropic",
         )
         self.assertEqual(
-            compatible.redacted_dict()["workers"]["pool"][0]["env"][
-                "ANTHROPIC_AUTH_TOKEN"
-            ],
+            compatible.redacted_dict()["workers"]["pool"][0]["env"]["ANTHROPIC_AUTH_TOKEN"],
             "<redacted>",
         )
         self.assertEqual(codex.workers.pool[0].harness, "codex")
+        self.assertEqual(codex_compatible.workers.pool[0].harness, "codex")
+        self.assertIn(
+            'model_provider="compatible"',
+            codex_compatible.workers.pool[0].args,
+        )
+        self.assertIn(
+            'model_providers.compatible.base_url="https://example.invalid/v1"',
+            codex_compatible.workers.pool[0].args,
+        )
+        self.assertIn("strategy_analysis", [phase.name for phase in research.workflow.phases])
 
     def test_checked_in_solver_examples_declare_valid_interfaces(self) -> None:
         interface = InterfaceSpec.parse("solver.py:solver")
@@ -73,6 +90,8 @@ def _dataclass_paths(cls: type[Any], prefix: str = "") -> set[str]:
     hints = get_type_hints(cls)
     paths: set[str] = set()
     for field in dataclasses.fields(cls):
+        if field.name.startswith("_"):
+            continue
         annotation = hints[field.name]
         path = f"{prefix}.{field.name}" if prefix else field.name
         if isinstance(annotation, type) and dataclasses.is_dataclass(annotation):

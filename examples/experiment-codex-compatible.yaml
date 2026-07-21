@@ -31,12 +31,25 @@ workers:
   max_parallel: 1
   timeout_seconds: 900
   pool:
-    - harness: claude
-      model: ${OPTIPROFILER_EVOLVE_MODEL}
-      pass_env: [ANTHROPIC_API_KEY]
+    - harness: codex
+      model: ${OPTIPROFILER_EVOLVE_CODEX_MODEL}
+      env:
+        CODEX_PROVIDER_API_KEY: ${OPTIPROFILER_EVOLVE_API_KEY}
+      args:
+        - --config
+        - 'model_provider="compatible"'
+        - --config
+        - 'model_providers.compatible.name="Compatible provider"'
+        - --config
+        - 'model_providers.compatible.base_url="${OPTIPROFILER_EVOLVE_OPENAI_BASE_URL}"'
+        - --config
+        - 'model_providers.compatible.env_key="CODEX_PROVIDER_API_KEY"'
+        - --config
+        - 'model_providers.compatible.wire_api="responses"'
   tools:
     preset: research
-    web_search: true
+    # Enable only after the provider proves Responses web-search support.
+    web_search: false
     network: true
     communication: none
 

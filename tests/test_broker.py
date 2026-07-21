@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 import uuid
@@ -22,7 +23,60 @@ class FakeEvaluator:
         return result
 
 
+class BlockingEvaluator:
+    def __init__(self, ready: threading.Event, release: threading.Event) -> None:
+        self.ready = ready
+        self.release = release
+
+    def evaluate(self, candidate: Path, mode: str, output_dir: Path) -> EvaluationResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "partial.txt").write_text("not yet public", encoding="utf-8")
+        self.ready.set()
+        if not self.release.wait(timeout=5):
+            raise TimeoutError("test evaluator was not released")
+        result = EvaluationResult(mode, 0.6, 0.7, 0.5, 1, output_dir)
+        (output_dir / "result.json").write_text(json.dumps(result.as_dict()), encoding="utf-8")
+        (output_dir / "feedback.md").write_text("ok", encoding="utf-8")
+        return result
+
+
 class BrokerTests(unittest.TestCase):
+    def test_evaluation_tree_is_published_only_after_completion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            ready = threading.Event()
+            release = threading.Event()
+            broker = EvaluationBroker(
+                workspace=workspace,
+                control_dir=root / "broker-control",
+                evaluator=BlockingEvaluator(ready, release),
+                max_smoke_calls=1,
+                max_public_calls=0,
+            )
+            connection = broker.start(docker=False)
+            request_id = uuid.uuid4().hex
+            request = broker.exchange / "requests" / f"{request_id}.json"
+            response = broker.exchange / "responses" / f"{request_id}.json"
+            request.write_text(
+                json.dumps({"id": request_id, "token": connection.token, "mode": "smoke"}),
+                encoding="utf-8",
+            )
+            self.assertTrue(ready.wait(timeout=2))
+            published = broker.artifacts / "evaluations" / "smoke" / "001"
+            self.assertFalse(published.exists())
+            self.assertTrue(any((broker.control_dir / "staging").iterdir()))
+            release.set()
+            for _ in range(200):
+                if response.exists():
+                    break
+                time.sleep(0.01)
+            self.assertTrue(response.exists())
+            self.assertTrue((published / "partial.txt").is_file())
+            self.assertFalse(any((broker.control_dir / "staging").iterdir()))
+            broker.stop()
+
     def test_public_capabilities_work_and_hidden_is_forbidden(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

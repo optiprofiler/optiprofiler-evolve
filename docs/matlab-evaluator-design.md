@@ -76,7 +76,7 @@ in `evolve(...)`:
 
 ```yaml
 evaluation:
-  backend: local
+  backend: unsafe_local
   matlab:
     executable: matlab
     optiprofiler_path: /path/to/optiprofiler/matlab

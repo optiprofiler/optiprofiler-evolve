@@ -63,7 +63,7 @@ For Claude Code with an Anthropic-compatible endpoint, use the dedicated
 example so provider-specific variables stay outside the YAML file:
 
 ```bash
-export OPTIPROFILER_EVOLVE_MODEL='deepseek-v4-flash'
+export OPTIPROFILER_EVOLVE_MODEL='<provider-model-id>'
 export OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL='https://api.deepseek.com/anthropic'
 export OPTIPROFILER_EVOLVE_API_KEY='<provider-key>'
 python examples/run_claude_compatible.py
@@ -72,6 +72,26 @@ python examples/run_claude_compatible.py
 The model identifier and endpoint are provider-specific. The engine passes
 them unchanged to Claude Code. Credential values are expanded in memory and
 redacted from `resolved_config.json`.
+
+For Codex with a non-OpenAI endpoint, do not assume that setting
+`OPENAI_BASE_URL` is enough. Codex custom providers require a Responses-compatible
+API and an explicit provider definition. Copy
+`examples/experiment-codex-compatible.yaml` and follow
+[Model providers and agent workers](providers.md).
+
+Before an evolution run, perform the static worker check:
+
+```bash
+python scripts/check_worker_setup.py examples/experiment.yaml
+```
+
+Then run the live probe. It consumes a small amount of model quota and verifies
+that the configured CLI is operating as an agent by requiring it to create and
+read a file through its tools inside the private workspace:
+
+```bash
+python scripts/check_worker_setup.py examples/experiment.yaml --live
+```
 
 The script prints the run directory, final solver directory, public score, and
 controller-only final score. A timestamped run directory is created under
@@ -111,11 +131,16 @@ separate module namespaces during the same OptiProfiler benchmark call.
 Before increasing model spend:
 
 1. Confirm the seed evaluates successfully against the configured fixed reference.
-2. Keep `rounds: 1`, `islands: 1`, and a small explicit problem list.
+2. Keep `iterations: 1`, `islands: 1`, and a small explicit problem list.
 3. Inspect `public_data_manifest.json`, `resolved_config.json`, worker
    transcripts, and evaluation feedback in the run directory.
 4. Increase problem count and evaluation budget.
-5. Increase islands, rounds, and worker parallelism last.
+5. Increase islands, iterations, and worker parallelism last.
+
+After this exploration-only path is stable, switch the YAML to the ordered
+research phases in `examples/experiment-research.yaml`. Do not enable every
+phase merely to test provider connectivity: strategy attribution and
+recombination add extra public and controller-only validation evaluations.
 
 Validation and hidden splits are not exposed through worker tools. Validation
 selects candidates inside the controller. Hidden is evaluated once after one
@@ -149,3 +174,4 @@ boundaries and should be used only for trusted package tests.
 - Package internals: [Architecture](architecture.md)
 - Modifying the package: [Contributing](../CONTRIBUTING.md)
 - Current isolation guarantees: [Security](security.md)
+- Provider/API compatibility and agent-mode checks: [Providers](providers.md)

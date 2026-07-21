@@ -74,8 +74,8 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(FakeEvaluator.calls.count("public_score"), 3)
             self.assertEqual(FakeEvaluator.calls.count("hidden"), 1)
             self.assertIn("improved", (result.best_solver / "solver.py").read_text())
-            first_workspace = result.run_dir / "workspaces" / "g001-i00"
-            second_workspace = result.run_dir / "workspaces" / "g001-i01"
+            first_workspace = result.run_dir / "workspaces" / "it001-i00-a00"
+            second_workspace = result.run_dir / "workspaces" / "it001-i01-a00"
             self.assertTrue(first_workspace.is_dir())
             self.assertTrue(second_workspace.is_dir())
             self.assertNotEqual(first_workspace.resolve(), second_workspace.resolve())
@@ -83,7 +83,7 @@ class EngineTests(unittest.TestCase):
             public_manifest = (result.run_dir / "public_data_manifest.json").read_text()
             self.assertNotIn("controller/data_manifest", public_manifest)
             self.assertNotIn("P1", public_manifest)
-            self.assertTrue((result.run_dir / "checkpoints" / "generation_001.json").is_file())
+            self.assertTrue((result.run_dir / "checkpoints" / "iteration_001.json").is_file())
 
 
 if __name__ == "__main__":

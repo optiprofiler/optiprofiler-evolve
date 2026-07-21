@@ -20,6 +20,9 @@
     },
     "sandbox": {
       "$ref": "#/$defs/SandboxConfig"
+    },
+    "workflow": {
+      "$ref": "#/$defs/WorkflowConfig"
     }
   },
   "required": [
@@ -166,7 +169,7 @@
           "type": "string",
           "enum": [
             "docker",
-            "local"
+            "unsafe_local"
           ],
           "default": "docker"
         },
@@ -209,7 +212,8 @@
           "type": "string",
           "enum": [
             "initial",
-            "scipy_powell"
+            "scipy_powell",
+            "prima_newuoa"
           ],
           "default": "initial"
         },
@@ -231,6 +235,11 @@
           "type": "integer",
           "minimum": 0,
           "default": 5
+        },
+        "adapter": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",
+          "default": "optiprofiler"
         }
       },
       "allOf": [
@@ -260,7 +269,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "rounds": {
+        "iterations": {
           "type": "integer",
           "minimum": 1,
           "default": 3
@@ -269,6 +278,11 @@
           "type": "integer",
           "minimum": 1,
           "default": 4
+        },
+        "attempts_per_island": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
         },
         "population_per_island": {
           "type": "integer",
@@ -327,6 +341,11 @@
           ],
           "exclusiveMinimum": 0,
           "default": null
+        },
+        "adapter": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",
+          "default": "cli"
         },
         "tools": {
           "$ref": "#/$defs/ToolConfig"
@@ -442,6 +461,40 @@
             "global"
           ],
           "default": "none"
+        }
+      }
+    },
+    "ComponentConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+        },
+        "options": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": true
+        }
+      },
+      "required": ["name"]
+    },
+    "WorkflowConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "phases": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/ComponentConfig"}
+        },
+        "attempt_steps": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/ComponentConfig"}
+        },
+        "after_iteration": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/ComponentConfig"}
         }
       }
     },

@@ -7,6 +7,7 @@ import json
 import math
 import mimetypes
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -15,22 +16,20 @@ import types
 import uuid
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from .config import EvaluationConfig
 from .data import DataPlan
 from .models import EvaluationResult
+from .protocols import Evaluator
 from .solver import InterfaceSpec, validate_interface
-
-
-class Evaluator(Protocol):
-    """Internal evaluation boundary used by the controller and tool broker."""
-
-    def evaluate(self, candidate: Path, mode: str, output_dir: Path) -> EvaluationResult: ...
 
 
 class PythonOptiProfilerEvaluator:
     """Run candidate and immutable reference together in OptiProfiler benchmark."""
+
+    name = "optiprofiler-python"
+    deterministic = False
 
     def __init__(
         self,
@@ -89,8 +88,9 @@ class PythonOptiProfilerEvaluator:
             json.dumps(_json_safe(result.as_dict()), indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        _write_artifact_index(output_dir)
         _write_feedback(result, output_dir, self.config.feedback_mode)
+        _sanitize_worker_artifacts(output_dir, self.data)
+        _write_artifact_index(output_dir)
         return result
 
     def _benchmark(
@@ -152,6 +152,9 @@ class PythonOptiProfilerEvaluator:
 class DockerOptiProfilerEvaluator:
     """Run the Python evaluator inside a separately hardened Docker container."""
 
+    name = "optiprofiler-docker"
+    deterministic = False
+
     def __init__(
         self,
         *,
@@ -181,7 +184,7 @@ class DockerOptiProfilerEvaluator:
             "mode": mode,
             "output_dir": "/output",
             "data": data_manifest,
-            "evaluation": asdict(self.config) | {"backend": "local"},
+            "evaluation": asdict(self.config) | {"backend": "unsafe_local"},
         }
         container_name = f"ope-evaluator-{uuid.uuid4().hex[:12]}"
         with tempfile.TemporaryDirectory(prefix="ope-evaluator-request-") as request_dir:
@@ -229,8 +232,9 @@ class DockerOptiProfilerEvaluator:
                 error=error,
             )
             result_path.write_text(json.dumps(result.as_dict(), indent=2) + "\n", encoding="utf-8")
-            _write_artifact_index(output_dir)
             _write_feedback(result, output_dir, self.config.feedback_mode)
+            _sanitize_worker_artifacts(output_dir, self.data)
+            _write_artifact_index(output_dir)
             return result
         result = _read_result(result_path)
         result = replace(
@@ -242,6 +246,7 @@ class DockerOptiProfilerEvaluator:
             json.dumps(_json_safe(result.as_dict()), indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        _sanitize_worker_artifacts(output_dir, self.data)
         _write_artifact_index(output_dir)
         return result
 
@@ -337,6 +342,9 @@ def create_evaluator(
         DockerOptiProfilerEvaluator if config.backend == "docker" else PythonOptiProfilerEvaluator
     )
     return evaluator_type(reference=reference, interface=interface, data=data, config=config)
+
+
+setattr(create_evaluator, "deterministic", False)
 
 
 def _problems_for_mode(data: DataPlan, mode: str) -> tuple[str, ...]:
@@ -576,6 +584,77 @@ def _redact_problem_names(value: str | None, data: DataPlan) -> str | None:
     for problem_name in sorted(data.universe, key=len, reverse=True):
         redacted = redacted.replace(problem_name, data.opaque_name(problem_name))
     return redacted
+
+
+def _sanitize_worker_artifacts(output_dir: Path, data: DataPlan) -> None:
+    """Remove direct problem-name disclosures before artifacts reach a worker.
+
+    Text is rewritten with the run's opaque identifiers. A binary file that
+    contains a literal protected name is removed because byte replacement could
+    corrupt its format. This closes accidental and direct-string disclosure; it
+    is not a substitute for the stronger candidate-process boundary documented
+    in ``docs/security.md``.
+    """
+
+    replacements = {
+        name: data.opaque_name(name) for name in data.universe if data.opaque_name(name) != name
+    }
+    if not replacements or not output_dir.is_dir():
+        return
+    removed_binary = 0
+    for original in list(output_dir.rglob("*")):
+        metadata = original.lstat()
+        if original.is_symlink():
+            original.unlink()
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
+            continue
+        path = original
+        relative = path.relative_to(output_dir).as_posix()
+        redacted_relative = relative
+        for name in sorted(replacements, key=len, reverse=True):
+            redacted_relative = redacted_relative.replace(name, replacements[name])
+        if redacted_relative != relative:
+            target = output_dir / redacted_relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                path.unlink()
+                continue
+            path.replace(target)
+            path = target
+
+        content = path.read_bytes()
+        protected = [name for name in replacements if name.encode("utf-8") in content]
+        if not protected:
+            continue
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            path.unlink()
+            removed_binary += 1
+            continue
+        for name in sorted(protected, key=len, reverse=True):
+            text = text.replace(name, replacements[name])
+        path.write_text(text, encoding="utf-8")
+
+    for directory in sorted(
+        (
+            path
+            for path in output_dir.rglob("*")
+            if not path.is_symlink() and stat.S_ISDIR(path.lstat().st_mode)
+        ),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    ):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
+    if removed_binary:
+        (output_dir / "redaction_report.json").write_text(
+            json.dumps({"removed_binary_artifacts": removed_binary}, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
 
 __all__: list[str] = []

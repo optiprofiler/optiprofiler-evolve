@@ -1,0 +1,116 @@
+# yaml-language-server: $schema=../config.schema.json
+
+# Full research harness. Start with examples/experiment.yaml for the smaller
+# exploration-only workflow.
+data:
+  library: s2mpj
+  selection:
+    ptype: u
+    mindim: 1
+    maxdim: 10
+  split:
+    validation_fraction: 0.2
+    hidden_fraction: 0.2
+    smoke_count: 3
+    seed: 20260721
+
+evaluation:
+  backend: docker
+  docker_image: optiprofiler-evolve-evaluator:latest
+  cpus: 2
+  memory: 4g
+  pids_limit: 512
+  feedback_mode: agent
+  reference: initial
+  benchmark:
+    max_eval_factor: 200
+    n_jobs: 4
+    score_only: false
+  smoke_overrides:
+    max_eval_factor: 10
+    n_jobs: 2
+
+evolution:
+  iterations: 10
+  islands: 4
+  attempts_per_island: 1
+  population_per_island: 4
+  migration_interval: 2
+  finalists_per_island: 1
+  random_seed: 20260721
+
+workers:
+  max_parallel: 4
+  timeout_seconds: 1800
+  token_budget: 80000
+  pool:
+    - harness: claude
+      model: ${OPTIPROFILER_EVOLVE_MODEL}
+      pass_env: [ANTHROPIC_API_KEY]
+  tools:
+    preset: research
+    web_search: true
+    network: true
+    shell: true
+    python: true
+    git: true
+    compilers: true
+    package_install: false
+    communication: island
+
+sandbox:
+  backend: docker
+  worker_image: optiprofiler-evolve-worker:latest
+  cpus: 2
+  memory: 4g
+  pids_limit: 512
+
+workflow:
+  phases:
+    - name: prepare
+    - name: direction_scout
+      options:
+        mode: shared
+        guided_islands: [0, 1]
+        max_directions: 4
+        worker_index: 0
+        token_budget: 30000
+        prompt_version: direction-scout/1
+        tools:
+          network: true
+          web_search: true
+    - name: explore
+    - name: strategy_analysis
+      options:
+        max_strategies: 6
+        max_ablations: 6
+        min_effect: 0.01
+        n_repeats: 1
+        worker_index: 0
+        token_budget: 30000
+        prompt_version: strategy-analysis/1
+        tools:
+          network: false
+          web_search: false
+    - name: recombine
+      options:
+        max_strategies: 8
+        max_combination_size: 2
+        max_combinations: 12
+        beam_width: 3
+    - name: validate
+    - name: hidden
+    - name: challenger
+      options:
+        reference: prima_newuoa
+    - name: report
+  attempt_steps:
+    - name: mutate
+    - name: static_audit
+    - name: smoke
+    - name: public_evaluate
+    - name: feedback
+  after_iteration:
+    - name: migration
+      options:
+        interval: 2

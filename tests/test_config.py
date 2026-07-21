@@ -13,7 +13,7 @@ def minimal_config() -> dict:
             "problem_names": ["P1", "P2", "P3", "P4"],
             "split": {"smoke_count": 1, "hidden_fraction": 0.25},
         },
-        "evaluation": {"backend": "local"},
+        "evaluation": {"backend": "unsafe_local"},
         "evolution": {"rounds": 1, "islands": 2},
         "workers": {
             "pool": [{"harness": "codex", "model": "test-model"}],
@@ -54,6 +54,12 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dotted Python module names"):
             load_config(raw)
 
+    def test_codex_no_shell_configuration_fails_closed(self) -> None:
+        raw = minimal_config()
+        raw["workers"]["tools"] = {"shell": False, "web_search": False}
+        with self.assertRaisesRegex(ValueError, "not enforceable by the built-in Codex"):
+            load_config(raw)
+
     def test_environment_reference_is_resolved_then_redacted(self) -> None:
         raw = minimal_config()
         raw["workers"]["pool"][0]["env"] = {
@@ -70,6 +76,18 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             config.redacted_dict()["workers"]["pool"][0]["env"]["OPENAI_BASE_URL"],
             "https://example.invalid/v1",
+        )
+
+    def test_environment_reference_can_expand_inside_cli_argument(self) -> None:
+        raw = minimal_config()
+        raw["workers"]["pool"][0]["args"] = [
+            'model_providers.compatible.base_url="${TEST_OPE_BASE_URL}"'
+        ]
+        with patch.dict(os.environ, {"TEST_OPE_BASE_URL": "https://example.invalid/v1"}):
+            config = load_config(raw)
+        self.assertEqual(
+            config.workers.pool[0].args,
+            ('model_providers.compatible.base_url="https://example.invalid/v1"',),
         )
 
 

@@ -29,6 +29,11 @@
   OptiProfiler still controls experiment-level parallelism through `n_jobs`;
   the pin prevents nested BLAS workers and parallel plotting from exhausting
   the container PID budget.
+- Public evaluation output is first written to a controller-only staging
+  directory. Direct occurrences of real problem names in text and paths are
+  replaced with opaque IDs, and matching binary artifacts are withheld and
+  counted in `redaction_report.json`. The completed directory is then published
+  atomically into the worker's read-only artifact mount.
 
 Each attempt receives a distinct workspace, broker token, container, and
 temporary Docker network, including workers on the same island. Enabling web
@@ -42,8 +47,10 @@ internal, no-egress network.
 The Python candidate function executes in the same interpreter as
 `optiprofiler.benchmark` inside the evaluator container. Read-only mounts prevent
 persistent modification, but intentionally hostile Python can still inspect or
-monkey-patch its evaluation process. The alpha release therefore assumes
-research workers optimize the solver rather than attack the scorer.
+monkey-patch its evaluation process, including the temporary public-name proxy.
+The artifact sanitizer blocks direct-string disclosure but cannot prevent an
+adversarial solver from encoding that information. The alpha release therefore
+assumes research workers optimize the solver rather than attack the scorer.
 
 Before untrusted public execution or paper-grade hidden evaluation, add a
 candidate execution protocol with a narrower callback boundary, a static/runtime

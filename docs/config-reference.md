@@ -38,17 +38,18 @@ controller directory.
 |---|---|---|---|
 | `evaluation.benchmark` | mapping | `{}` | Options forwarded to `optiprofiler.benchmark`; data and solver identity fields are controller-owned. |
 | `evaluation.smoke_overrides` | mapping | `{}` | Benchmark options overlaid only for `smoke_test`. |
-| `evaluation.backend` | `docker` or `local` | `docker` | Execution boundary for Python candidate code. `local` is trusted-development only. |
+| `evaluation.backend` | `docker` or `unsafe_local` | `docker` | Execution boundary for Python candidate code. `unsafe_local` executes untrusted solver code in the controller process and is for trusted development only. |
 | `evaluation.docker_image` | string or `null` | `null` | Evaluator image; **required** when backend is `docker`. |
-| `evaluation.timeout_seconds` | positive integer | `3600` | Wall-time limit for one Docker evaluator process; the trusted local backend has no process timeout. |
-| `evaluation.cpus` | positive number | `2.0` | CPU limit passed to the evaluator container; ignored by the local backend. |
-| `evaluation.memory` | Docker memory string | `4g` | Evaluator-container memory limit; ignored by the local backend. |
-| `evaluation.pids_limit` | integer at least `16` | `512` | Evaluator-container process limit; ignored by the local backend. |
+| `evaluation.timeout_seconds` | positive integer | `3600` | Wall-time limit for one Docker evaluator process; `unsafe_local` has no process timeout. |
+| `evaluation.cpus` | positive number | `2.0` | CPU limit passed to the evaluator container; ignored by `unsafe_local`. |
+| `evaluation.memory` | Docker memory string | `4g` | Evaluator-container memory limit; ignored by `unsafe_local`. |
+| `evaluation.pids_limit` | integer at least `16` | `512` | Evaluator-container process limit; ignored by `unsafe_local`. |
 | `evaluation.feedback_mode` | `summary` or `agent` | `summary` | Amount of structured benchmark feedback exposed after public evaluations. |
-| `evaluation.reference` | `initial` or `scipy_powell` | `initial` | Fixed reference solver paired with every candidate benchmark. |
+| `evaluation.reference` | `initial`, `scipy_powell`, or `prima_newuoa` | `initial` | Fixed reference solver paired with every candidate benchmark. Use `initial` for seed-relative evolution; reserve a strong solver for post-selection comparison. |
 | `evaluation.forbidden_candidate_imports` | list of dotted Python module names | `[]` | Reject candidate source that uses these imports. This is an auditable experiment ablation, not a security boundary. |
 | `evaluation.max_smoke_calls_per_worker` | nonnegative integer | `20` | Broker quota for worker `smoke_test` calls. |
 | `evaluation.max_public_calls_per_worker` | nonnegative integer | `5` | Broker quota for worker `evaluate` calls. |
+| `evaluation.adapter` | registered name | `optiprofiler` | Trusted evaluator adapter. Change this only for an owner-supplied evaluator implementation. |
 
 Evaluation quotas are local to one worker job and each invocation consumes one
 slot, including a failed evaluation. An exhausted quota is non-retryable;
@@ -63,8 +64,9 @@ normalization, and other identity-sensitive fields.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `evolution.rounds` | positive integer | `3` | Number of generations; one worker is dispatched per island per round. |
+| `evolution.iterations` | positive integer | `3` | Number of synchronized population iterations. |
 | `evolution.islands` | positive integer | `4` | Number of independently maintained populations. |
+| `evolution.attempts_per_island` | positive integer | `1` | Candidate attempts launched for each island in one iteration. |
 | `evolution.population_per_island` | positive integer | `4` | Maximum retained candidates in each island. |
 | `evolution.migration_interval` | nonnegative integer | `2` | Champion ring-migration interval; `0` disables migration. |
 | `evolution.random_seed` | integer | `0` | Reproducible controller sampling seed. |
@@ -81,6 +83,7 @@ normalization, and other identity-sensitive fields.
 | `workers.timeout_seconds` | positive integer | `1800` | Wall-time limit for one coding-agent process. |
 | `workers.token_budget` | positive integer or `null` | `null` | Advisory token budget inserted into the worker task. |
 | `workers.max_budget_usd` | positive number or `null` | `null` | Claude Code per-worker cost limit. Other providers enforce their own limits. |
+| `workers.adapter` | registered name | `cli` | Worker lifecycle adapter. The built-in adapter runs Codex or Claude Code. |
 | `workers.pool[].harness` | `claude` or `codex` | **required** | Coding-agent CLI adapter. |
 | `workers.pool[].model` | string | **required** | Model identifier passed unchanged to the selected CLI. |
 | `workers.pool[].weight` | positive integer | `1` | Relative probability of selecting this worker entry. |
@@ -93,6 +96,11 @@ Do not store credentials directly in YAML. Prefer `pass_env` or an
 `${ENV_NAME}` reference. Keys containing common credential markers are redacted
 from `resolved_config.json`.
 
+`profile` is useful only when the selected worker image contains the matching
+Codex profile under its own `CODEX_HOME`. The default image uses an ephemeral
+home and deliberately does not inherit host Codex profiles. Prefer explicit
+provider `args` for portable experiment configs.
+
 ## Worker tools
 
 | Field | Type | Default | Meaning |
@@ -100,16 +108,19 @@ from `resolved_config.json`.
 | `workers.tools.preset` | `minimal`, `research`, or `custom` | `research` | Named tool policy recorded for the experiment. |
 | `workers.tools.web_search` | boolean | `true` | Expose harness web-search tools when supported. Requires network. |
 | `workers.tools.network` | boolean | `true` | Permit worker-container outbound networking. |
-| `workers.tools.shell` | boolean | `true` | Expose shell execution through the harness. |
+| `workers.tools.shell` | boolean | `true` | Include `Bash` in Claude Code's tool list. The built-in Codex adapter cannot enforce `false` and rejects that combination. |
 | `workers.tools.python` | boolean | `true` | Declare Python available to workers. Strict removal requires a different image. |
 | `workers.tools.git` | boolean | `true` | Declare Git available to workers. Strict removal requires a different image. |
 | `workers.tools.compilers` | boolean | `true` | Declare compiler tools available. Strict removal requires a different image. |
 | `workers.tools.package_install` | boolean | `false` | Declare package installation permitted; image and network policy still apply. |
 | `workers.tools.communication` | `none`, `controller_summary`, `island`, or `global` | `none` | Previous-attempt information injected into later worker prompts. |
 
-Boolean availability fields describe the harness policy. They cannot remove a
-binary already present in an image. Use separate worker images for strict tool
-ablation studies.
+`web_search` and Claude Code's `shell` setting alter the actual harness command.
+The Python, Git, compiler, and package-install fields describe the declared
+experiment capability; they cannot remove a binary already present in an image.
+Use separate worker images for strict binary/tool ablation studies. The built-in
+Codex adapter rejects `shell: false` rather than silently running a shell-enabled
+agent.
 
 ## Sandbox
 
@@ -127,12 +138,81 @@ The worker receives only a private solver copy, public manifests, and bounded
 evaluation tools. It does not receive the immutable reference, hidden manifest,
 OptiProfiler source, Docker socket, host home, or sibling repositories.
 
+## Workflow components
+
+The workflow is three ordered component lists, not a DAG or a configuration
+language. Built-ins cover the normal experiment. Owner code may supply trusted
+components through Python config helpers; YAML resolves only names registered by
+the package.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `workflow.phases[].name` | registered name | `prepare`, `explore`, `validate`, `hidden`, `report` | Ordered run-level phases with declared artifact requirements and outputs. Core phases are mandatory in the alpha. |
+| `workflow.phases[].options` | mapping | `{}` | Constructor options for one phase. |
+| `workflow.attempt_steps[].name` | registered name | `mutate`, `static_audit`, `smoke`, `public_evaluate`, `feedback` | Ordered steps executed for each candidate attempt. `mutate` and `public_evaluate` are mandatory. |
+| `workflow.attempt_steps[].options` | mapping | `{}` | Constructor options for one attempt step. |
+| `workflow.after_iteration[].name` | registered name | `migration` | Policies evaluated after the iteration barrier. They propose edits; only the engine applies them. |
+| `workflow.after_iteration[].options` | mapping | `{}` | Constructor options for one after-iteration policy. |
+
+Use immutable config helpers such as `without_step(...)`, `with_step(...)`,
+`with_phase(...)`, `without_phase(...)`, `with_phase_options(...)`, and
+`with_evaluator(...)` to define ablations without editing a shared config in
+place. For example, one matrix can derive scout `off`, `shared`, and
+`per_island` variants with `with_phase_options`. Removing the `static_audit` step changes reported pipeline evidence, but
+does not remove the engine's mandatory final safety and edit-scope gate.
+
+`PopulationEdit.budget` is reserved but not implemented in the alpha. A custom
+policy returning a nonempty budget edit fails explicitly; it is not silently
+recorded as an effective scheduling ablation.
+
+The built-in full research sequence is:
+
+```text
+prepare, direction_scout, explore, strategy_analysis, recombine,
+validate, hidden, challenger, report
+```
+
+Its phase options live under `workflow.phases[].options` and are validated by
+the phase constructor before a run directory is created:
+
+| Phase | Option | Default | Meaning |
+|---|---|---:|---|
+| `direction_scout` | `mode` | `shared` | `off`, `shared`, or `per_island`. |
+| `direction_scout` | `guided_islands` | first half | Island indexes receiving scout cards. |
+| `direction_scout` | `max_directions` | `4` | Maximum direction cards. |
+| `direction_scout` | `worker_index` | `0` | Entry in `workers.pool`. |
+| `direction_scout` | `timeout_seconds` | worker default | Role wall time. |
+| `direction_scout` | `token_budget` | worker default | Advisory role token budget. |
+| `direction_scout` | `max_budget_usd` | worker default | Claude role cost cap. |
+| `direction_scout` | `tools` | network/web on | Role-specific `ToolConfig` overrides. |
+| `direction_scout` | `prompt_version` | `direction-scout/1` | Recorded prompt contract. |
+| `strategy_analysis` | `max_strategies` | `6` | Cards normalized per island. |
+| `strategy_analysis` | `max_ablations` | `6` | Executable toggles tested per island. |
+| `strategy_analysis` | `min_effect` | `0.01` | Public-fitness support threshold. |
+| `strategy_analysis` | `n_repeats` | `1` | Repeated ablated evaluations. |
+| `strategy_analysis` | `worker_index` | `0` | Entry in `workers.pool`. |
+| `strategy_analysis` | `timeout_seconds` | worker default | Role wall time. |
+| `strategy_analysis` | `token_budget` | worker default | Advisory role token budget. |
+| `strategy_analysis` | `max_budget_usd` | worker default | Claude role cost cap. |
+| `strategy_analysis` | `tools` | network/web off | Role-specific `ToolConfig` overrides. |
+| `strategy_analysis` | `prompt_version` | `strategy-analysis/1` | Recorded prompt contract. |
+| `recombine` | `max_strategies` | `8` | Portable strategies considered. |
+| `recombine` | `max_combination_size` | `2` | Patches in one combination. |
+| `recombine` | `max_combinations` | `12` | Hard combination evaluation cap. |
+| `recombine` | `beam_width` | `3` | Validation-selected combinations registered. |
+| `challenger` | `reference` | `scipy_powell` | `scipy_powell`, `prima_newuoa`, or `initial`. This phase is post-selection only. |
+
+See [Research workflow](research-workflow.md) for artifact schemas, fallback
+behavior, patch portability, and validation-query semantics.
+
 ## Provider configuration
 
 The package passes model names, environment variables, profiles, and extra
 arguments to Codex or Claude Code. It does not maintain a vendor registry. A
-compatible provider can be configured in one worker entry. For Claude Code,
-map host-side package variables to the names expected by the CLI:
+compatible provider can be configured in one worker entry. Compatibility means
+that the endpoint implements the selected CLI's API dialect and tool calling,
+not merely that it accepts a model string. For Claude Code, map host-side
+package variables to the names expected by the CLI:
 
 ```yaml
 workers:
@@ -144,7 +224,9 @@ workers:
         ANTHROPIC_AUTH_TOKEN: ${OPTIPROFILER_EVOLVE_API_KEY}
 ```
 
-The analogous Codex configuration is:
+Codex custom providers require the Responses wire protocol. Configure the
+provider explicitly rather than treating `OPENAI_BASE_URL` as an analogue of
+Claude Code's gateway variable:
 
 ```yaml
 workers:
@@ -152,11 +234,20 @@ workers:
     - harness: codex
       model: ${OPTIPROFILER_EVOLVE_CODEX_MODEL}
       env:
-        OPENAI_BASE_URL: ${OPTIPROFILER_EVOLVE_OPENAI_BASE_URL}
-      pass_env: [OPENAI_API_KEY]
+        CODEX_PROVIDER_API_KEY: ${OPTIPROFILER_EVOLVE_API_KEY}
+      args:
+        - --config
+        - 'model_provider="compatible"'
+        - --config
+        - 'model_providers.compatible.base_url="${OPTIPROFILER_EVOLVE_OPENAI_BASE_URL}"'
+        - --config
+        - 'model_providers.compatible.env_key="CODEX_PROVIDER_API_KEY"'
+        - --config
+        - 'model_providers.compatible.wire_api="responses"'
 ```
 
 Use the environment-variable names and model identifier expected by the
 installed CLI/provider. Provider support should be verified with that CLI
-before starting a multi-round experiment. See the checked-in
-`experiment-claude-compatible.yaml` example for a complete small run.
+before starting a multi-iteration experiment. See
+[Model providers and agent workers](providers.md) and the checked-in compatible
+provider examples for complete small runs.
