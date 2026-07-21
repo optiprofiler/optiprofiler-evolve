@@ -14,11 +14,11 @@ import tempfile
 import threading
 import types
 import uuid
-from dataclasses import asdict, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from .config import EvaluationConfig
+from .config import EvaluationConfig, plain_data
 from .data import DataPlan
 from .models import EvaluationResult
 from .protocols import Evaluator
@@ -184,7 +184,7 @@ class DockerOptiProfilerEvaluator:
             "mode": mode,
             "output_dir": "/output",
             "data": data_manifest,
-            "evaluation": asdict(self.config) | {"backend": "unsafe_local"},
+            "evaluation": plain_data(self.config) | {"backend": "unsafe_local"},
         }
         container_name = f"ope-evaluator-{uuid.uuid4().hex[:12]}"
         with tempfile.TemporaryDirectory(prefix="ope-evaluator-request-") as request_dir:

@@ -3,8 +3,10 @@ from __future__ import annotations
 import importlib.util
 import json
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from optiprofiler_evolve.config import EvaluationConfig
 from optiprofiler_evolve.data import DataPlan
@@ -71,6 +73,41 @@ class OptiProfilerEvaluationTests(unittest.TestCase):
 
 
 class DockerEvaluationBoundaryTests(unittest.TestCase):
+    def test_nested_frozen_config_serializes_at_docker_request_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            candidate = root / "candidate"
+            reference = root / "reference"
+            candidate.mkdir()
+            reference.mkdir()
+            data = DataPlan(
+                library="s2mpj",
+                selection={},
+                universe=("PUBLIC",),
+                public=("PUBLIC",),
+                validation=(),
+                hidden=(),
+                smoke=("PUBLIC",),
+                split_seed=0,
+                manifest_hash="test",
+                aliases={"PUBLIC": "P_PUBLIC"},
+            )
+            evaluator = DockerOptiProfilerEvaluator(
+                reference=reference,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                data=data,
+                config=EvaluationConfig(
+                    backend="docker",
+                    docker_image="evaluator:test",
+                    benchmark={"max_eval_factor": 200, "nested": {"n_jobs": 4}},
+                ),
+            )
+            completed = types.SimpleNamespace(returncode=1, stdout="expected test failure")
+            with patch("optiprofiler_evolve.evaluation.subprocess.run", return_value=completed):
+                result = evaluator.evaluate(candidate, "public", root / "output")
+            self.assertFalse(result.success)
+            self.assertIn("code 1", result.error or "")
+
     def test_worker_artifacts_redact_text_and_withhold_matching_binary(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

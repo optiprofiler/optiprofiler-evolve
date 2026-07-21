@@ -433,7 +433,7 @@ class EvolveConfig:
     def redacted_dict(self) -> dict[str, Any]:
         """Return a serializable config without credential values."""
 
-        result = _plain_data(self)
+        result = plain_data(self)
         for worker in result["workers"]["pool"]:
             worker["env"] = {
                 key: "<redacted>" if _is_secret_name(key) else value
@@ -688,17 +688,19 @@ def _freeze_value(value: Any) -> Any:
     return value
 
 
-def _plain_data(value: Any) -> Any:
+def plain_data(value: Any) -> Any:
+    """Convert frozen config values into JSON-native containers."""
+
     if dataclasses.is_dataclass(value):
         return {
-            field.name: _plain_data(getattr(value, field.name))
+            field.name: plain_data(getattr(value, field.name))
             for field in dataclasses.fields(value)
             if not field.name.startswith("_")
         }
     if isinstance(value, Mapping):
-        return {str(key): _plain_data(item) for key, item in value.items()}
+        return {str(key): plain_data(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
-        return [_plain_data(item) for item in value]
+        return [plain_data(item) for item in value]
     if isinstance(value, Path):
         return str(value)
     return value
