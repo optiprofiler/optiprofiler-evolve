@@ -198,7 +198,10 @@ class StrategyAnalysisPhase:
         self.timeout_seconds = timeout_seconds
         self.token_budget = token_budget
         self.max_budget_usd = max_budget_usd
-        self.tools = _tool_config(tools, network=False, web_search=False)
+        # Remote CLI harnesses still need transport access to their model API.
+        # Disable search by default without putting the whole container on an
+        # internal-only Docker network.
+        self.tools = _tool_config(tools, network=True, web_search=False)
         self.prompt_version = prompt_version
 
     def run(self, context: PhaseContext) -> PhaseResult:

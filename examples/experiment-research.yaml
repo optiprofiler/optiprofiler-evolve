@@ -90,7 +90,7 @@ workflow:
         token_budget: 30000
         prompt_version: strategy-analysis/1
         tools:
-          network: false
+          network: true
           web_search: false
     - name: recombine
       options:

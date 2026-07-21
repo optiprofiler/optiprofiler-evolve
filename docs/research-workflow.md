@@ -84,7 +84,7 @@ strategies that cannot be materialized are listed under
 | `timeout_seconds` | worker default | Analyst wall time. |
 | `token_budget` | worker default | Analyst advisory token budget. |
 | `max_budget_usd` | worker default | Analyst Claude budget. |
-| `tools` | network/web off | Analyst `ToolConfig` overrides. |
+| `tools` | network on, web off | Analyst `ToolConfig` overrides. Remote CLI harnesses need network transport to their model API. |
 | `prompt_version` | `strategy-analysis/1` | Recorded prompt contract. |
 
 Invalid or failed analysts produce zero verified strategies for that island and

@@ -194,7 +194,7 @@ the phase constructor before a run directory is created:
 | `strategy_analysis` | `timeout_seconds` | worker default | Role wall time. |
 | `strategy_analysis` | `token_budget` | worker default | Advisory role token budget. |
 | `strategy_analysis` | `max_budget_usd` | worker default | Claude role cost cap. |
-| `strategy_analysis` | `tools` | network/web off | Role-specific `ToolConfig` overrides. |
+| `strategy_analysis` | `tools` | network on, web off | Role-specific `ToolConfig` overrides. Remote CLI harnesses need network transport to their model API. |
 | `strategy_analysis` | `prompt_version` | `strategy-analysis/1` | Recorded prompt contract. |
 | `recombine` | `max_strategies` | `8` | Portable strategies considered. |
 | `recombine` | `max_combination_size` | `2` | Patches in one combination. |

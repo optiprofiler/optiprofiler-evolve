@@ -10,7 +10,7 @@ from pathlib import Path
 from optiprofiler_evolve.config import load_config
 from optiprofiler_evolve.engine import EvolutionEngine
 from optiprofiler_evolve.models import EvaluationResult
-from optiprofiler_evolve.phases.research import RecombinePhase
+from optiprofiler_evolve.phases.research import RecombinePhase, StrategyAnalysisPhase
 from optiprofiler_evolve.protocols import PhaseContext, VariantRequest
 from optiprofiler_evolve.sandbox import AgentRunResult
 from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
@@ -278,6 +278,12 @@ def research_config() -> dict:
 
 
 class ResearchHarnessTests(unittest.TestCase):
+    def test_strategy_analyst_keeps_model_transport_but_disables_web_search(self) -> None:
+        phase = StrategyAnalysisPhase()
+
+        self.assertTrue(phase.tools.network)
+        self.assertFalse(phase.tools.web_search)
+
     def test_scripted_full_workflow_detects_effective_and_placebo_strategies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             ResearchEvaluator.calls = []

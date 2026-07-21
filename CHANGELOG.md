@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep remote model-API transport enabled for strategy-analysis agents while
+  leaving their web-search tools disabled by default.
 - Add an auditable `forbidden_candidate_imports` experiment policy for
   external-solver-API ablations.
 - Require agent-feedback workers to inspect selected benchmark plots through a
