@@ -93,7 +93,15 @@ class _AgentRunnerAdapter:
             prompt=request.prompt,
             transcript=request.transcript,
         )
-        return WorkerOutcome(result.returncode, result.transcript, result.timed_out)
+        return WorkerOutcome(
+            result.returncode,
+            result.transcript,
+            result.timed_out,
+            native_trace=result.native_trace,
+            stderr_trace=result.stderr_trace,
+            trace_chunks=result.trace_chunks,
+            capture_error=result.capture_error,
+        )
 
     def provenance(self, workers: Sequence[WorkerConfig]) -> Mapping[str, object]:
         module = getattr(self.runner, "__module__", self.runner.__class__.__module__)
@@ -733,6 +741,13 @@ class EvolutionEngine:
             "native_trace": str(attempt.worker_outcome.native_trace)
             if attempt.worker_outcome.native_trace
             else None,
+            "stderr_trace": str(attempt.worker_outcome.stderr_trace)
+            if attempt.worker_outcome.stderr_trace
+            else None,
+            "trace_chunks": str(attempt.worker_outcome.trace_chunks)
+            if attempt.worker_outcome.trace_chunks
+            else None,
+            "trace_capture_error": attempt.worker_outcome.capture_error,
         }
         self.attempt_history.append(summary)
         _append_json(self.run_dir / "attempts.jsonl", summary)
@@ -1097,6 +1112,17 @@ class _EngineControllerServices:
                     broker=connection,
                     prompt=job.prompt,
                     transcript=transcript,
+                    trace_dir=engine.run_dir / "research" / "traces" / role / job_id,
+                    trace_context={
+                        "schema": "trace_input/1",
+                        "join": {
+                            "job_id": job_id,
+                            "role": role,
+                            "phase": role_phase,
+                            "island": scope.get("island"),
+                        },
+                        "inputs": sorted(job.inputs),
+                    },
                 )
             )
         except Exception as exc:
@@ -1127,6 +1153,10 @@ class _EngineControllerServices:
                 "returncode": outcome.returncode,
                 "timed_out": outcome.timed_out,
                 "transcript": str(outcome.transcript),
+                "native_trace": str(outcome.native_trace) if outcome.native_trace else None,
+                "stderr_trace": str(outcome.stderr_trace) if outcome.stderr_trace else None,
+                "trace_chunks": str(outcome.trace_chunks) if outcome.trace_chunks else None,
+                "trace_capture_error": outcome.capture_error,
                 "outputs": sorted(outputs),
                 "missing_outputs": missing_outputs,
             },
@@ -1483,6 +1513,18 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
                     broker=connection,
                     prompt=prompt,
                     transcript=transcript,
+                    trace_dir=engine.run_dir / "traces" / self._attempt_id,
+                    trace_context={
+                        "schema": "trace_input/1",
+                        "join": {
+                            "attempt_id": self._attempt_id,
+                            "iteration": self._iteration,
+                            "island": self._island,
+                            "attempt_index": self._attempt_index,
+                        },
+                        "parent_id": self._parent.candidate_id,
+                        "parent_tree_hash": self._parent.tree_hash,
+                    },
                 )
             )
         except Exception as exc:
@@ -1504,6 +1546,9 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
                 "timed_out": outcome.timed_out,
                 "transcript": str(outcome.transcript),
                 "native_trace": str(outcome.native_trace) if outcome.native_trace else None,
+                "stderr_trace": str(outcome.stderr_trace) if outcome.stderr_trace else None,
+                "trace_chunks": str(outcome.trace_chunks) if outcome.trace_chunks else None,
+                "trace_capture_error": outcome.capture_error,
             },
         )
         return outcome

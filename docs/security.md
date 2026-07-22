@@ -45,6 +45,9 @@
   and report files are rebuilt from a centralized default-deny projection;
   unknown event kinds, fields, errors, paths, model identities, validation
   scores, prompts, and traces are withheld automatically.
+- Raw worker and role-agent streams, prompts, sanitized invocation metadata, and
+  chunk indexes are stored under private per-invocation directories. Public
+  projections never expose those paths. See [Agent trace retention](traces.md).
 
 Each attempt receives a distinct workspace, broker token, container, and
 temporary Docker network, including workers on the same island. Enabling web

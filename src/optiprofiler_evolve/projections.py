@@ -88,7 +88,7 @@ _PUBLIC_DATA_KEYS: Mapping[str, frozenset[str]] = {
     "validation_selection_finished": frozenset(
         {"selected_ids", "new_evaluations", "cumulative_evaluations"}
     ),
-    "research_finalist_registered": frozenset({"source"}),
+    "research_finalist_registered": frozenset(),
 }
 
 
@@ -128,8 +128,20 @@ def _project_event(event: Mapping[str, Any]) -> dict[str, Any] | None:
         "kind": kind,
         "scope": {key: scope[key] for key in _PUBLIC_SCOPE_KEYS if key in scope},
         "status": status,
-        "data": {key: data[key] for key in allowed_data if key in data},
+        "data": {
+            key: data[key]
+            for key in allowed_data
+            if key in data and _is_public_value(data[key])
+        },
     }
+
+
+def _is_public_value(value: object) -> bool:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(_is_public_value(item) for item in value)
+    return False
 
 
 __all__: list[str] = []

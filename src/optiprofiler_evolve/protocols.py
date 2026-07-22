@@ -32,6 +32,8 @@ class WorkerRequest:
     broker: object
     prompt: str
     transcript: Path
+    trace_dir: Path
+    trace_context: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,9 @@ class WorkerOutcome:
     transcript: Path
     timed_out: bool = False
     native_trace: Path | None = None
+    stderr_trace: Path | None = None
+    trace_chunks: Path | None = None
+    capture_error: str | None = None
 
 
 @dataclass(frozen=True)

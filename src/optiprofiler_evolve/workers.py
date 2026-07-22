@@ -26,11 +26,17 @@ class CliWorkerAdapter:
             broker=request.broker,
             prompt=request.prompt,
             transcript=request.transcript,
+            trace_dir=request.trace_dir,
+            trace_context=request.trace_context,
         )
         return WorkerOutcome(
             returncode=result.returncode,
             transcript=result.transcript,
             timed_out=result.timed_out,
+            native_trace=result.native_trace,
+            stderr_trace=result.stderr_trace,
+            trace_chunks=result.trace_chunks,
+            capture_error=result.capture_error,
         )
 
     def provenance(self, workers: Sequence[WorkerConfig]) -> Mapping[str, object]:

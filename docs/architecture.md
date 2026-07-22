@@ -91,7 +91,7 @@ the optional `static_audit` evidence step is removed for an ablation.
 | `protocols.py`, `registry.py`, `builtins.py` | Narrow contracts and explicit component lookup |
 | `phases/`, `steps/`, `policies/` | Built-in orchestration components |
 | `engine.py` | Ordered execution, population ownership, selection, checkpoints, holdout |
-| `workers.py`, `harness.py`, `sandbox.py` | Worker lifecycle, CLI commands, and isolation |
+| `workers.py`, `harness.py`, `sandbox.py`, `traces.py` | Worker lifecycle, CLI commands, isolation, and private raw trace capture |
 | `evaluation.py`, `broker.py` | Evaluator adapter and bounded public worker tools |
 | `solver.py`, `data.py` | Solver tree checks and immutable problem splits |
 | `events.py`, `provenance.py`, `viewers.py` | Append-only events, reproducibility evidence, derived local views |

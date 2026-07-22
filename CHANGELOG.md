@@ -6,6 +6,9 @@
   through a centralized default-deny event projection.
 - Remove problem-library identity, reference raw scores, and scoring-formula
   details from worker manifests and evaluation responses.
+- Preserve built-in CLI worker and research-role stdout/stderr incrementally in
+  private per-invocation traces, including partial output on timeout, while
+  keeping readable transcripts as derived artifacts.
 - Keep remote model-API transport enabled for strategy-analysis agents while
   leaving their web-search tools disabled by default.
 - Preserve nested component options as structured JSON in provenance and run

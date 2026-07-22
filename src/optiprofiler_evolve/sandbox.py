@@ -12,6 +12,7 @@ from typing import Mapping
 from .broker import BrokerConnection
 from .config import SandboxConfig, WorkerConfig, WorkersConfig
 from .harness import build_harness_command
+from .traces import prepare_trace, render_transcript, run_captured_process
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,10 @@ class AgentRunResult:
     returncode: int
     transcript: Path
     timed_out: bool = False
+    native_trace: Path | None = None
+    stderr_trace: Path | None = None
+    trace_chunks: Path | None = None
+    capture_error: str | None = None
 
 
 def run_agent(
@@ -31,6 +36,8 @@ def run_agent(
     broker: BrokerConnection,
     prompt: str,
     transcript: Path,
+    trace_dir: Path,
+    trace_context: Mapping[str, object] | None = None,
 ) -> AgentRunResult:
     """Run one coding worker and preserve its complete stdout/stderr transcript."""
 
@@ -81,26 +88,35 @@ def run_agent(
         environment = _worker_environment(selected_values, broker, tools_dir, workspace)
         cwd = workspace
 
+    paths = prepare_trace(
+        root=trace_dir,
+        prompt=prompt,
+        command=command,
+        worker=worker,
+        workers=workers,
+        sandbox=sandbox,
+        context=trace_context,
+        secret_values=selected_values,
+    )
     try:
-        completed = subprocess.run(
-            command,
-            input=prompt,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=workers.timeout_seconds,
-            check=False,
-            env=environment,
+        completed = run_captured_process(
+            command=command,
+            prompt=prompt,
+            paths=paths,
+            timeout_seconds=workers.timeout_seconds,
+            environment=environment,
             cwd=cwd,
         )
-        transcript.write_text(completed.stdout, encoding="utf-8")
-        return AgentRunResult(completed.returncode, transcript)
-    except subprocess.TimeoutExpired as exc:
-        output = exc.stdout or ""
-        if isinstance(output, bytes):
-            output = output.decode("utf-8", errors="replace")
-        transcript.write_text(output + "\n[controller] worker timed out\n", encoding="utf-8")
-        return AgentRunResult(124, transcript, timed_out=True)
+        render_transcript(paths, transcript)
+        return AgentRunResult(
+            completed.returncode,
+            transcript,
+            timed_out=completed.timed_out,
+            native_trace=paths.stdout,
+            stderr_trace=paths.stderr,
+            trace_chunks=paths.chunks,
+            capture_error=completed.capture_error,
+        )
     finally:
         if container_name is not None:
             subprocess.run(

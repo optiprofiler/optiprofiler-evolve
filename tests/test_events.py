@@ -148,6 +148,7 @@ class EventLedgerTests(unittest.TestCase):
                 data={
                     "candidate_id": "it001-i00-a00",
                     "public_score": 0.75,
+                    "guidance": {"nested": "SECRET_NESTED"},
                     "validation_score": 0.99,
                     "transcript": "/private/SECRET_TRACE",
                     "error": "SECRET_ERROR",
@@ -171,6 +172,7 @@ class EventLedgerTests(unittest.TestCase):
                 "SECRET_ERROR",
                 "SECRET_SCOPE",
                 "SECRET_FUTURE",
+                "SECRET_NESTED",
             ):
                 self.assertNotIn(secret, serialized)
             event = json.loads(serialized)

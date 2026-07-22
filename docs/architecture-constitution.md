@@ -93,6 +93,10 @@ components.
   default. No renderer or exporter performs its own ad hoc redaction.
 - `attempt_id` joins step events, worker transcripts, candidate records, and
   evaluation artifacts.
+- Provider-delivered stdout and stderr are retained separately and incrementally
+  in controller-private per-invocation directories. Readable transcripts are
+  derived evidence, never replacements for the raw streams. See
+  [Agent trace retention](traces.md).
 - Status values are `pending`, `running`, `succeeded`, `failed`, `skipped`, or
   `cancelled`.
 - `public_run_state.json`, `status.html`, shareable reports, GitHub Actions
