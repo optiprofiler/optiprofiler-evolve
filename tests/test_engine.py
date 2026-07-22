@@ -215,6 +215,19 @@ class EngineTests(unittest.TestCase):
                 "mutation worker",
                 (reviewer_workspace / "mutation_transcript.txt").read_text(),
             )
+            trace_entries = [
+                json.loads(line)
+                for line in (result.run_dir / "controller" / "trace_index.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            reviewer_entry = next(
+                entry
+                for entry in trace_entries
+                if entry["join"].get("role") == "integrity-reviewer"
+            )
+            self.assertEqual(reviewer_entry["join"]["candidate_id"], "it001-i00-a00")
+            self.assertEqual(reviewer_entry["join"]["module"], "integrity-reviewer")
 
     def test_quarantined_candidate_never_consumes_validation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

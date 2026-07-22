@@ -252,6 +252,7 @@ class ExtensibilityTests(unittest.TestCase):
             }
             self.assertEqual(attempt_ids, recorded)
             provenance = json.loads((root / "run" / "provenance.json").read_text())
+            self.assertRegex(provenance["run_id"], r"^[0-9a-f]{32}$")
             self.assertIn("config_hash", provenance)
             self.assertIn("source_hash", provenance["components"]["attempt_steps"][0])
             nested = next(
@@ -288,6 +289,36 @@ class ExtensibilityTests(unittest.TestCase):
             )
             self.assertNotIn("validation_score", public_events)
             self.assertNotIn("source_file_hash", public_events)
+            self.assertIn('"kind": "trace_coverage"', public_events)
+            self.assertNotIn("test-model", public_events)
+            trace_entries = [
+                json.loads(line)
+                for line in (root / "run" / "controller" / "trace_index.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            self.assertEqual(len(trace_entries), len(recorded))
+            self.assertEqual({entry["run_id"] for entry in trace_entries}, {provenance["run_id"]})
+            self.assertEqual(
+                {entry["config_hash"] for entry in trace_entries},
+                {provenance["config_hash"]},
+            )
+            self.assertEqual(
+                {entry["join"]["attempt_id"] for entry in trace_entries},
+                recorded,
+            )
+            coverage = json.loads(
+                (root / "run" / "controller" / "trace_coverage.json").read_text()
+            )
+            self.assertEqual(coverage["total"], len(recorded))
+            self.assertEqual(coverage["capture_quality"]["degraded"], len(recorded))
+            public_coverage = (
+                root / "run" / "public_trace_coverage.json"
+            ).read_text(encoding="utf-8")
+            self.assertNotIn("model", public_coverage)
+            self.assertNotIn("relative_path", public_coverage)
+            self.assertIn('"capture_degraded"', public_coverage)
+            self.assertIn("## Agent trace coverage", (root / "run" / "FINAL_REPORT.md").read_text())
 
     def test_engine_safety_gate_survives_static_audit_ablation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

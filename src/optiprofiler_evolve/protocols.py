@@ -70,6 +70,9 @@ class AgentJob:
     timeout_seconds: int | None = None
     token_budget: int | None = None
     max_budget_usd: float | None = None
+    trace_links: Mapping[str, str | int | float | bool | None] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)

@@ -69,7 +69,15 @@ Before a `WorkerAdapter` runs, the engine creates its private trace inputs and
 passes both `trace_dir` and `cancellation_event` in `WorkerRequest`. Built-in CLI
 workers add exact native stream evidence. A custom adapter should do the same;
 when it returns only a transcript, the engine imports that file and marks the
-missing native timing in the terminal trace manifest.
+missing native timing in the terminal trace manifest. Both explorer attempts
+and trusted role jobs pass through the same private engine call site. Workflow
+modules can invoke agents only through `ControllerServices.run_trusted_agent`;
+they do not receive the adapter or a subprocess capability.
+
+Each terminal invocation is joined to run/config/component provenance in
+`controller/trace_index.jsonl`. The separate
+`controller/trace_coverage.json` reports capture quality and worker outcomes;
+`public_trace_coverage.json` contains aggregate counts only.
 
 The `budget` field is reserved for a future scheduler. The alpha engine raises
 on a nonempty budget proposal so an apparently successful experiment cannot
@@ -115,7 +123,8 @@ the optional `static_audit` evidence step is removed for an ablation.
 | `protocols.py`, `registry.py`, `builtins.py` | Narrow contracts and explicit component lookup |
 | `phases/`, `steps/`, `policies/` | Built-in orchestration components |
 | `engine.py` | Ordered execution, population ownership, selection, checkpoints, holdout |
-| `workers.py`, `harness.py`, `sandbox.py`, `traces.py` | Worker lifecycle, CLI commands, isolation, and private raw trace capture |
+| `workers.py`, `harness.py`, `sandbox.py`, `traces.py` | Worker lifecycle, CLI commands, isolation, and per-invocation raw trace capture |
+| `trace_ledger.py` | Run-level trace indexing, crash reconciliation, and coverage summaries |
 | `evaluation.py`, `broker.py` | Evaluator adapter and bounded public worker tools |
 | `solver.py`, `data.py` | Solver tree checks and immutable problem splits |
 | `events.py`, `provenance.py`, `viewers.py` | Append-only events, reproducibility evidence, derived local views |

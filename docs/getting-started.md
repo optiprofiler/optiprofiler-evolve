@@ -133,7 +133,8 @@ Before increasing model spend:
 1. Confirm the seed evaluates successfully against the configured fixed reference.
 2. Keep `iterations: 1`, `islands: 1`, and a small explicit problem list.
 3. Inspect `public_data_manifest.json`, `resolved_config.json`, worker
-   transcripts, and evaluation feedback in the run directory.
+   transcripts, `controller/trace_index.jsonl`, trace coverage, and evaluation
+   feedback in the run directory.
 4. Increase problem count and evaluation budget.
 5. Increase islands, iterations, and worker parallelism last.
 

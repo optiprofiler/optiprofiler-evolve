@@ -48,6 +48,9 @@
 - Raw worker and role-agent streams, prompts, sanitized invocation metadata, and
   chunk indexes are stored under private per-invocation directories. Public
   projections never expose those paths. See [Agent trace retention](traces.md).
+- The private run-level trace index contains role, model, lineage, path, and
+  content hashes. The public coverage projection contains aggregate counts
+  only; it cannot be used to recover private trace identities or locations.
 - On POSIX, timeout and controller cancellation terminate the worker process
   group rather than only the CLI parent. Trace outcome manifests distinguish
   complete, truncated, timed-out, cancelled, and crash-inferred evidence.

@@ -74,7 +74,8 @@ from .solver import (
     validate_interface,
     validate_tree_safety,
 )
-from .traces import finalize_adapter_trace, prepare_trace, recover_incomplete_traces
+from .trace_ledger import TraceLedger
+from .traces import finalize_adapter_trace
 from .viewers import render_final_report, render_status
 
 
@@ -194,6 +195,8 @@ class EvolutionEngine:
         self.populations: list[list[CandidateRecord]] = []
         self.artifacts: dict[str, object] = {}
         self.events: EventWriter | None = None
+        self.run_id: str | None = None
+        self.trace_ledger: TraceLedger | None = None
         self.data: DataPlan | None = None
         self.evaluator: Evaluator | None = None
         self.reference: Path | None = None
@@ -223,13 +226,16 @@ class EvolutionEngine:
     def _run_worker_adapter(self, request: WorkerRequest) -> WorkerOutcome:
         """Invoke one adapter behind a controller-owned trace boundary."""
 
-        paths = prepare_trace(
+        if self.trace_ledger is None:
+            raise RuntimeError("Trace ledger is not initialized.")
+        paths = self.trace_ledger.prepare(
             root=request.trace_dir,
             prompt=request.prompt,
             command=["<worker-adapter>", self.worker_adapter.name],
             worker=request.worker,
             workers=request.workers,
             sandbox=request.sandbox,
+            workspace=request.workspace,
             context=request.trace_context,
             secret_values=request.worker.env,
         )
@@ -259,6 +265,7 @@ class EvolutionEngine:
             cancelled=cancelled,
             capture_error=outcome.capture_error,
         )
+        self.trace_ledger.record(paths, workspace=request.workspace)
         return replace(
             outcome,
             native_trace=paths.stdout,
@@ -422,19 +429,28 @@ class EvolutionEngine:
         self._initialize_run_directory()
         self._cancellation_event.clear()
         self.events = EventWriter(self.run_dir / "events.jsonl")
+        self.run_id = secrets.token_hex(16)
         reviewer_worker = self.config.integrity_review.resolved_worker(self.config.workers)
         provenance_workers = self.config.workers.pool
         if reviewer_worker is not None and reviewer_worker not in provenance_workers:
             provenance_workers = (*provenance_workers, reviewer_worker)
         provenance = build_run_provenance(
             self.config,
+            run_id=self.run_id,
             worker_adapter=self.worker_adapter,
             worker_provenance=self.worker_adapter.provenance(provenance_workers),
             evaluator_factory=self.evaluator_factory,
         )
+        self.trace_ledger = TraceLedger(
+            self.run_dir,
+            run_id=self.run_id,
+            config_hash=str(provenance["config_hash"]),
+            adapter_name=self.worker_adapter.name,
+        )
         _write_json(self.run_dir / "resolved_config.json", self.config.redacted_dict())
         _write_json(self.run_dir / "provenance.json", provenance)
         self._emit("run_started", "running", data=provenance)
+        run_succeeded = False
         try:
             with _controller_cancellation(self._cancellation_event):
                 self._run_phases()
@@ -446,14 +462,10 @@ class EvolutionEngine:
                     "succeeded",
                     data={"best_candidate_id": self.result.best_candidate_id},
                 )
-                self._refresh_status()
-                render_final_report(
-                    self.run_dir / "public_events.jsonl", self.run_dir / "report.html"
-                )
+                run_succeeded = True
                 return self.result
         except _RunCancelled as exc:
             self._emit("run_finished", "cancelled", data={"error": str(exc)})
-            self._refresh_status()
             raise
         except Exception as exc:
             self._emit(
@@ -461,13 +473,46 @@ class EvolutionEngine:
                 "failed",
                 data={"error": f"{type(exc).__name__}: {exc}"},
             )
-            self._refresh_status()
             raise
         finally:
-            recover_incomplete_traces(self.run_dir)
-            if self.events is not None:
-                self.events.close()
-                self.events = None
+            trace_failure: Exception | None = None
+            try:
+                if self.trace_ledger is None:
+                    raise RuntimeError("Trace ledger was not initialized.")
+                coverage = self.trace_ledger.recover_and_summarize()
+                capture = coverage["capture_quality"]
+                outcomes = coverage["outcomes"]
+                if not isinstance(capture, Mapping) or not isinstance(outcomes, Mapping):
+                    raise ValueError("Trace coverage has an invalid shape.")
+                self._emit(
+                    "trace_coverage",
+                    "succeeded",
+                    data={
+                        "total": coverage["total"],
+                        **{f"capture_{key}": value for key, value in capture.items()},
+                        **{f"outcome_{key}": value for key, value in outcomes.items()},
+                    },
+                )
+                self._append_trace_coverage(coverage)
+            except Exception as exc:
+                trace_failure = exc
+                try:
+                    self._emit("trace_coverage", "failed")
+                except Exception:
+                    pass
+            try:
+                if self.events is not None:
+                    self._refresh_status()
+                    render_final_report(
+                        self.run_dir / "public_events.jsonl",
+                        self.run_dir / "report.html",
+                    )
+            finally:
+                if self.events is not None:
+                    self.events.close()
+                    self.events = None
+            if trace_failure is not None and run_succeeded:
+                raise RuntimeError("Trace finalization failed after a successful run.") from trace_failure
 
     def _run_phases(self) -> None:
         for spec, phase in zip(self.config.workflow.phases, self.phases, strict=True):
@@ -1277,6 +1322,31 @@ class EvolutionEngine:
             )
         (self.run_dir / "FINAL_REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+    def _append_trace_coverage(self, coverage: Mapping[str, object]) -> None:
+        report = self.run_dir / "FINAL_REPORT.md"
+        if not report.is_file():
+            return
+        capture = coverage.get("capture_quality", {})
+        outcomes = coverage.get("outcomes", {})
+        if not isinstance(capture, Mapping) or not isinstance(outcomes, Mapping):
+            raise ValueError("Trace coverage has an invalid shape.")
+        lines = [
+            "",
+            "## Agent trace coverage",
+            "",
+            f"- Total invocations: `{coverage.get('total', 0)}`",
+            f"- Complete captures: `{capture.get('complete', 0)}`",
+            f"- Degraded captures: `{capture.get('degraded', 0)}`",
+            f"- Interrupted captures: `{capture.get('interrupted', 0)}`",
+            f"- Failed worker outcomes: `{outcomes.get('failed', 0)}`",
+            f"- Timed-out worker outcomes: `{outcomes.get('timed_out', 0)}`",
+            f"- Cancelled worker outcomes: `{outcomes.get('cancelled', 0)}`",
+            "- Private index: `controller/trace_index.jsonl`",
+            "- Private coverage details: `controller/trace_coverage.json`",
+        ]
+        with report.open("a", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+
     def _emit(
         self,
         kind: str,
@@ -1385,9 +1455,23 @@ class _EngineControllerServices:
             "strategy-analyst": "strategy_analysis",
         }.get(role, role)
         scope: dict[str, object] = {"phase": role_phase, "role": role, "job_id": job_id}
+        trace_links = dict(job.trace_links)
+        reserved_links = {"phase", "module", "role", "job_id"}
+        for key, value in trace_links.items():
+            if not re.fullmatch(r"[a-z][a-z0-9_]*", key) or key in reserved_links:
+                raise ValueError(f"Invalid or reserved trace link key: {key!r}")
+            if value is not None and not isinstance(value, (str, int, float, bool)):
+                raise TypeError(f"Trace link {key!r} must contain one scalar value.")
         island_match = re.search(r"island-(\d+)", job_id)
         if island_match:
             scope["island"] = int(island_match.group(1))
+        if "island" in trace_links:
+            linked_island = trace_links["island"]
+            if not isinstance(linked_island, int) or isinstance(linked_island, bool):
+                raise TypeError("Trace link 'island' must be an integer.")
+            if "island" in scope and scope["island"] != linked_island:
+                raise ValueError("Agent job island conflicts with its trace link.")
+            scope["island"] = linked_island
         engine._emit(
             "role_agent_started",
             "running",
@@ -1420,7 +1504,9 @@ class _EngineControllerServices:
                             "job_id": job_id,
                             "role": role,
                             "phase": role_phase,
+                            "module": role_phase,
                             "island": scope.get("island"),
+                            **trace_links,
                         },
                         "inputs": sorted(job.inputs),
                     },
@@ -1867,6 +1953,10 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
                         "schema": "trace_input/1",
                         "join": {
                             "attempt_id": self._attempt_id,
+                            "candidate_id": self._attempt_id,
+                            "parent_id": self._parent.candidate_id,
+                            "phase": "explore",
+                            "module": "candidate_attempt",
                             "iteration": self._iteration,
                             "island": self._island,
                             "attempt_index": self._attempt_index,

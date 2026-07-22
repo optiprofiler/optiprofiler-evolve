@@ -106,7 +106,10 @@ reference, candidate snapshots and lineage, worker transcripts, public
 evaluation output, iteration checkpoints, validation selection, hidden evaluation,
 and a materialized `final_solver/` directory. Raw stdout/stderr, chunk indexes,
 invocation/outcome manifests, and normalized integrity decisions are retained
-for every mutation worker and reviewer. Full research runs also preserve
+for every agent invocation, including rejected, failed, timed-out, cancelled,
+and interrupted work. `controller/trace_index.jsonl` joins those traces to the
+run and workflow; private and aggregate public coverage files distinguish trace
+quality from worker outcome. Full research runs also preserve
 direction cards, per-island source diffs and strategy cards, executable ablation
 matrices, island bundles, recombination conflicts/results, and a challenger
 report under `research/`.

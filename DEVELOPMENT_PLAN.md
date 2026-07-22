@@ -111,16 +111,30 @@ Implementation order for the stabilization pass:
 3. Add the mandatory independent reviewer gate and explicit
    retention/sampling strategy seams, including scalar-compatible Pareto
    policies.
-4. Complete worker/evaluator/network isolation and controlled research tools.
-5. Render the public projection as a local Actions-style workflow/island view
+4. Close trace-analysis readiness before adding more evidence producers:
+   create a run-level trace index, aggregate complete/degraded/interrupted
+   coverage, and promote workflow/candidate/model provenance to stable join
+   fields. Every real agent invocation, including future trusted workflow
+   modules, must continue through the controller-owned trace boundary. Keep all
+   outcomes, including rejected, quarantined, failed, timed-out, cancelled, and
+   interrupted attempts; never delete or lossy-compress traces during a live
+   research run.
+5. Complete worker/evaluator/network isolation and controlled research tools.
+   Provider-gateway lifecycle and redacted transport metadata join the same
+   private trace index, while bodies, prompts, source, and credentials remain
+   excluded from gateway logs.
+6. Render the public projection as a local Actions-style workflow/island view
    and export the same vocabulary through a single-job GitHub Actions wrapper.
 
 Items 1-3 are implemented, locally tested, and independently reviewed. Item 3
 includes complete explorer/role/reviewer trace retention, the mandatory
 pre-validation integrity gate, explicit island retention and parent sampling,
-and a scalar-compatible Pareto interface. Work proceeds next to isolation and
-controlled tool/network transport; the Actions-style view remains a projection
-over the same event ledger.
+and a scalar-compatible Pareto interface. Item 4 is the next additive closeout:
+the raw per-invocation evidence already exists, but run-level indexing,
+completeness accounting, and provenance joins remain to be implemented and
+independently reviewed. Isolation and controlled tool/network transport follow
+that closeout; the Actions-style view remains a projection over the same event
+ledger.
 
 Each item is independently tested and reviewed before work starts on the next
 one. Changes remain inside this repository; OptiProfiler agent-output work is a

@@ -53,6 +53,10 @@ The supported extension slots are `Phase`, `AttemptStep`,
   operations: run a sanitized role agent, materialize a gated variant, evaluate
   a public variant, select IDs by controller validation, and register a finalist.
   Adding a sixth operation requires a deliberate constitution change and tests.
+- `ControllerServices.run_trusted_agent` is the only agent-invocation capability
+  exposed to workflow modules. Modules never receive a worker adapter or a raw
+  subprocess launcher. Every future agent-invoking module therefore inherits
+  the same controller-owned trace lifecycle by construction.
 - A research phase must not become a second engine. It may propose file-backed
   artifacts and call these services; only the engine writes candidate and
   population state.
@@ -92,7 +96,10 @@ Every run records:
   attempt, component)`;
 - candidate snapshots, lineage, checkpoints, evaluation artifacts, and worker
   transcripts;
-- normalized integrity decisions and complete traces for every reviewer attempt.
+- normalized integrity decisions and complete traces for every reviewer attempt;
+- a private run-level trace index, capture-quality/outcome coverage, and stable
+  joins from each invocation to its workflow, candidate lineage, config, and
+  run provenance;
 - research prompt-template versions, direction/strategy schemas, variant base
   and patch hashes, validation query counts, and rejected materializations.
 
@@ -116,6 +123,10 @@ components.
   timeout or SIGINT/SIGTERM cancellation terminates the complete worker process
   group on POSIX; incomplete invocations are marked by an idempotent crash
   scanner rather than silently treated as complete.
+- `controller/trace_index.jsonl` contains one idempotent terminal row per agent
+  invocation. `controller/trace_coverage.json` distinguishes complete,
+  degraded, and interrupted capture from worker success, failure, timeout, and
+  cancellation. Public projections expose aggregate counts only.
 - Status values are `pending`, `running`, `succeeded`, `failed`, `skipped`, or
   `cancelled`.
 - `public_run_state.json`, `status.html`, shareable reports, GitHub Actions

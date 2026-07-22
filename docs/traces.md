@@ -1,9 +1,14 @@
 # Agent trace retention
 
-Every explorer worker, integrity reviewer, and trusted research-role agent
-receives a private trace directory. The trace is evidence for later trajectory
-analysis; it is not a second source of workflow truth and it is never part of a
-public run bundle.
+Every real agent invocation that crosses the controller's worker-adapter
+boundary receives a private trace directory. This includes explorer workers,
+integrity reviewers, built-in research roles, and future trusted workflow
+modules that call `ControllerServices.run_trusted_agent`. Role names are not a
+capture allowlist. A module cannot receive the raw worker adapter, so the
+controller boundary remains the only supported way to invoke an agent.
+
+The trace is evidence for later trajectory analysis. It is not a second source
+of workflow truth and it is never part of a public run bundle.
 
 ## Evidence layers
 
@@ -36,6 +41,7 @@ raw.stderr.stream
 chunks.jsonl
 invocation.json
 outcome.json
+workspace.json
 ```
 
 The trace and input directories use mode `0700`; files use `0600`. Output is
@@ -51,13 +57,53 @@ The existing transcript path is reconstructed from the chunk index after the
 process exits. Native stdout and stderr remain separate so later ATIF conversion
 or provider-specific parsing does not depend on a lossy merged file.
 
-`invocation.json` hashes the controller inputs that existed before launch.
+`invocation.json` uses `trace_invocation/2`. It records a unique trace ID, run
+and config identity, adapter/harness/model identity, stable workflow join
+fields, the input workspace hash, and hashes of controller inputs that existed
+before launch. `workspace.json` records the post-invocation workspace hash
+without modifying the raw streams. The evidence scanner never follows worker-
+created symbolic links or reads special files; it records an unsafe tree state
+instead, before the mandatory candidate gate rejects that workspace.
 `outcome.json` records terminal state, return code, timeout/cancellation reason,
 duration when known, capture/derivation errors, explicit completeness and
 truncation flags, and byte counts plus SHA-256 hashes for each raw stream and the
 chunk index. Missing outcome manifests can be marked `interrupted`
 idempotently by the controller's crash scanner; recovery never invents missing
 bytes.
+
+## Run index and coverage
+
+The controller appends one terminal row per invocation to
+`controller/trace_index.jsonl`. A `trace_index_entry/1` row contains only
+private provenance and integrity metadata: trace/run/config identity, relative
+trace path, adapter/harness/model identity, workflow join fields, input/output
+tree hashes, terminal outcome, capture quality, and stream byte counts and
+hashes. It does not duplicate prompts or provider output.
+
+The index is idempotent by trace ID and safe under concurrent islands. After a
+controller interruption, recovery marks unfinished invocations explicitly and
+adds only missing index rows. A torn final JSONL row is removed before
+reconciliation; complete earlier rows are not rewritten. The per-invocation
+manifests remain authoritative, so the index can be reconstructed by scanning
+them. Internal recovery tooling calls `trace_ledger.reconcile_trace_run` using
+the persisted run provenance; this does not add another public package API.
+
+`controller/trace_coverage.json` separates two concepts:
+
+- capture quality: `complete`, `degraded`, or `interrupted`;
+- worker outcome: `completed`, `failed`, `timed_out`, `cancelled`, or
+  `interrupted`.
+
+A worker can fail while its trace is complete. Conversely, a successful legacy
+adapter can have a degraded trace if it returned only a transcript. The
+shareable `public_trace_coverage.json` and `trace_coverage` event contain only
+aggregate counts. They omit trace IDs, roles, models, paths, prompts, findings,
+and provider content.
+
+Stable join fields include the workflow module, role/job or attempt identity,
+candidate and parent identity when applicable, iteration, and island. Trusted
+custom role jobs may add scalar `trace_links`; reserved controller identity
+fields cannot be replaced.
 
 ## Privacy and limitations
 
@@ -80,8 +126,12 @@ bytes.
 - Windows does not provide the POSIX process-group guarantee. Container isolation
   remains the recommended backend for strict descendant cleanup.
 
-Trace retention is mandatory for research runs. Retention duration, compression,
-and deletion are deployment policies and must not silently truncate a live run.
+Trace retention is mandatory for research runs. Failed, rejected, quarantined,
+timed-out, cancelled, retried, and interrupted invocations are retained just as
+successful invocations are. Retention duration, compression, and deletion are
+explicit owner deployment policies and must not silently truncate or
+lossy-compress a live research run. A future exporter must produce a complete
+private research bundle separately from a default-deny sanitized public bundle.
 Normalized reviewer JSON is stored separately under
 `controller/integrity_reviews/<candidate_id>/`; it complements, rather than
 replaces, the raw reviewer stream.

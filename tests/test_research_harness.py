@@ -314,6 +314,27 @@ class ResearchHarnessTests(unittest.TestCase):
             self.assertTrue(
                 all(json.loads(path.read_text())["state"] == "completed" for path in role_outcomes)
             )
+            trace_index = [
+                json.loads(line)
+                for line in (root / "run" / "controller" / "trace_index.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            role_entries = [entry for entry in trace_index if "role" in entry["join"]]
+            self.assertEqual(
+                {entry["join"]["role"] for entry in role_entries},
+                {"direction-scout", "strategy-analyst"},
+            )
+            self.assertTrue(all(entry["join"]["module"] for entry in role_entries))
+            strategy_entries = [
+                entry
+                for entry in role_entries
+                if entry["join"]["role"] == "strategy-analyst"
+            ]
+            self.assertEqual(
+                {entry["join"]["candidate_id"] for entry in strategy_entries},
+                {"it001-i00-a00", "it001-i01-a00"},
+            )
             self.assertEqual(result.public_score, 0.7)
             self.assertEqual(sum(mode == "hidden" for _name, mode in ResearchEvaluator.calls), 1)
             directions = json.loads(

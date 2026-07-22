@@ -126,6 +126,7 @@ class AgentIntegrityReviewer:
                 timeout_seconds=request.timeout_seconds,
                 token_budget=request.token_budget,
                 max_budget_usd=request.max_budget_usd,
+                trace_links={"candidate_id": request.candidate_id},
                 tools=ToolConfig(
                     preset="minimal",
                     web_search=False,

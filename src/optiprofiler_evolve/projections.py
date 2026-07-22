@@ -81,6 +81,19 @@ _PUBLIC_DATA_KEYS: Mapping[str, frozenset[str]] = {
     ),
     "integrity_review_started": frozenset(),
     "integrity_review_finished": frozenset({"gate"}),
+    "trace_coverage": frozenset(
+        {
+            "total",
+            "capture_complete",
+            "capture_degraded",
+            "capture_interrupted",
+            "outcome_completed",
+            "outcome_failed",
+            "outcome_timed_out",
+            "outcome_cancelled",
+            "outcome_interrupted",
+        }
+    ),
     "directions_ready": frozenset({"mode", "card_count", "status"}),
     "island_analysis_finished": frozenset(
         {"island", "finalist", "strategy_count", "verified_count"}

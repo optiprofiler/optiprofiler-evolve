@@ -30,6 +30,7 @@ def coordinate_seed(base_seed: int, *coordinates: object) -> int:
 def build_run_provenance(
     config: EvolveConfig,
     *,
+    run_id: str,
     worker_adapter: object,
     worker_provenance: Mapping[str, object],
     evaluator_factory: object,
@@ -61,6 +62,7 @@ def build_run_provenance(
     }
     return {
         "schema_version": "1",
+        "run_id": run_id,
         "config": resolved,
         "config_hash": hashlib.sha256(encoded.encode()).hexdigest(),
         "components": components,

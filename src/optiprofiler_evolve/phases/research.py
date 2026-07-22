@@ -116,6 +116,9 @@ class DirectionScoutPhase:
                         timeout_seconds=self.timeout_seconds,
                         token_budget=self.token_budget,
                         max_budget_usd=self.max_budget_usd,
+                        trace_links={"island": job_island}
+                        if job_island is not None
+                        else {},
                     )
                 )
                 cards_path = result.outputs["direction_cards.json"]
@@ -275,6 +278,11 @@ class StrategyAnalysisPhase:
                         timeout_seconds=self.timeout_seconds,
                         token_budget=self.token_budget,
                         max_budget_usd=self.max_budget_usd,
+                        trace_links={
+                            "island": island,
+                            "candidate_id": finalist.candidate_id,
+                            "parent_id": finalist.parent_id,
+                        },
                     )
                 )
                 cards = normalize_strategy_cards(

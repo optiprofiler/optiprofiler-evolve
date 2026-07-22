@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import signal
 import shutil
+import stat
 import subprocess
 import threading
 import time
@@ -16,6 +18,7 @@ from pathlib import Path
 from typing import Any, BinaryIO, Mapping, Sequence
 
 from .config import SandboxConfig, WorkerConfig, WorkersConfig, plain_data
+from .solver import tree_hash
 
 
 _CHUNK_BYTES = 64 * 1024
@@ -35,6 +38,7 @@ class TracePaths:
     chunks: Path
     invocation: Path
     outcome: Path
+    workspace_evidence: Path
 
 
 @dataclass(frozen=True)
@@ -60,6 +64,10 @@ def prepare_trace(
     sandbox: SandboxConfig,
     context: Mapping[str, object] | None = None,
     secret_values: Mapping[str, str] | None = None,
+    run_id: str | None = None,
+    config_hash: str | None = None,
+    adapter_name: str | None = None,
+    workspace: Path | None = None,
 ) -> TracePaths:
     """Create private controller inputs before an agent adapter starts."""
 
@@ -78,6 +86,7 @@ def prepare_trace(
         chunks=root / "chunks.jsonl",
         invocation=root / "invocation.json",
         outcome=root / "outcome.json",
+        workspace_evidence=root / "workspace.json",
     )
     _write_private_text(input_dir / "prompt.txt", prompt)
     _write_private_json(
@@ -101,7 +110,18 @@ def prepare_trace(
     payload = dict(context or {})
     payload["prompt_sha256"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     _write_private_json(input_dir / "input_artifacts.json", payload)
-    _write_invocation(paths, worker)
+    input_tree = _workspace_tree_evidence(workspace) if workspace is not None else None
+    if input_tree is not None and input_tree["state"] != "safe":
+        raise ValueError("Trace input workspace must be a safe regular-file tree.")
+    _write_invocation(
+        paths,
+        worker,
+        run_id=run_id,
+        config_hash=config_hash,
+        adapter_name=adapter_name,
+        context=payload,
+        input_tree_hash=input_tree["tree_hash"] if input_tree is not None else None,
+    )
     return paths
 
 
@@ -116,7 +136,51 @@ def trace_paths(root: Path) -> TracePaths:
         chunks=root / "chunks.jsonl",
         invocation=root / "invocation.json",
         outcome=root / "outcome.json",
+        workspace_evidence=root / "workspace.json",
     )
+
+
+def record_workspace_evidence(paths: TracePaths, workspace: Path) -> None:
+    """Record the post-invocation tree hash without mutating raw streams."""
+
+    evidence = _workspace_tree_evidence(workspace)
+    payload = {
+        "schema": "trace_workspace/1",
+        "recorded_at": _utc_now(),
+        "output_tree_hash": evidence["tree_hash"],
+        "output_tree_state": evidence["state"],
+    }
+    if paths.workspace_evidence.exists():
+        existing = _read_json_object(paths.workspace_evidence)
+        if (
+            existing.get("schema") != payload["schema"]
+            or existing.get("output_tree_hash") != payload["output_tree_hash"]
+            or existing.get("output_tree_state") != payload["output_tree_state"]
+        ):
+            raise ValueError(f"Trace workspace evidence already differs: {paths.root}")
+        return
+    _write_private_json(paths.workspace_evidence, payload)
+
+
+def _workspace_tree_evidence(root: Path) -> dict[str, str | None]:
+    if not root.is_dir():
+        return {"state": "missing", "tree_hash": None}
+    for current, directories, files in os.walk(root, followlinks=False):
+        for name in (*directories, *files):
+            path = Path(current, name)
+            try:
+                mode = path.lstat().st_mode
+            except OSError:
+                return {"state": "unreadable", "tree_hash": None}
+            if stat.S_ISLNK(mode):
+                return {"state": "unsafe_symlink", "tree_hash": None}
+            if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+                return {"state": "unsafe_special_file", "tree_hash": None}
+    try:
+        digest = tree_hash(root)
+    except OSError:
+        return {"state": "unreadable", "tree_hash": None}
+    return {"state": "safe", "tree_hash": digest}
 
 
 def record_sanitized_command(
@@ -493,35 +557,33 @@ def recover_incomplete_traces(run_dir: Path) -> tuple[Path, ...]:
     """Idempotently mark invocations left without an outcome manifest."""
 
     recovered: list[Path] = []
-    patterns = ("traces/*/invocation.json", "research/traces/*/*/invocation.json")
-    for pattern in patterns:
-        for invocation_path in sorted(run_dir.glob(pattern)):
-            paths = trace_paths(invocation_path.parent)
-            if paths.outcome.exists():
+    for root in trace_roots(run_dir):
+        paths = trace_paths(root)
+        if paths.outcome.exists():
+            continue
+        for path, binary in (
+            (paths.stdout, True),
+            (paths.stderr, True),
+            (paths.chunks, False),
+        ):
+            if path.exists():
                 continue
-            for path, binary in (
-                (paths.stdout, True),
-                (paths.stderr, True),
-                (paths.chunks, False),
-            ):
-                if path.exists():
-                    continue
-                handle = _open_private_binary(path) if binary else _open_private_text(path)
-                handle.close()
-            invocation = _read_json_object(paths.invocation)
-            finalize_trace(
-                paths,
-                state="interrupted",
-                returncode=None,
-                timed_out=False,
-                cancelled=True,
-                termination_reason="controller_interrupted_before_outcome",
-                started_at=str(invocation.get("started_at", _utc_now())),
-                duration_seconds=None,
-                capture_error="controller exited before writing a terminal trace outcome",
-                truncated=True,
-            )
-            recovered.append(paths.root)
+            handle = _open_private_binary(path) if binary else _open_private_text(path)
+            handle.close()
+        invocation = _read_json_object(paths.invocation)
+        finalize_trace(
+            paths,
+            state="interrupted",
+            returncode=None,
+            timed_out=False,
+            cancelled=True,
+            termination_reason="controller_interrupted_before_outcome",
+            started_at=str(invocation.get("started_at", _utc_now())),
+            duration_seconds=None,
+            capture_error="controller exited before writing a terminal trace outcome",
+            truncated=True,
+        )
+        recovered.append(paths.root)
     return tuple(recovered)
 
 
@@ -630,16 +692,34 @@ def _write_private_json_atomic(path: Path, payload: Mapping[str, object]) -> Non
     _set_private_mode(path, 0o600)
 
 
-def _write_invocation(paths: TracePaths, worker: WorkerConfig) -> None:
+def _write_invocation(
+    paths: TracePaths,
+    worker: WorkerConfig,
+    *,
+    run_id: str | None,
+    config_hash: str | None,
+    adapter_name: str | None,
+    context: Mapping[str, object],
+    input_tree_hash: str | None,
+) -> None:
+    join = context.get("join", {})
+    if not isinstance(join, Mapping):
+        raise ValueError("Trace context join metadata must be a mapping.")
     _write_private_json(
         paths.invocation,
         {
-            "schema": "trace_invocation/1",
+            "schema": "trace_invocation/2",
+            "trace_id": secrets.token_hex(16),
             "state": "started",
             "started_at": _utc_now(),
             "controller_pid": os.getpid(),
+            "run_id": run_id,
+            "config_hash": config_hash,
+            "adapter": adapter_name,
             "harness": worker.harness,
             "model": worker.model,
+            "join": dict(join),
+            "input_tree_hash": input_tree_hash,
             "input_files": _input_evidence(paths.input_dir),
         },
     )
@@ -721,6 +801,15 @@ def _harden_trace_parents(directory: Path) -> None:
         if current.name == "traces" or current.parent == current:
             return
         current = current.parent
+
+
+def trace_roots(run_dir: Path) -> tuple[Path, ...]:
+    roots = [path.parent for path in (run_dir / "traces").glob("*/invocation.json")]
+    roots.extend(
+        path.parent
+        for path in (run_dir / "research" / "traces").glob("**/invocation.json")
+    )
+    return tuple(sorted(set(roots)))
 
 
 def _utc_now() -> str:
