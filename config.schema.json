@@ -18,6 +18,9 @@
     "workers": {
       "$ref": "#/$defs/WorkersConfig"
     },
+    "integrity_review": {
+      "$ref": "#/$defs/IntegrityReviewConfig"
+    },
     "sandbox": {
       "$ref": "#/$defs/SandboxConfig"
     },
@@ -27,7 +30,8 @@
   },
   "required": [
     "evaluation",
-    "workers"
+    "workers",
+    "integrity_review"
   ],
   "$defs": {
     "DataConfig": {
@@ -421,6 +425,56 @@
         "harness",
         "model"
       ]
+    },
+    "IntegrityReviewConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "component": {
+          "$ref": "#/$defs/ComponentConfig",
+          "default": {"name": "agent_integrity"}
+        },
+        "worker": {
+          "oneOf": [
+            {"$ref": "#/$defs/WorkerConfig"},
+            {"type": "null"}
+          ],
+          "default": null
+        },
+        "allow_same_model": {
+          "type": "boolean",
+          "default": false
+        },
+        "allow_unsafe_stub": {
+          "type": "boolean",
+          "default": false
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 1
+        },
+        "strict": {
+          "type": "boolean",
+          "default": false
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 600
+        },
+        "token_budget": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "default": 4000
+        },
+        "max_budget_usd": {
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0,
+          "default": null
+        }
+      },
+      "required": ["component"]
     },
     "ToolConfig": {
       "type": "object",

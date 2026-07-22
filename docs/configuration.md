@@ -80,6 +80,18 @@ workers:
     package_install: false
     communication: controller_summary
 
+integrity_review:
+  component:
+    name: agent_integrity
+  worker:
+    harness: claude
+    model: ${OPTIPROFILER_EVOLVE_REVIEW_MODEL}
+    pass_env: [ANTHROPIC_API_KEY]
+  retries: 1
+  strict: false
+  timeout_seconds: 600
+  token_budget: 12000
+
 sandbox:
   backend: docker
   worker_image: optiprofiler-evolve-worker:latest
@@ -130,6 +142,13 @@ primary population-retention and parent-selection score, and uses public fitness
 as a tie-breaker. Hidden is evaluated only once for the fixed
 validation-selected champion. Plan compute budgets accordingly: validation adds
 one canonical benchmark call per surviving attempt.
+
+Every surviving public candidate first passes a mandatory semantic integrity
+review. The reviewer compares the candidate with its parent and inspects a
+credential-redacted mutation transcript. It cannot call the evaluator. A
+quarantined candidate consumes no validation query and cannot enter an island
+archive. Use a distinct reviewer model for research runs; same-model reuse must
+be explicit.
 
 `runtime="auto"` in `evolve(...)` uses the interface suffix: `.py` selects the
 Python adapter and `.m` selects the future MATLAB adapter. It describes the

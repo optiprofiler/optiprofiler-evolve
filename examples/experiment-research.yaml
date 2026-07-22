@@ -61,6 +61,15 @@ workers:
     package_install: false
     communication: island
 
+integrity_review:
+  component:
+    name: agent_integrity
+  allow_same_model: true  # Replace with a distinct worker before paper-grade runs.
+  retries: 1
+  strict: false
+  timeout_seconds: 600
+  token_budget: 12000
+
 sandbox:
   backend: docker
   worker_image: optiprofiler-evolve-worker:latest

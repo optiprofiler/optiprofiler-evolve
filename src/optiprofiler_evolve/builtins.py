@@ -16,6 +16,7 @@ from .phases.research import (
 )
 from .policies.builtin import EarlyStopPolicy, MigrationPolicy
 from .registry import register, registered
+from .review import AgentIntegrityReviewer, UnsafeApproveReviewer
 from .selection import (
     MetricParetoRetention,
     TopBiasedValidationWeightedSampler,
@@ -48,6 +49,8 @@ def register_builtin_components() -> None:
         "top_biased_validation_weighted",
         TopBiasedValidationWeightedSampler,
     )
+    _register("reviewer", "agent_integrity", AgentIntegrityReviewer)
+    _register("reviewer", "unsafe_approve", UnsafeApproveReviewer)
     for action in ("prepare", "explore", "validate", "hidden", "report"):
         _register("phase", action, partial(CorePhase, action=action))
     _register("phase", "direction_scout", DirectionScoutPhase)

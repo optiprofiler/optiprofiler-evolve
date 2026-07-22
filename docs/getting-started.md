@@ -140,7 +140,10 @@ Before increasing model spend:
 After this exploration-only path is stable, switch the YAML to the ordered
 research phases in `examples/experiment-research.yaml`. Do not enable every
 phase merely to test provider connectivity: strategy attribution and
-recombination add extra public and controller-only validation evaluations.
+recombination add extra public and controller-only validation evaluations. A
+mandatory integrity-review agent also runs once for every candidate that
+survives public checks, with one retry on malformed or unavailable output by
+default.
 
 Validation and hidden splits are not exposed through worker tools. Validation
 selects candidates inside the controller. Hidden is evaluated once after one

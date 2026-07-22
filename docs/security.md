@@ -51,6 +51,15 @@
 - On POSIX, timeout and controller cancellation terminate the worker process
   group rather than only the CLI parent. Trace outcome manifests distinguish
   complete, truncated, timed-out, cancelled, and crash-inferred evidence.
+- Every candidate that survives public checks is reviewed by an isolated
+  semantic integrity agent before any validation query. The reviewer has no
+  evaluator, problem manifest, validation/hidden data, network, or mutation
+  capability. Quarantine prevents population admission.
+
+The reviewer has shell, Python, and Git inside its own worker sandbox so it can
+inspect a multi-file solver, but it has no network or evaluation capability.
+It is an independent semantic check, not a stronger sandbox or a formal proof
+that candidate code is harmless.
 
 Each attempt receives a distinct workspace, broker token, container, and
 temporary Docker network, including workers on the same island. Enabling web
@@ -70,9 +79,9 @@ adversarial solver from encoding that information. The alpha release therefore
 assumes research workers optimize the solver rather than attack the scorer.
 
 Before untrusted public execution or paper-grade hidden evaluation, add a
-candidate execution protocol with a narrower callback boundary, a static/runtime
-policy gate, and adversarial regression tests. Final candidate code should also
-be reviewed independently.
+candidate execution protocol with a narrower callback boundary and adversarial
+runtime regression tests. The current reviewer is an independent semantic gate,
+not a substitute for process-level isolation from a hostile solver.
 
 When worker network is enabled for remote model APIs or web search, the current
 Docker bridge provides outbound access. A controlled egress proxy/allowlist is

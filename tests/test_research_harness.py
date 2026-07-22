@@ -450,6 +450,18 @@ class ResearchHarnessTests(unittest.TestCase):
             usage = json.loads((root / "run" / "research" / "validation_usage.json").read_text())
             self.assertGreaterEqual(usage["selection_calls"], 6)
             self.assertEqual(usage["new_evaluations"], 3)
+            for candidate_id in ("bundle-island-0", "bundle-island-1", "combo-001"):
+                self.assertEqual(engine.integrity_reviews[candidate_id].verdict, "approve")
+                self.assertTrue(
+                    (
+                        root
+                        / "run"
+                        / "controller"
+                        / "integrity_reviews"
+                        / candidate_id
+                        / "decision.json"
+                    ).is_file()
+                )
 
     def test_variant_gate_rejects_out_of_scope_and_conflicting_patches(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

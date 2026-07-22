@@ -2,6 +2,10 @@
 
 All examples use the public `evolve(...)` function. They intentionally run one
 small iteration and demonstrate the interface rather than solver quality.
+For convenience they explicitly reuse the mutation model as the mandatory
+integrity reviewer. Paper-grade runs should configure a distinct
+`integrity_review.worker`; every candidate then consumes one mutation call and
+at least one review call.
 
 | Goal | Python file | Config | Required environment |
 |---|---|---|---|

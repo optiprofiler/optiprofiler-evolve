@@ -22,6 +22,8 @@ independent solver workspaces, an anonymous experiment manifest, and two tools:
 `smoke_test` for a small public subset and `evaluate` for all public problems.
 Validation selects one champion inside the controller; hidden problems evaluate
 that fixed champion once and never influence the worker or population loop.
+Every public-gated candidate also passes an independent semantic integrity
+review before validation or population admission.
 
 ## Alpha status
 
@@ -102,7 +104,9 @@ artifacts use opaque problem identifiers.
 Each run keeps the resolved redacted config, exact data manifest, immutable
 reference, candidate snapshots and lineage, worker transcripts, public
 evaluation output, iteration checkpoints, validation selection, hidden evaluation,
-and a materialized `final_solver/` directory. Full research runs also preserve
+and a materialized `final_solver/` directory. Raw stdout/stderr, chunk indexes,
+invocation/outcome manifests, and normalized integrity decisions are retained
+for every mutation worker and reviewer. Full research runs also preserve
 direction cards, per-island source diffs and strategy cards, executable ablation
 matrices, island bundles, recombination conflicts/results, and a challenger
 report under `research/`.

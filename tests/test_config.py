@@ -19,6 +19,10 @@ def minimal_config() -> dict:
             "pool": [{"harness": "codex", "model": "test-model"}],
             "max_parallel": 2,
         },
+        "integrity_review": {
+            "component": {"name": "unsafe_approve"},
+            "allow_unsafe_stub": True,
+        },
         "sandbox": {"backend": "unsafe_local"},
     }
 
@@ -35,6 +39,49 @@ class ConfigTests(unittest.TestCase):
             "top_biased_validation_weighted",
         )
         self.assertEqual(config.evolution.parent_sampler.options["greedy_ratio"], 0.7)
+        self.assertEqual(config.integrity_review.component.name, "unsafe_approve")
+
+    def test_agent_reviewer_requires_a_distinct_model_or_explicit_override(self) -> None:
+        raw = minimal_config()
+        raw["integrity_review"] = {"component": {"name": "agent_integrity"}}
+        with self.assertRaisesRegex(ValueError, "dedicated integrity_review.worker"):
+            load_config(raw)
+
+        raw["integrity_review"]["allow_same_model"] = True
+        config = load_config(raw)
+        self.assertEqual(
+            config.integrity_review.resolved_worker(config.workers).model,
+            "test-model",
+        )
+
+    def test_unsafe_reviewer_requires_double_opt_in(self) -> None:
+        raw = minimal_config()
+        raw["integrity_review"].pop("allow_unsafe_stub")
+        with self.assertRaisesRegex(ValueError, "allow_unsafe_stub=true"):
+            load_config(raw)
+
+    def test_dedicated_reviewer_must_differ_and_its_secrets_are_redacted(self) -> None:
+        raw = minimal_config()
+        raw["integrity_review"] = {
+            "component": {"name": "agent_integrity"},
+            "worker": {
+                "harness": "claude",
+                "model": "review-model",
+                "env": {"ANTHROPIC_API_KEY": "review-secret"},
+            },
+        }
+        config = load_config(raw)
+        self.assertEqual(config.integrity_review.worker.model, "review-model")
+        self.assertEqual(
+            config.redacted_dict()["integrity_review"]["worker"]["env"][
+                "ANTHROPIC_API_KEY"
+            ],
+            "<redacted>",
+        )
+        raw["integrity_review"]["worker"]["harness"] = "codex"
+        raw["integrity_review"]["worker"]["model"] = "test-model"
+        with self.assertRaisesRegex(ValueError, "outside the mutation pool"):
+            load_config(raw)
 
     def test_unknown_key_is_rejected(self) -> None:
         raw = minimal_config()

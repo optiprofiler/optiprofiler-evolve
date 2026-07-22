@@ -192,6 +192,8 @@ class CandidateRecord:
     public_score: float
     validation_score: float
     selection_metrics: MetricBundle | None = None
+    review_verdict: str | None = None
+    review_report: str | None = None
     worker: str | None = None
     guidance: str | None = None
     valid: bool = True

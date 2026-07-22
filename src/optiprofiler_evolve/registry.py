@@ -14,7 +14,16 @@ from typing import Any
 from .config import ComponentConfig
 
 
-_KINDS = ("phase", "step", "policy", "retention", "sampler", "worker", "evaluator")
+_KINDS = (
+    "phase",
+    "step",
+    "policy",
+    "retention",
+    "sampler",
+    "reviewer",
+    "worker",
+    "evaluator",
+)
 _REGISTRIES: dict[str, dict[str, Callable[..., Any]]] = {kind: {} for kind in _KINDS}
 
 
@@ -58,7 +67,10 @@ def build(kind: str, spec: ComponentConfig) -> Any:
     is_instance = (
         spec._factory is not None
         and not inspect.isclass(target)
-        and any(hasattr(target, attribute) for attribute in ("run", "propose", "evaluate"))
+        and any(
+            hasattr(target, attribute)
+            for attribute in ("run", "propose", "evaluate", "review")
+        )
     )
     if is_instance:
         if spec.options:

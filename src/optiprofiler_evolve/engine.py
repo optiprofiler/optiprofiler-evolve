@@ -5,6 +5,7 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import json
+import os
 import random
 import re
 import secrets
@@ -52,6 +53,13 @@ from .provenance import build_run_provenance, coordinate_seed
 from .projections import project_public_events
 from .references import materialize_reference
 from .research import file_hash, read_json_object, safe_relative_path
+from .review import (
+    CandidateReviewer,
+    IntegrityReviewDecision,
+    IntegrityReviewRequest,
+    write_private_review,
+    write_sanitized_transcript,
+)
 from .registry import build, resolve
 from .sandbox import AgentRunResult
 from .selection import MetricSelectionError
@@ -75,6 +83,10 @@ AgentRunner = Callable[..., AgentRunResult]
 
 class _RunCancelled(RuntimeError):
     """Raised after the controller has requested graceful cancellation."""
+
+
+class _IntegrityReviewerUnavailable(RuntimeError):
+    """Raised when strict reviewer availability is part of the run contract."""
 
 
 @dataclass(frozen=True)
@@ -174,6 +186,9 @@ class EvolutionEngine:
         self.parent_sampler: ParentSampler = build(
             "sampler", config.evolution.parent_sampler
         )
+        self.integrity_reviewer: CandidateReviewer = build(
+            "reviewer", config.integrity_review.component
+        )
         self.attempt_history: list[dict[str, Any]] = []
         self.candidates: dict[str, CandidateRecord] = {}
         self.populations: list[list[CandidateRecord]] = []
@@ -188,8 +203,10 @@ class EvolutionEngine:
         self.result: EvolveResult | None = None
         self.direction_assignments: dict[int, dict[str, object]] = {}
         self.variant_handles: dict[str, VariantHandle] = {}
+        self.variant_bases: dict[str, Path] = {}
         self.variant_public: dict[str, EvaluationResult] = {}
         self.variant_validation: dict[str, EvaluationResult] = {}
+        self.integrity_reviews: dict[str, IntegrityReviewDecision] = {}
         self.research_finalists: dict[str, CandidateRecord] = {}
         self.validation_query_count = 0
         self.validation_selection_count = 0
@@ -259,14 +276,160 @@ class EvolutionEngine:
         if self._cancellation_event.is_set():
             raise _RunCancelled("Evolution run cancelled by controller signal.")
 
+    def _review_candidate(
+        self,
+        *,
+        candidate_id: str,
+        candidate: Path,
+        parent: Path,
+        changed: tuple[str, ...],
+        mutation_transcript: Path | None,
+        mutation_worker: WorkerConfig | None,
+    ) -> tuple[IntegrityReviewDecision, Path]:
+        """Run the mandatory semantic gate before any validation query."""
+
+        cached = self.integrity_reviews.get(candidate_id)
+        normalized_root = self.run_dir / "controller" / "integrity_reviews" / candidate_id
+        if cached is not None:
+            return cached, normalized_root / "decision.json"
+
+        transcript = normalized_root / "inputs" / "mutation_transcript.txt"
+        secret_values: dict[str, str] = {}
+        if mutation_worker is not None:
+            secret_values.update(mutation_worker.env)
+            secret_values.update(
+                {
+                    name: os.environ[name]
+                    for name in mutation_worker.pass_env
+                    if name in os.environ
+                }
+            )
+        if mutation_transcript is None:
+            mutation_transcript = normalized_root / "inputs" / "empty_transcript.txt"
+            mutation_transcript.parent.mkdir(parents=True, exist_ok=True)
+            mutation_transcript.write_text(
+                "[controller] no mutation transcript exists for this materialized variant.\n",
+                encoding="utf-8",
+            )
+            mutation_transcript.chmod(0o600)
+        write_sanitized_transcript(
+            mutation_transcript,
+            transcript,
+            secret_values=secret_values,
+        )
+        config = self.config.integrity_review
+        reviewer_worker = config.resolved_worker(self.config.workers)
+        failures: list[str] = []
+        review_scope = {
+            "phase": "explore",
+            "attempt_id": candidate_id,
+            "role": "integrity-reviewer",
+        }
+        self._emit("integrity_review_started", "running", scope=review_scope)
+        for review_attempt in range(1, config.retries + 2):
+            scope = {
+                **review_scope,
+                "job_id": f"{candidate_id}-r{review_attempt:02d}",
+            }
+            self._emit(
+                "integrity_review_attempt_started",
+                "running",
+                scope=scope,
+                data={"review_attempt": review_attempt},
+            )
+            try:
+                decision = self.integrity_reviewer.review(
+                    IntegrityReviewRequest(
+                        candidate_id=candidate_id,
+                        candidate=candidate,
+                        parent=parent,
+                        changed_files=changed,
+                        interface=f"{self.interface.file}:{self.interface.function}",
+                        editable=self.editable,
+                        mutation_transcript=transcript,
+                        reviewer_worker=reviewer_worker,
+                        review_attempt=review_attempt,
+                        timeout_seconds=config.timeout_seconds,
+                        token_budget=config.token_budget,
+                        max_budget_usd=config.max_budget_usd,
+                        run_agent=self.controller_services.run_trusted_agent,
+                    )
+                )
+            except _RunCancelled:
+                raise
+            except Exception as exc:
+                failure = f"{type(exc).__name__}: {exc}"
+                failures.append(failure)
+                self._emit(
+                    "integrity_review_attempt_finished",
+                    "failed",
+                    scope=scope,
+                    data={
+                        "gate": "unavailable",
+                        "review_attempt": review_attempt,
+                        "error": failure,
+                    },
+                )
+                continue
+            attempt_report = normalized_root / f"attempt_{review_attempt:02d}.json"
+            write_private_review(attempt_report, decision)
+            write_private_review(normalized_root / "decision.json", decision)
+            self.integrity_reviews[candidate_id] = decision
+            self._emit(
+                "integrity_review_attempt_finished",
+                "succeeded",
+                scope=scope,
+                data={
+                    "review_attempt": review_attempt,
+                    "verdict": decision.verdict,
+                    "checked": list(decision.checked),
+                    "finding_count": len(decision.findings),
+                    "report": str(attempt_report),
+                },
+            )
+            self._emit(
+                "integrity_review_finished",
+                "succeeded",
+                scope=review_scope,
+                data={
+                    "gate": "approved" if decision.verdict == "approve" else "quarantined"
+                },
+            )
+            return decision, normalized_root / "decision.json"
+
+        decision = IntegrityReviewDecision(
+            verdict="quarantine",
+            checked=(),
+            summary="Integrity reviewer was unavailable after all configured attempts.",
+            reason="reviewer_unavailable",
+        )
+        report = normalized_root / "decision.json"
+        write_private_review(report, decision)
+        self.integrity_reviews[candidate_id] = decision
+        self._emit(
+            "integrity_review_finished",
+            "failed",
+            scope=review_scope,
+            data={"gate": "unavailable" if config.strict else "quarantined"},
+        )
+        if config.strict:
+            raise _IntegrityReviewerUnavailable(
+                "Integrity reviewer was unavailable in strict mode: " + "; ".join(failures)
+            )
+        return decision, report
+
     def run(self) -> EvolveResult:
         self._initialize_run_directory()
         self._cancellation_event.clear()
         self.events = EventWriter(self.run_dir / "events.jsonl")
+        reviewer_worker = self.config.integrity_review.resolved_worker(self.config.workers)
+        provenance_workers = self.config.workers.pool
+        if reviewer_worker is not None and reviewer_worker not in provenance_workers:
+            provenance_workers = (*provenance_workers, reviewer_worker)
         provenance = build_run_provenance(
             self.config,
             worker_adapter=self.worker_adapter,
-            worker_provenance=self.worker_adapter.provenance(self.config.workers.pool),
+            worker_provenance=self.worker_adapter.provenance(provenance_workers),
             evaluator_factory=self.evaluator_factory,
         )
         _write_json(self.run_dir / "resolved_config.json", self.config.redacted_dict())
@@ -497,6 +660,8 @@ class EvolutionEngine:
                     island, attempt_index, parent, worker = futures[future]
                     try:
                         attempts.append(future.result())
+                    except (_RunCancelled, _IntegrityReviewerUnavailable):
+                        raise
                     except Exception as exc:
                         attempts.append(
                             self._failed_attempt(
@@ -728,6 +893,8 @@ class EvolutionEngine:
             self.run_dir / "transcripts" / f"{attempt_id}.jsonl",
         )
         metrics = {key: value for result in results for key, value in result.metrics.items()}
+        review_decision: IntegrityReviewDecision | None = None
+        review_report: Path | None = None
         try:
             if rejected:
                 error = next((result.error for result in reversed(results) if result.error), None)
@@ -735,6 +902,18 @@ class EvolutionEngine:
             # Non-removable safety and controller-only validation gate.
             changed = capabilities.audit_candidate()
             public_score = float(metrics["public_score"])
+            review_decision, review_report = self._review_candidate(
+                candidate_id=attempt_id,
+                candidate=workspace,
+                parent=parent.path,
+                changed=changed,
+                mutation_transcript=outcome.transcript,
+                mutation_worker=worker,
+            )
+            if review_decision.verdict != "approve":
+                raise RuntimeError(
+                    f"integrity_review_quarantine: {review_decision.summary}"
+                )
             if self.evaluator is None:
                 raise RuntimeError("Evaluator is unavailable.")
             validation = self.evaluator.evaluate(
@@ -757,9 +936,13 @@ class EvolutionEngine:
                 public_score=public_score,
                 validation_score=validation.score,
                 selection_metrics=validation.metric_bundle,
+                review_verdict=review_decision.verdict,
+                review_report=str(review_report),
                 worker=f"{worker.harness}:{worker.model}",
                 guidance=_guidance_id(self.direction_assignments.get(island)),
             )
+        except _IntegrityReviewerUnavailable:
+            raise
         except Exception as exc:
             record = CandidateRecord(
                 candidate_id=attempt_id,
@@ -771,6 +954,8 @@ class EvolutionEngine:
                 tree_hash="",
                 public_score=float(metrics.get("public_score", 0.0)),
                 validation_score=0.0,
+                review_verdict=review_decision.verdict if review_decision else None,
+                review_report=str(review_report) if review_report else None,
                 worker=f"{worker.harness}:{worker.model}",
                 guidance=_guidance_id(self.direction_assignments.get(island)),
                 valid=False,
@@ -846,6 +1031,8 @@ class EvolutionEngine:
             "guidance": record.guidance,
             "public_score": record.public_score,
             "validation_score": record.validation_score,
+            "review_verdict": record.review_verdict,
+            "review_report": record.review_report,
             "valid": record.valid,
             "error": record.error,
             "changed_files": list(attempt.changed),
@@ -1127,7 +1314,7 @@ class _EngineControllerServices:
         engine = self.engine
         role = _safe_identifier(job.role, "role")
         job_id = _safe_identifier(job.job_id, "job_id")
-        if not 0 <= job.worker_index < len(engine.config.workers.pool):
+        if job.worker is None and not 0 <= job.worker_index < len(engine.config.workers.pool):
             raise ValueError(f"Agent job worker_index is out of range: {job.worker_index}")
         workspace = engine.run_dir / "research" / "roles" / role / job_id
         if workspace.exists():
@@ -1140,7 +1327,7 @@ class _EngineControllerServices:
         for relative, source in job.inputs.items():
             destination = workspace / safe_relative_path(relative)
             _copy_role_input(Path(source), destination)
-            if relative not in {"seed", "finalist", "parent"}:
+            if relative not in {"seed", "finalist", "parent", "candidate"}:
                 _redact_role_input(destination, replacements)
         validate_tree_safety(
             workspace,
@@ -1155,7 +1342,8 @@ class _EngineControllerServices:
             compilers=False,
         )
         tools.validate()
-        worker = engine.config.workers.pool[job.worker_index]
+        worker = job.worker or engine.config.workers.pool[job.worker_index]
+        worker.validate()
         workers = replace(
             engine.config.workers,
             pool=(worker,),
@@ -1347,6 +1535,7 @@ class _EngineControllerServices:
                 change_hashes=tuple(change_hashes),
             )
             engine.variant_handles[variant_id] = handle
+            engine.variant_bases[variant_id] = base
             _write_json(
                 engine.run_dir / "research" / "variant_manifests" / f"{variant_id}.json",
                 {
@@ -1449,11 +1638,34 @@ class _EngineControllerServices:
         for candidate_id in unique:
             record = engine.candidates.get(candidate_id)
             if record is not None:
+                if not record.valid:
+                    continue
+                if record.candidate_id != "seed" and record.review_verdict != "approve":
+                    continue
                 ranked.append((record.validation_score, record.public_score, candidate_id))
                 continue
             handle = engine.variant_handles.get(candidate_id)
             if handle is None:
                 raise KeyError(f"Validation selection references unknown candidate {candidate_id!r}.")
+            public = engine.variant_public.get(candidate_id)
+            if public is None or not public.success:
+                raise ValueError(
+                    f"Research variant {candidate_id!r} must pass public evaluation "
+                    "before integrity review and validation selection."
+                )
+            base = engine.variant_bases.get(candidate_id)
+            if base is None:
+                raise RuntimeError(f"Research variant {candidate_id!r} has no recorded base tree.")
+            decision, _report = engine._review_candidate(
+                candidate_id=candidate_id,
+                candidate=handle.path,
+                parent=base,
+                changed=changed_files(base, handle.path),
+                mutation_transcript=None,
+                mutation_worker=None,
+            )
+            if decision.verdict != "approve":
+                continue
             result = engine.variant_validation.get(candidate_id)
             if result is None:
                 if engine.evaluator is None:
@@ -1470,7 +1682,6 @@ class _EngineControllerServices:
                 engine.variant_validation[candidate_id] = result
                 engine.validation_query_count += 1
                 new_queries += 1
-            public = engine.variant_public.get(candidate_id)
             ranked.append(
                 (
                     result.score if result.success else 0.0,
@@ -1520,6 +1731,9 @@ class _EngineControllerServices:
         validation = engine.variant_validation.get(handle.variant_id)
         if validation is None or not validation.success:
             raise ValueError("A research finalist must pass controller validation first.")
+        review = engine.integrity_reviews.get(handle.variant_id)
+        if review is None or review.verdict != "approve":
+            raise ValueError("A research finalist must pass integrity review first.")
         public = engine.variant_public.get(handle.variant_id)
         public_score = (
             public.score
@@ -1542,6 +1756,14 @@ class _EngineControllerServices:
             public_score=public_score,
             validation_score=validation.score,
             selection_metrics=validation.metric_bundle,
+            review_verdict=review.verdict,
+            review_report=str(
+                engine.run_dir
+                / "controller"
+                / "integrity_reviews"
+                / handle.variant_id
+                / "decision.json"
+            ),
             worker="controller:research",
         )
         engine.candidates[record.candidate_id] = record

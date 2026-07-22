@@ -228,6 +228,28 @@ class TraceCaptureTests(unittest.TestCase):
             self.assertEqual(terminal["state"], "interrupted")
             self.assertTrue(terminal["truncated"])
 
+    def test_recovery_covers_integrity_reviewer_role_traces(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            worker = WorkerConfig(harness="claude", model="review-model")
+            paths = prepare_trace(
+                root=run_dir
+                / "research"
+                / "traces"
+                / "integrity-reviewer"
+                / "it001-i00-a00-r01",
+                prompt="private review",
+                command=["claude"],
+                worker=worker,
+                workers=WorkersConfig(pool=(worker,)),
+                sandbox=SandboxConfig(backend="unsafe_local"),
+            )
+
+            self.assertEqual(recover_incomplete_traces(run_dir), (paths.root,))
+            terminal = json.loads(paths.outcome.read_text(encoding="utf-8"))
+            self.assertEqual(terminal["state"], "interrupted")
+            self.assertTrue(terminal["cancelled"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,7 @@ from typing import Any
 
 from .config import ComponentConfig, EvolveConfig, plain_data
 from .prompt import WORKER_PROMPT_VERSION
+from .review import REVIEW_PROMPT_VERSION
 from .registry import resolve
 
 
@@ -45,6 +46,9 @@ def build_run_provenance(
         "parent_sampler": _component_table(
             "sampler", (config.evolution.parent_sampler,)
         )[0],
+        "integrity_reviewer": _component_table(
+            "reviewer", (config.integrity_review.component,)
+        )[0],
         "worker": {
             **_callable_identity(worker_adapter),
             **dict(worker_provenance),
@@ -72,7 +76,10 @@ def build_run_provenance(
             ),
         },
         "seed_coordinates": ["seed", "phase", "iteration", "island", "attempt", "component"],
-        "prompt_templates": {"solver_worker": WORKER_PROMPT_VERSION},
+        "prompt_templates": {
+            "solver_worker": WORKER_PROMPT_VERSION,
+            "integrity_reviewer": REVIEW_PROMPT_VERSION,
+        },
     }
 
 

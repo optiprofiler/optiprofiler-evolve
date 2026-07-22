@@ -65,6 +65,7 @@ class AgentJob:
     inputs: Mapping[str, Path] = field(default_factory=dict)
     expected_outputs: tuple[str, ...] = ()
     worker_index: int = 0
+    worker: WorkerConfig | None = None
     tools: ToolConfig | None = None
     timeout_seconds: int | None = None
     token_budget: int | None = None

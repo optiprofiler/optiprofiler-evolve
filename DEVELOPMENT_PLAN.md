@@ -115,6 +115,13 @@ Implementation order for the stabilization pass:
 5. Render the public projection as a local Actions-style workflow/island view
    and export the same vocabulary through a single-job GitHub Actions wrapper.
 
+Items 1-3 are implemented, locally tested, and independently reviewed. Item 3
+includes complete explorer/role/reviewer trace retention, the mandatory
+pre-validation integrity gate, explicit island retention and parent sampling,
+and a scalar-compatible Pareto interface. Work proceeds next to isolation and
+controlled tool/network transport; the Actions-style view remains a projection
+over the same event ledger.
+
 Each item is independently tested and reviewed before work starts on the next
 one. Changes remain inside this repository; OptiProfiler agent-output work is a
 separate dependency and is not part of this implementation pass.

@@ -12,6 +12,7 @@ evolve(...)
          launch configured attempts for every island
          run each private attempt pipeline
            mutate -> audit -> smoke -> public evaluate -> feedback
+         run mandatory independent integrity review
          controller evaluates each surviving candidate on validation
          wait at the iteration barrier
          engine accepts/rejects and ranks each island by validation, then public
@@ -45,8 +46,8 @@ launch more than one attempt through `attempts_per_island`.
 
 ## Extension layers
 
-The package has three workflow slots, two selection slots, and two backend
-adapters:
+The package has three workflow slots, a mandatory reviewer slot, two selection
+slots, and two backend adapters:
 
 | Contract | Purpose | May change population? |
 |---|---|---|
@@ -55,6 +56,7 @@ adapters:
 | `AfterIterationPolicy` | Read an immutable population snapshot and propose kill/migrate/budget/stop edits | No; the engine applies proposals |
 | `RetentionPolicy` | Choose the ordered bounded archive retained by one island | No; the engine validates and applies the choice |
 | `ParentSampler` | Choose one parent from an island archive | No |
+| `CandidateReviewer` | Approve or quarantine a public-gated tree before validation | No |
 | `WorkerAdapter` | Launch a coding worker and collect lifecycle output | No |
 | `Evaluator` | Execute trusted public/validation/hidden benchmark calls | No |
 
@@ -72,6 +74,14 @@ missing native timing in the terminal trace manifest.
 The `budget` field is reserved for a future scheduler. The alpha engine raises
 on a nonempty budget proposal so an apparently successful experiment cannot
 silently ignore a budget policy.
+
+The integrity-review call is not an `AttemptStep`: configuration cannot remove
+or reorder it. Its implementation is replaceable, but the engine always calls
+it inside `_run_attempt`, after deterministic/public checks and immediately
+before the first validation evaluation. Research variants pass the same gate
+before controller validation selection. Reviewer failures retry once by
+default; exhaustion quarantines the candidate unless strict availability was
+requested.
 
 ## State ownership
 

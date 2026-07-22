@@ -1,8 +1,9 @@
 # Agent trace retention
 
-Every explorer worker and trusted research-role agent receives a private trace
-directory. The trace is evidence for later trajectory analysis; it is not a
-second source of workflow truth and it is never part of a public run bundle.
+Every explorer worker, integrity reviewer, and trusted research-role agent
+receives a private trace directory. The trace is evidence for later trajectory
+analysis; it is not a second source of workflow truth and it is never part of a
+public run bundle.
 
 ## Evidence layers
 
@@ -20,8 +21,9 @@ provider output, trace path, evaluation secret, or private filesystem path.
 
 ## Per-invocation layout
 
-Explorer attempts are stored below `traces/<attempt_id>/`. Research-role agents
-use `research/traces/<role>/<job_id>/`. Each directory contains:
+Explorer attempts are stored below `traces/<attempt_id>/`. Integrity reviewers
+and research-role agents use `research/traces/<role>/<job_id>/`; reviewer jobs
+are uniquely keyed by candidate and retry number. Each directory contains:
 
 ```text
 input/
@@ -80,3 +82,9 @@ bytes.
 
 Trace retention is mandatory for research runs. Retention duration, compression,
 and deletion are deployment policies and must not silently truncate a live run.
+Normalized reviewer JSON is stored separately under
+`controller/integrity_reviews/<candidate_id>/`; it complements, rather than
+replaces, the raw reviewer stream.
+The double-opt-in `unsafe_approve` test/ablation component performs no agent
+invocation, so it records only the normalized decision and is excluded from
+agent-trace coverage counts.

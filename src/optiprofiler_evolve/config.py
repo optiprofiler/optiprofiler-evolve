@@ -5,9 +5,10 @@ from __future__ import annotations
 import dataclasses
 import os
 import re
+import types
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Generic, TypeVar, get_args, get_origin, get_type_hints
+from typing import Any, Generic, TypeVar, Union, get_args, get_origin, get_type_hints
 
 import yaml
 
@@ -87,6 +88,10 @@ def _default_parent_sampler() -> ComponentConfig:
         "top_biased_validation_weighted",
         options={"greedy_ratio": 0.7},
     )
+
+
+def _default_integrity_reviewer() -> ComponentConfig:
+    return ComponentConfig("agent_integrity")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -387,6 +392,67 @@ class WorkersConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class IntegrityReviewConfig:
+    """Mandatory semantic gate applied before controller validation."""
+
+    component: ComponentConfig = dataclasses.field(default_factory=_default_integrity_reviewer)
+    worker: WorkerConfig | None = None
+    allow_same_model: bool = False
+    allow_unsafe_stub: bool = False
+    retries: int = 1
+    strict: bool = False
+    timeout_seconds: int = 600
+    token_budget: int | None = 4_000
+    max_budget_usd: float | None = None
+
+    def validate(self, workers: WorkersConfig) -> None:
+        if self.retries < 0:
+            raise ValueError("integrity_review.retries cannot be negative.")
+        if self.timeout_seconds < 1:
+            raise ValueError("integrity_review.timeout_seconds must be positive.")
+        if self.token_budget is not None and self.token_budget < 1:
+            raise ValueError("integrity_review.token_budget must be positive when set.")
+        if self.max_budget_usd is not None and self.max_budget_usd <= 0:
+            raise ValueError("integrity_review.max_budget_usd must be positive when set.")
+        if self.component.name == "unsafe_approve":
+            if not self.allow_unsafe_stub:
+                raise ValueError(
+                    "integrity_review.component=unsafe_approve requires "
+                    "allow_unsafe_stub=true."
+                )
+            return
+        if self.allow_unsafe_stub:
+            raise ValueError(
+                "integrity_review.allow_unsafe_stub is only valid with unsafe_approve."
+            )
+        reviewer = self.worker
+        if reviewer is None:
+            if not self.allow_same_model:
+                raise ValueError(
+                    "A dedicated integrity_review.worker is required unless "
+                    "allow_same_model=true is explicitly set."
+                )
+            reviewer = workers.pool[0]
+        reviewer.validate()
+        mutation_identities = {(item.harness, item.model) for item in workers.pool}
+        if (
+            (reviewer.harness, reviewer.model) in mutation_identities
+            and not self.allow_same_model
+        ):
+            raise ValueError(
+                "The integrity reviewer must use a model outside the mutation pool; "
+                "set allow_same_model=true only for an explicit ablation."
+            )
+
+    def resolved_worker(self, workers: WorkersConfig) -> WorkerConfig | None:
+        """Resolve the separately budgeted reviewer worker after validation."""
+
+        if self.component.name == "unsafe_approve":
+            return None
+        return self.worker or workers.pool[0]
+
+
+@dataclasses.dataclass(frozen=True)
 class SandboxConfig:
     """Coding-agent sandbox settings."""
 
@@ -415,6 +481,9 @@ class EvolveConfig:
     evaluation: EvaluationConfig = dataclasses.field(default_factory=EvaluationConfig)
     evolution: EvolutionConfig = dataclasses.field(default_factory=EvolutionConfig)
     workers: WorkersConfig = dataclasses.field(default_factory=WorkersConfig)
+    integrity_review: IntegrityReviewConfig = dataclasses.field(
+        default_factory=IntegrityReviewConfig
+    )
     sandbox: SandboxConfig = dataclasses.field(default_factory=SandboxConfig)
     workflow: WorkflowConfig = dataclasses.field(default_factory=WorkflowConfig)
 
@@ -440,6 +509,7 @@ class EvolveConfig:
         self.evaluation.validate()
         self.evolution.validate()
         self.workers.validate()
+        self.integrity_review.validate(self.workers)
         self.sandbox.validate()
         self.workflow.validate()
 
@@ -451,6 +521,12 @@ class EvolveConfig:
             worker["env"] = {
                 key: "<redacted>" if _is_secret_name(key) else value
                 for key, value in worker["env"].items()
+            }
+        reviewer = result["integrity_review"].get("worker")
+        if reviewer is not None:
+            reviewer["env"] = {
+                key: "<redacted>" if _is_secret_name(key) else value
+                for key, value in reviewer["env"].items()
             }
         return result
 
@@ -637,6 +713,9 @@ def _from_mapping(cls: type[_T], raw: Mapping[str, Any], path: str) -> _T:
         annotation = hints[name]
         nested = _nested_dataclass(annotation)
         if nested is not None:
+            if value is None and type(None) in get_args(annotation):
+                kwargs[name] = None
+                continue
             if not isinstance(value, Mapping):
                 raise TypeError(f"{path}.{name} must be a mapping.")
             kwargs[name] = _from_mapping(nested, value, f"{path}.{name}")
@@ -662,6 +741,10 @@ def _from_mapping(cls: type[_T], raw: Mapping[str, Any], path: str) -> _T:
 def _nested_dataclass(annotation: Any) -> type[Any] | None:
     if isinstance(annotation, type) and dataclasses.is_dataclass(annotation):
         return annotation
+    if get_origin(annotation) in {types.UnionType, Union}:
+        for option in get_args(annotation):
+            if isinstance(option, type) and dataclasses.is_dataclass(option):
+                return option
     return None
 
 

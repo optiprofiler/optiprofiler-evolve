@@ -112,6 +112,34 @@ Codex profile under its own `CODEX_HOME`. The default image uses an ephemeral
 home and deliberately does not inherit host Codex profiles. Prefer explicit
 provider `args` for portable experiment configs.
 
+## Integrity review
+
+The semantic integrity gate is mandatory and runs after public checks but before
+any validation query or population admission. The default implementation uses a
+separate coding-agent invocation with no evaluation broker, network, problem
+manifest, population, validation data, or hidden data. It sees sanitized copies
+of the parent, candidate, changed-file list, solver contract, and mutation
+transcript.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `integrity_review.component.name` | registered reviewer name | `agent_integrity` | Reviewer implementation. `unsafe_approve` is restricted to explicit tests/ablations. |
+| `integrity_review.component.options` | object | `{}` | Constructor options for an owner-supplied reviewer. |
+| `integrity_review.worker` | worker mapping or `null` | `null` | Dedicated reviewer worker. Required unless same-model reuse is explicitly allowed. |
+| `integrity_review.allow_same_model` | boolean | `false` | Permit reuse of the first mutation worker identity. This is an explicit ablation, not the recommended research setup. |
+| `integrity_review.allow_unsafe_stub` | boolean | `false` | Required second opt-in when `component.name` is `unsafe_approve`. |
+| `integrity_review.retries` | nonnegative integer | `1` | Additional attempts after malformed output or reviewer unavailability. |
+| `integrity_review.strict` | boolean | `false` | Abort the run when all reviewer attempts are unavailable. Evidence-backed quarantine still rejects only that candidate. |
+| `integrity_review.timeout_seconds` | positive integer | `600` | Wall-time limit for one reviewer invocation. |
+| `integrity_review.token_budget` | positive integer or `null` | `4000` | Reviewer-specific advisory token budget. |
+| `integrity_review.max_budget_usd` | positive number or `null` | `null` | Reviewer-specific Claude Code cost cap. |
+
+The nested `integrity_review.worker` accepts the same fields as
+`workers.pool[]`: `harness`, `model`, `weight`, `profile`, `args`, `env`, and
+`pass_env`. When `allow_same_model` is false, its harness/model identity must not
+appear in the mutation pool. Every review attempt retains a complete private
+trace under `research/traces/integrity-reviewer/`.
+
 ## Worker tools
 
 | Field | Type | Default | Meaning |

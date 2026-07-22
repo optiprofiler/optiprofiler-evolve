@@ -34,8 +34,8 @@ changed deliberately with matching tests.
 ## 4. Extension contracts
 
 The supported extension slots are `Phase`, `AttemptStep`,
-`AfterIterationPolicy`, `RetentionPolicy`, `ParentSampler`, `WorkerAdapter`, and
-`Evaluator`.
+`AfterIterationPolicy`, `RetentionPolicy`, `ParentSampler`, `CandidateReviewer`,
+`WorkerAdapter`, and `Evaluator`.
 
 - A trusted custom component can be supplied directly without editing framework
   files.
@@ -59,6 +59,9 @@ The supported extension slots are `Phase`, `AttemptStep`,
 - Retention and parent sampling are read-only proposals over one bounded island
   archive. They cannot admit candidates, change lineage, exceed capacity, or
   bypass controller validation.
+- The semantic integrity gate is a non-removable engine operation after public
+  checks and before every validation query. Its reviewer implementation is
+  replaceable; an unsafe approval stub requires explicit double opt-in.
 
 ## 5. Trust and isolation
 
@@ -68,6 +71,9 @@ The supported extension slots are `Phase`, `AttemptStep`,
   population state, validation/hidden splits, or the full config.
 - Scout and analyst roles receive sanitized file copies and no evaluation
   broker. Validation selection returns IDs, never validation values.
+- Integrity reviewers receive only sanitized parent/candidate trees, edit
+  metadata, and the mutation transcript. They receive no evaluator, problem
+  manifest, population state, validation/hidden data, or network access.
 - Workers cannot mount OptiProfiler/problem-library source, the immutable
   reference, hidden data, Docker socket, host home, or sibling repositories.
 - The engine's final edit-scope, tree, interface, and candidate-safety gate is
@@ -85,7 +91,8 @@ Every run records:
 - coordinate-derived random seeds using `(seed, phase, iteration, island,
   attempt, component)`;
 - candidate snapshots, lineage, checkpoints, evaluation artifacts, and worker
-  transcripts.
+  transcripts;
+- normalized integrity decisions and complete traces for every reviewer attempt.
 - research prompt-template versions, direction/strategy schemas, variant base
   and patch hashes, validation query counts, and rejected materializations.
 

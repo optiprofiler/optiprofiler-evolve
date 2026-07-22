@@ -15,6 +15,9 @@
 - Make island retention and parent sampling explicit registered components while
   preserving the seeded legacy default, and add validated controller-only metric
   bundles plus scalar-compatible Pareto retention.
+- Add a mandatory pre-validation semantic integrity reviewer with strict JSON
+  evidence, retry/quarantine behavior, separate model budgets, and complete
+  private reviewer traces.
 - Keep remote model-API transport enabled for strategy-analysis agents while
   leaving their web-search tools disabled by default.
 - Preserve nested component options as structured JSON in provenance and run

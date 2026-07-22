@@ -53,6 +53,12 @@ workers:
     network: true
     communication: none
 
+integrity_review:
+  component:
+    name: agent_integrity
+  allow_same_model: true  # Quick-start only; use a distinct reviewer model for studies.
+  retries: 1
+
 sandbox:
   backend: docker
   worker_image: optiprofiler-evolve-worker:latest
