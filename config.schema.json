@@ -302,6 +302,17 @@
           "type": "integer",
           "minimum": 1,
           "default": 1
+        },
+        "retention": {
+          "$ref": "#/$defs/ComponentConfig",
+          "default": {"name": "validation_lexicographic"}
+        },
+        "parent_sampler": {
+          "$ref": "#/$defs/ComponentConfig",
+          "default": {
+            "name": "top_biased_validation_weighted",
+            "options": {"greedy_ratio": 0.7}
+          }
         }
       }
     },

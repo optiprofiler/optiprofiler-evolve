@@ -78,6 +78,10 @@ normalization, and other identity-sensitive fields.
 | `evolution.migration_interval` | nonnegative integer | `2` | Champion ring-migration interval; `0` disables migration. |
 | `evolution.random_seed` | integer | `0` | Reproducible controller sampling seed. |
 | `evolution.finalists_per_island` | positive integer | `1` | Validation-ranked candidates per island considered when selecting one champion. |
+| `evolution.retention.name` | registered retention name | `validation_lexicographic` | Bounded island-archive retention strategy. `metric_pareto` enables multi-objective research variants. |
+| `evolution.retention.options` | object | `{}` | Constructor options for the retention strategy, such as Pareto objectives and epsilon. |
+| `evolution.parent_sampler.name` | registered sampler name | `top_biased_validation_weighted` | Parent selection strategy applied to the retained island archive. |
+| `evolution.parent_sampler.options` | object | `{"greedy_ratio": 0.7}` | Constructor options for the parent sampler. |
 
 `finalists_per_island` cannot exceed `population_per_island`.
 

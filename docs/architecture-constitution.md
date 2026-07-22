@@ -34,7 +34,8 @@ changed deliberately with matching tests.
 ## 4. Extension contracts
 
 The supported extension slots are `Phase`, `AttemptStep`,
-`AfterIterationPolicy`, `WorkerAdapter`, and `Evaluator`.
+`AfterIterationPolicy`, `RetentionPolicy`, `ParentSampler`, `WorkerAdapter`, and
+`Evaluator`.
 
 - A trusted custom component can be supplied directly without editing framework
   files.
@@ -55,6 +56,9 @@ The supported extension slots are `Phase`, `AttemptStep`,
 - A research phase must not become a second engine. It may propose file-backed
   artifacts and call these services; only the engine writes candidate and
   population state.
+- Retention and parent sampling are read-only proposals over one bounded island
+  archive. They cannot admit candidates, change lineage, exceed capacity, or
+  bypass controller validation.
 
 ## 5. Trust and isolation
 

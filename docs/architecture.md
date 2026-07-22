@@ -45,13 +45,16 @@ launch more than one attempt through `attempts_per_island`.
 
 ## Extension layers
 
-The package has three orchestration slots and two backend adapters:
+The package has three workflow slots, two selection slots, and two backend
+adapters:
 
 | Contract | Purpose | May change population? |
 |---|---|---|
 | `Phase` | One ordered run-level stage with named `requires` and `provides` artifacts | Only through an engine-owned core operation |
 | `AttemptStep` | Mutate, inspect, or evaluate one private candidate attempt | No |
 | `AfterIterationPolicy` | Read an immutable population snapshot and propose kill/migrate/budget/stop edits | No; the engine applies proposals |
+| `RetentionPolicy` | Choose the ordered bounded archive retained by one island | No; the engine validates and applies the choice |
+| `ParentSampler` | Choose one parent from an island archive | No |
 | `WorkerAdapter` | Launch a coding worker and collect lifecycle output | No |
 | `Evaluator` | Execute trusted public/validation/hidden benchmark calls | No |
 
@@ -85,6 +88,11 @@ Candidate records retain their origin island as immutable lineage. In an
 `IterationView`, current island membership is the index of the outer
 `populations` tuple; migration deliberately does not rewrite origin metadata.
 
+Retention and parent sampling are separate registered components. Their exact
+identity and options are recorded in provenance. The default components are
+golden-tested against the former in-engine implementation; research variants do
+not silently change the baseline experiment.
+
 Mandatory edit-scope and candidate-safety checks remain in the engine even when
 the optional `static_audit` evidence step is removed for an ablation.
 
@@ -101,6 +109,7 @@ the optional `static_audit` evidence step is removed for an ablation.
 | `evaluation.py`, `broker.py` | Evaluator adapter and bounded public worker tools |
 | `solver.py`, `data.py` | Solver tree checks and immutable problem splits |
 | `events.py`, `provenance.py`, `viewers.py` | Append-only events, reproducibility evidence, derived local views |
+| `selection.py` | Bounded island-archive retention, parent sampling, and Pareto variants |
 | `experiments.py` | Repeated seeded ablation matrices over frozen configs |
 | `research.py`, `phases/research.py` | Versioned scout/strategy evidence and optional research phases |
 

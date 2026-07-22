@@ -12,6 +12,9 @@
 - Add trace invocation/outcome manifests, process-group timeout cleanup,
   cooperative SIGINT/SIGTERM cancellation, idempotent interrupted-run recovery,
   and a controller-owned fallback for injected worker adapters.
+- Make island retention and parent sampling explicit registered components while
+  preserving the seeded legacy default, and add validated controller-only metric
+  bundles plus scalar-compatible Pareto retention.
 - Keep remote model-API transport enabled for strategy-analysis agents while
   leaving their web-search tools disabled by default.
 - Preserve nested component options as structured JSON in provenance and run

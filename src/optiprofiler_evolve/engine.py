@@ -36,9 +36,11 @@ from .protocols import (
     ControllerServices,
     Evaluator,
     IterationView,
+    ParentSampler,
     Phase,
     PhaseContext,
     PopulationEdit,
+    RetentionPolicy,
     StepResult,
     WorkerAdapter,
     WorkerOutcome,
@@ -52,6 +54,7 @@ from .references import materialize_reference
 from .research import file_hash, read_json_object, safe_relative_path
 from .registry import build, resolve
 from .sandbox import AgentRunResult
+from .selection import MetricSelectionError
 from .solver import (
     InterfaceSpec,
     changed_files,
@@ -166,6 +169,10 @@ class EvolutionEngine:
         )
         self.after_iteration: tuple[AfterIterationPolicy, ...] = tuple(
             build("policy", spec) for spec in config.workflow.after_iteration
+        )
+        self.retention: RetentionPolicy = build("retention", config.evolution.retention)
+        self.parent_sampler: ParentSampler = build(
+            "sampler", config.evolution.parent_sampler
         )
         self.attempt_history: list[dict[str, Any]] = []
         self.candidates: dict[str, CandidateRecord] = {}
@@ -414,6 +421,7 @@ class EvolutionEngine:
             tree_hash=tree_hash(seed_path),
             public_score=seed_public.score,
             validation_score=seed_validation.score,
+            selection_metrics=seed_validation.metric_bundle,
         )
         self.candidates[seed.candidate_id] = seed
         self.populations = [[seed] for _ in range(self.config.evolution.islands)]
@@ -748,6 +756,7 @@ class EvolutionEngine:
                 tree_hash=tree_hash(snapshot),
                 public_score=public_score,
                 validation_score=validation.score,
+                selection_metrics=validation.metric_bundle,
                 worker=f"{worker.harness}:{worker.model}",
                 guidance=_guidance_id(self.direction_assignments.get(island)),
             )
@@ -804,6 +813,28 @@ class EvolutionEngine:
 
     def _accept_and_record(self, attempt: _Attempt) -> None:
         record = attempt.record
+        accepted = False
+        if attempt.worker_outcome.cancelled and record.valid:
+            record = replace(
+                record,
+                valid=False,
+                error="cancelled_candidate_not_admitted",
+            )
+        if record.valid:
+            population = [*self.populations[record.island], record]
+            try:
+                retained = self._trim_population(population)
+            except MetricSelectionError as exc:
+                record = replace(
+                    record,
+                    valid=False,
+                    error=f"metric_incomplete: {exc}",
+                )
+            else:
+                self.populations[record.island] = retained
+                accepted = record.candidate_id in {
+                    item.candidate_id for item in retained
+                }
         self.candidates[record.candidate_id] = record
         summary = {
             "attempt_id": record.attempt_id,
@@ -839,14 +870,6 @@ class EvolutionEngine:
         }
         self.attempt_history.append(summary)
         _append_json(self.run_dir / "attempts.jsonl", summary)
-        accepted = False
-        if record.valid:
-            population = self.populations[record.island]
-            population.append(record)
-            self.populations[record.island] = self._trim_population(population)
-            accepted = record.candidate_id in {
-                item.candidate_id for item in self.populations[record.island]
-            }
         self._emit(
             "attempt_finished",
             "succeeded" if record.valid else "failed",
@@ -899,27 +922,29 @@ class EvolutionEngine:
         self, population: list[CandidateRecord], rng: random.Random
     ) -> CandidateRecord:
         ordered = self._trim_population(population)
-        if len(ordered) == 1 or rng.random() < 0.7:
-            return ordered[0]
-        weights = [max(record.validation_score, 1e-6) for record in ordered]
-        return rng.choices(ordered, weights=weights, k=1)[0]
+        selected = self.parent_sampler.select(tuple(ordered), rng)
+        allowed = {record.candidate_id: record for record in ordered}
+        if selected.candidate_id not in allowed:
+            raise RuntimeError("Parent sampler returned a candidate outside the island archive.")
+        return allowed[selected.candidate_id]
 
     def _select_worker(self, rng: random.Random) -> WorkerConfig:
         weighted = [worker for worker in self.config.workers.pool for _ in range(worker.weight)]
         return rng.choice(weighted)
 
     def _trim_population(self, population: list[CandidateRecord]) -> list[CandidateRecord]:
-        unique = {record.candidate_id: record for record in population}
-        ordered = sorted(
-            unique.values(),
-            key=lambda record: (
-                -record.validation_score,
-                -record.public_score,
-                -record.iteration,
-                record.candidate_id,
-            ),
-        )
-        return ordered[: self.config.evolution.population_per_island]
+        capacity = self.config.evolution.population_per_island
+        available = {record.candidate_id: record for record in population}
+        retained = self.retention.retain(tuple(population), capacity)
+        ids = [record.candidate_id for record in retained]
+        if len(ids) != len(set(ids)):
+            raise RuntimeError("Retention policy returned duplicate candidate ids.")
+        if len(ids) > capacity:
+            raise RuntimeError("Retention policy exceeded the island archive capacity.")
+        unknown = sorted(set(ids).difference(available))
+        if unknown:
+            raise RuntimeError(f"Retention policy returned unknown candidates: {unknown!r}")
+        return [available[candidate_id] for candidate_id in ids]
 
     def _fixed_finalists(
         self, populations: list[list[CandidateRecord]]
@@ -1516,6 +1541,7 @@ class _EngineControllerServices:
             tree_hash=handle.tree_hash,
             public_score=public_score,
             validation_score=validation.score,
+            selection_metrics=validation.metric_bundle,
             worker="controller:research",
         )
         engine.candidates[record.candidate_id] = record

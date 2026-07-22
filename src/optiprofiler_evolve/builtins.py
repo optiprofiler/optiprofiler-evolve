@@ -16,6 +16,11 @@ from .phases.research import (
 )
 from .policies.builtin import EarlyStopPolicy, MigrationPolicy
 from .registry import register, registered
+from .selection import (
+    MetricParetoRetention,
+    TopBiasedValidationWeightedSampler,
+    ValidationLexicographicRetention,
+)
 from .steps.builtin import (
     FeedbackStep,
     MutateStep,
@@ -36,6 +41,13 @@ def register_builtin_components() -> None:
     _register("step", "feedback", FeedbackStep)
     _register("policy", "migration", MigrationPolicy)
     _register("policy", "early_stop", EarlyStopPolicy)
+    _register("retention", "validation_lexicographic", ValidationLexicographicRetention)
+    _register("retention", "metric_pareto", MetricParetoRetention)
+    _register(
+        "sampler",
+        "top_biased_validation_weighted",
+        TopBiasedValidationWeightedSampler,
+    )
     for action in ("prepare", "explore", "validate", "hidden", "report"):
         _register("phase", action, partial(CorePhase, action=action))
     _register("phase", "direction_scout", DirectionScoutPhase)

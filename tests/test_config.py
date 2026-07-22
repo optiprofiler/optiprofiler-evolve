@@ -29,6 +29,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.evolution.islands, 2)
         self.assertEqual(config.workers.pool[0].harness, "codex")
         self.assertEqual(config.data.problem_names, ("P1", "P2", "P3", "P4"))
+        self.assertEqual(config.evolution.retention.name, "validation_lexicographic")
+        self.assertEqual(
+            config.evolution.parent_sampler.name,
+            "top_biased_validation_weighted",
+        )
+        self.assertEqual(config.evolution.parent_sampler.options["greedy_ratio"], 0.7)
 
     def test_unknown_key_is_rejected(self) -> None:
         raw = minimal_config()

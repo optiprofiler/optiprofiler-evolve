@@ -122,6 +122,8 @@ report under `research/`.
   compatibility, credential mapping, agent-mode probes, and search behavior.
 - [Agent trace retention](docs/traces.md): private raw evidence, readable
   transcripts, lifecycle events, and public projections.
+- [Island archives and selection](docs/selection.md): default retention and
+  sampling, metric bundles, and explicit Pareto variants.
 - [JSON Schema](config.schema.json): editor completion and structural validation.
 - [Examples](examples/README.md): Claude, Codex, and multi-file repository inputs.
 - [Architecture](docs/architecture.md): execution flow and module boundaries.

@@ -41,6 +41,10 @@ def build_run_provenance(
         "phases": _component_table("phase", config.workflow.phases),
         "attempt_steps": _component_table("step", config.workflow.attempt_steps),
         "after_iteration": _component_table("policy", config.workflow.after_iteration),
+        "retention": _component_table("retention", (config.evolution.retention,))[0],
+        "parent_sampler": _component_table(
+            "sampler", (config.evolution.parent_sampler,)
+        )[0],
         "worker": {
             **_callable_identity(worker_adapter),
             **dict(worker_provenance),

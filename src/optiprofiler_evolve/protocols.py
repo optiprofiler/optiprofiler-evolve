@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from random import Random
 from threading import Event
 from typing import Any, Protocol, TYPE_CHECKING
 
@@ -232,6 +233,30 @@ class AfterIterationPolicy(Protocol):
     name: str
 
     def propose(self, view: IterationView) -> PopulationEdit: ...
+
+
+class RetentionPolicy(Protocol):
+    """Choose the bounded archive retained by one island."""
+
+    name: str
+
+    def retain(
+        self,
+        candidates: Sequence[CandidateRecord],
+        capacity: int,
+    ) -> tuple[CandidateRecord, ...]: ...
+
+
+class ParentSampler(Protocol):
+    """Choose one parent from an already ordered island archive."""
+
+    name: str
+
+    def select(
+        self,
+        population: Sequence[CandidateRecord],
+        rng: Random,
+    ) -> CandidateRecord: ...
 
 
 @dataclass(frozen=True)

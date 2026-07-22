@@ -14,7 +14,7 @@ from typing import Any
 from .config import ComponentConfig
 
 
-_KINDS = ("phase", "step", "policy", "worker", "evaluator")
+_KINDS = ("phase", "step", "policy", "retention", "sampler", "worker", "evaluator")
 _REGISTRIES: dict[str, dict[str, Callable[..., Any]]] = {kind: {} for kind in _KINDS}
 
 

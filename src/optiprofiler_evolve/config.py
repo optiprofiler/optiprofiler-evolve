@@ -78,6 +78,17 @@ def _default_after_iteration() -> tuple[ComponentConfig, ...]:
     return (ComponentConfig("migration"),)
 
 
+def _default_retention() -> ComponentConfig:
+    return ComponentConfig("validation_lexicographic")
+
+
+def _default_parent_sampler() -> ComponentConfig:
+    return ComponentConfig(
+        "top_biased_validation_weighted",
+        options={"greedy_ratio": 0.7},
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class WorkflowConfig:
     """Ordered, bounded extension slots; deliberately not a DAG language."""
@@ -262,6 +273,8 @@ class EvolutionConfig:
     migration_interval: int = 2
     random_seed: int = 0
     finalists_per_island: int = 1
+    retention: ComponentConfig = dataclasses.field(default_factory=_default_retention)
+    parent_sampler: ComponentConfig = dataclasses.field(default_factory=_default_parent_sampler)
 
     @property
     def rounds(self) -> int:
