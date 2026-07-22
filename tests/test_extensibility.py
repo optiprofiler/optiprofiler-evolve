@@ -210,6 +210,8 @@ class ExtensibilityTests(unittest.TestCase):
             self.assertFalse({"population", "validation", "hidden", "config"} & InspectStep.seen)
             self.assertTrue((root / "run" / "status.html").is_file())
             self.assertTrue((root / "run" / "report.html").is_file())
+            self.assertTrue((root / "run" / "public_events.jsonl").is_file())
+            self.assertTrue((root / "run" / "public_run_state.json").is_file())
 
     def test_provenance_and_events_share_attempt_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -278,6 +280,14 @@ class ExtensibilityTests(unittest.TestCase):
             self.assertNotIn("fetch(", status)
             self.assertIn('http-equiv="refresh"', status)
             self.assertIn("mutate:succeeded", status)
+            report = (root / "run" / "report.html").read_text(encoding="utf-8")
+            self.assertIn("public_events.jsonl", report)
+            self.assertNotIn('href="events.jsonl"', report)
+            public_events = (root / "run" / "public_events.jsonl").read_text(
+                encoding="utf-8"
+            )
+            self.assertNotIn("validation_score", public_events)
+            self.assertNotIn("source_file_hash", public_events)
 
     def test_engine_safety_gate_survives_static_audit_ablation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

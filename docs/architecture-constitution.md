@@ -88,13 +88,16 @@ components.
 
 - `events.jsonl` is append-only and has one writer. Every event has a sequence,
   timestamp, kind, scope, status, and data payload.
+- `events.jsonl` is controller-private. A centralized kind-and-field allowlist
+  derives `public_events.jsonl`; unknown kinds and fields are withheld by
+  default. No renderer or exporter performs its own ad hoc redaction.
 - `attempt_id` joins step events, worker transcripts, candidate records, and
   evaluation artifacts.
 - Status values are `pending`, `running`, `succeeded`, `failed`, `skipped`, or
   `cancelled`.
-- `run_state.json`, `status.html`, final reports, GitHub Actions summaries, and
-  future trace formats are projections. They never become competing state
-  stores.
+- `public_run_state.json`, `status.html`, shareable reports, GitHub Actions
+  summaries, and future public formats consume only the sanitized event
+  projection. They never become competing state stores.
 - The built-in local status page is static and server-free. GitHub Actions is an
   optional launcher/exporter, not the runtime scheduler.
 

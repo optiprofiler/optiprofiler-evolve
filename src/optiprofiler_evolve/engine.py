@@ -44,6 +44,7 @@ from .protocols import (
     VariantRequest,
 )
 from .provenance import build_run_provenance, coordinate_seed
+from .projections import project_public_events
 from .references import materialize_reference
 from .research import file_hash, read_json_object, safe_relative_path
 from .registry import build, resolve
@@ -197,7 +198,9 @@ class EvolutionEngine:
                 data={"best_candidate_id": self.result.best_candidate_id},
             )
             self._refresh_status()
-            render_final_report(self.run_dir / "events.jsonl", self.run_dir / "report.html")
+            render_final_report(
+                self.run_dir / "public_events.jsonl", self.run_dir / "report.html"
+            )
             return self.result
         except Exception as exc:
             self._emit(
@@ -981,7 +984,9 @@ class EvolutionEngine:
         if self.events is None:
             return
         self.events.flush()
-        render_status(self.run_dir / "events.jsonl", self.run_dir / "status.html")
+        public_events = self.run_dir / "public_events.jsonl"
+        project_public_events(self.run_dir / "events.jsonl", public_events)
+        render_status(public_events, self.run_dir / "status.html")
 
 
 class _EngineControllerServices:

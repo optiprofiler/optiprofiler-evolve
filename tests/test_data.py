@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -51,6 +52,10 @@ class DataPlanTests(unittest.TestCase):
         self.assertNotIn("PUBLIC", visible)
         self.assertIn("HIDDEN", trusted)
         self.assertIn("VALIDATION", trusted)
+        public_manifest = json.loads(visible)
+        self.assertEqual(public_manifest["experiment"], plan.manifest_hash[:12])
+        self.assertNotIn("library", public_manifest)
+        self.assertNotIn("manifest_hash", public_manifest)
 
     def test_explicit_smoke_must_stay_inside_public(self) -> None:
         config = DataConfig(

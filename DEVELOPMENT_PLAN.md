@@ -100,3 +100,21 @@ task framework, and no new subsystem without a tested responsibility boundary.
   engine-owned safety gate;
 - require a new trusted component to need no framework-file edits, and a new
   built-in component to need only its implementation, registry entry, and test.
+
+Implementation order for the stabilization pass:
+
+1. Separate the controller-only event ledger from a centralized default-deny
+   public projection, and remove provider/problem-library disclosures from the
+   worker surface.
+2. Preserve every provider-delivered worker/role byte incrementally, with
+   immutable inputs, manifests, crash recovery, and derived readable traces.
+3. Add the mandatory independent reviewer gate and explicit
+   retention/sampling strategy seams, including scalar-compatible Pareto
+   policies.
+4. Complete worker/evaluator/network isolation and controlled research tools.
+5. Render the public projection as a local Actions-style workflow/island view
+   and export the same vocabulary through a single-job GitHub Actions wrapper.
+
+Each item is independently tested and reviewed before work starts on the next
+one. Changes remain inside this repository; OptiProfiler agent-output work is a
+separate dependency and is not part of this implementation pass.

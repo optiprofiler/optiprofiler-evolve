@@ -3,10 +3,12 @@ from __future__ import annotations
 import tempfile
 import threading
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import patch
 
 from optiprofiler_evolve.events import EventWriter, read_events, rebuild_run_state
+from optiprofiler_evolve.projections import project_public_events
 
 
 class EventLedgerTests(unittest.TestCase):
@@ -128,6 +130,52 @@ class EventLedgerTests(unittest.TestCase):
             state = rebuild_run_state(path)
             self.assertEqual(state["phases"]["explore"], "running")
             self.assertEqual(len(state["attempts"]["it001-i00-a00"]["steps"]), 1)
+
+    def test_public_projection_is_default_deny_by_kind_and_field(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "events.jsonl"
+            destination = root / "public_events.jsonl"
+            writer = EventWriter(source)
+            writer.emit(
+                "attempt_finished",
+                "succeeded",
+                scope={
+                    "phase": "explore",
+                    "attempt_id": "it001-i00-a00",
+                    "private_scope": "SECRET_SCOPE",
+                },
+                data={
+                    "candidate_id": "it001-i00-a00",
+                    "public_score": 0.75,
+                    "validation_score": 0.99,
+                    "transcript": "/private/SECRET_TRACE",
+                    "error": "SECRET_ERROR",
+                },
+            )
+            writer.emit(
+                "future_private_event",
+                "succeeded",
+                data={"payload": "SECRET_FUTURE"},
+            )
+            writer.close()
+
+            projected = project_public_events(source, destination)
+
+            self.assertEqual(len(projected), 1)
+            serialized = destination.read_text(encoding="utf-8")
+            self.assertIn("public_score", serialized)
+            for secret in (
+                "validation_score",
+                "SECRET_TRACE",
+                "SECRET_ERROR",
+                "SECRET_SCOPE",
+                "SECRET_FUTURE",
+            ):
+                self.assertNotIn(secret, serialized)
+            event = json.loads(serialized)
+            self.assertEqual(event["seq"], 1)
+            self.assertEqual(event["scope"]["attempt_id"], "it001-i00-a00")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,13 @@
 - Validation/hidden names, split membership, alias mapping, and the immutable
   reference live only under the controller directory. Worker-visible benchmark
   files use per-run opaque problem identifiers.
+- The worker manifest contains only an opaque experiment identifier, public and
+  smoke counts, and a budget note. It does not disclose the problem-library
+  adapter, split hash, reference identity, scoring formula, validation score, or
+  hidden score.
+- Worker evaluation responses expose one fitness value, its direction, problem
+  count, and artifact handles. Candidate/reference raw scores remain
+  controller-only.
 - Public evaluation requests use a private file queue. The controller does not
   expose a host port and does not write evaluation output through
   worker-controlled paths.
@@ -34,6 +41,10 @@
   replaced with opaque IDs, and matching binary artifacts are withheld and
   counted in `redaction_report.json`. The completed directory is then published
   atomically into the worker's read-only artifact mount.
+- The append-only `events.jsonl` ledger is controller-private. Shareable status
+  and report files are rebuilt from a centralized default-deny projection;
+  unknown event kinds, fields, errors, paths, model identities, validation
+  scores, prompts, and traces are withheld automatically.
 
 Each attempt receives a distinct workspace, broker token, container, and
 temporary Docker network, including workers on the same island. Enabling web

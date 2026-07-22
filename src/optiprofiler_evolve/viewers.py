@@ -12,7 +12,7 @@ from .events import read_events, write_run_state
 def render_status(events_path: Path, destination: Path) -> None:
     """Atomically render an inline, GitHub-Actions-like status summary."""
 
-    state = write_run_state(events_path, destination.parent / "run_state.json")
+    state = write_run_state(events_path, destination.parent / "public_run_state.json")
     phases = (
         "".join(
             f"<li><strong>{html.escape(name)}</strong> "
@@ -100,7 +100,7 @@ def render_final_report(events_path: Path, destination: Path) -> None:
     document = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OptiProfiler Evolve Report</title><style>body{{max-width:1000px;margin:32px auto;font:14px system-ui,sans-serif;padding:0 20px}}pre{{white-space:pre-wrap;background:#f6f8fa;padding:16px;border:1px solid #d0d7de}}</style></head>
-<body><h1>Evolution report</h1><p><a href="status.html">Run status</a> · <a href="FINAL_REPORT.md">Markdown summary</a> · <a href="events.jsonl">Event ledger</a></p><h2>Latest events</h2><pre>{payload}</pre></body></html>
+<body><h1>Evolution report</h1><p><a href="status.html">Run status</a> · <a href="public_events.jsonl">Public event ledger</a></p><h2>Latest events</h2><pre>{payload}</pre></body></html>
 """
     _atomic_write(destination, document)
 

@@ -42,6 +42,9 @@ class PromptTests(unittest.TestCase):
         self.assertIn("do not sleep or retry", prompt)
         self.assertIn("render_pdf", prompt)
         self.assertIn("scipy.optimize", prompt)
+        self.assertNotIn("s2mpj", prompt)
+        self.assertNotIn("fixed reference solver", prompt)
+        self.assertNotIn("(candidate - reference + 1) / 2", prompt)
 
 
 if __name__ == "__main__":

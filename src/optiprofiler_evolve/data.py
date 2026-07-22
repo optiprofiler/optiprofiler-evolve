@@ -47,10 +47,10 @@ class DataPlan:
         """Return only information that may be shown to coding workers."""
 
         return {
-            "library": self.library,
+            "experiment": self.manifest_hash[:12],
             "public_problem_count": len(self.public),
             "smoke_problem_count": len(self.smoke),
-            "manifest_hash": self.manifest_hash,
+            "budget_note": "each problem enforces a fixed evaluation budget",
         }
 
     def full_manifest(self) -> dict[str, Any]:

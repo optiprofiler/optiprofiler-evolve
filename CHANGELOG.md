@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep the controller event ledger private and derive all shareable status data
+  through a centralized default-deny event projection.
+- Remove problem-library identity, reference raw scores, and scoring-formula
+  details from worker manifests and evaluation responses.
 - Keep remote model-API transport enabled for strategy-analysis agents while
   leaving their web-search tools disabled by default.
 - Preserve nested component options as structured JSON in provenance and run

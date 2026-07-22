@@ -517,12 +517,10 @@ def _write_feedback(result: EvaluationResult, output_dir: Path, feedback_mode: s
     if result.success:
         text = (
             f"# Evaluation: {result.mode}\n\n"
-            f"- normalized fitness: `{result.score:.6f}`\n"
-            f"- candidate OptiProfiler score: `{result.candidate_score:.6f}`\n"
-            f"- fixed reference score: `{result.reference_score:.6f}`\n"
+            f"- fitness: `{result.score:.6f}`\n"
+            "- direction: `maximize`\n"
             f"- problems: `{result.problem_count}`\n\n"
-            "The normalized fitness is `(candidate - reference + 1) / 2`; "
-            "`0.5` is a tie with the fixed reference solver.\n"
+            "Use this fitness only to compare candidates produced within this run.\n"
         )
         if feedback_mode == "agent":
             text += (

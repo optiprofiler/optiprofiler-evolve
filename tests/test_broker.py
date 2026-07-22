@@ -112,7 +112,20 @@ class BrokerTests(unittest.TestCase):
             payload = json.loads(completed.stdout)
             self.assertTrue(payload["success"])
             self.assertEqual(payload["problem_count"], 1)
+            self.assertEqual(payload["direction"], "maximize")
             self.assertNotIn("problems", payload)
+            self.assertNotIn("candidate_score", payload)
+            self.assertNotIn("reference_score", payload)
+            worker_result = json.loads(
+                (workspace / ".optiprofiler_evolve/evaluations/smoke/001/result.json").read_text()
+            )
+            self.assertNotIn("candidate_score", worker_result)
+            self.assertNotIn("reference_score", worker_result)
+            mounted_result = json.loads(
+                (broker.artifacts / "evaluations/smoke/001/result.json").read_text()
+            )
+            self.assertNotIn("candidate_score", mounted_result)
+            self.assertNotIn("reference_score", mounted_result)
             exhausted = subprocess.run(
                 [str(tools / "smoke_test")],
                 text=True,

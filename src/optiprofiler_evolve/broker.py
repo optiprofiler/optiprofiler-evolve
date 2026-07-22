@@ -178,7 +178,7 @@ class EvaluationBroker:
                 self.candidate_validator(self.workspace)
             output = self.artifacts / "evaluations" / mode / f"{call:03d}"
             result = self._evaluate_and_publish(mode, output)
-            payload = result.as_dict()
+            payload = _worker_result_payload(result)
             relative = Path(".optiprofiler_evolve") / "evaluations" / mode / f"{call:03d}"
             feedback = output / "feedback.md"
             payload.update(
@@ -215,7 +215,8 @@ class EvaluationBroker:
             result_path = output / "result.json"
             if result_path.is_file():
                 result_path.write_text(
-                    json.dumps(result.as_dict(), indent=2, sort_keys=True) + "\n",
+                    json.dumps(_worker_result_payload(result), indent=2, sort_keys=True)
+                    + "\n",
                     encoding="utf-8",
                 )
             return result
@@ -255,31 +256,18 @@ class EvaluationBroker:
         return self._worker_artifacts
 
 
-def latest_workspace_result(workspace: Path, mode: str) -> EvaluationResult | None:
-    """Read the last worker-triggered result for prompt memory and diagnostics."""
+def _worker_result_payload(result: EvaluationResult) -> dict[str, Any]:
+    """Return only score facts intentionally exposed to an untrusted worker."""
 
-    root = workspace / ".optiprofiler_evolve" / "evaluations" / mode
-    paths = sorted(root.glob("*/result.json")) if root.is_dir() else []
-    if not paths:
-        return None
-    raw = json.loads(paths[-1].read_text(encoding="utf-8"))
-    raw = {
-        key: value
-        for key, value in raw.items()
-        if key
-        in {
-            "mode",
-            "score",
-            "candidate_score",
-            "reference_score",
-            "problem_count",
-            "output_dir",
-            "success",
-            "error",
-        }
+    return {
+        "mode": result.mode,
+        "score": result.score,
+        "direction": "maximize",
+        "problem_count": result.problem_count,
+        "output_dir": str(result.output_dir),
+        "success": result.success,
+        "error": result.error,
     }
-    raw["output_dir"] = Path(raw["output_dir"])
-    return EvaluationResult(**raw)
 
 
 __all__: list[str] = []

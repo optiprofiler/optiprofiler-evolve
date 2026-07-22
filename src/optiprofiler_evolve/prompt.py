@@ -74,7 +74,7 @@ Contract
 - Required OptiProfiler entrypoint: {interface.file}:{interface.function}
 - Editable paths/globs: {json.dumps(list(editable))}
 - Iteration: {iteration}; island: {island}
-- Parent public fitness: {parent_score:.6f}; 0.5 means tied with the fixed reference solver
+- Parent public fitness: {parent_score:.6f}; higher is better
 - Advisory token budget: {budget}
 {dependency_policy}
 
