@@ -9,12 +9,15 @@ import random
 import re
 import secrets
 import shutil
+import signal
 import subprocess
+import threading
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Iterator
 
 from .broker import BrokerConnection, EvaluationBroker
 from .builtins import register_builtin_components
@@ -60,10 +63,15 @@ from .solver import (
     validate_interface,
     validate_tree_safety,
 )
+from .traces import finalize_adapter_trace, prepare_trace, recover_incomplete_traces
 from .viewers import render_final_report, render_status
 
 
 AgentRunner = Callable[..., AgentRunResult]
+
+
+class _RunCancelled(RuntimeError):
+    """Raised after the controller has requested graceful cancellation."""
 
 
 @dataclass(frozen=True)
@@ -100,7 +108,10 @@ class _AgentRunnerAdapter:
             native_trace=result.native_trace,
             stderr_trace=result.stderr_trace,
             trace_chunks=result.trace_chunks,
+            trace_outcome=result.trace_outcome,
             capture_error=result.capture_error,
+            cancelled=result.cancelled,
+            termination_reason=result.termination_reason,
         )
 
     def provenance(self, workers: Sequence[WorkerConfig]) -> Mapping[str, object]:
@@ -175,6 +186,7 @@ class EvolutionEngine:
         self.research_finalists: dict[str, CandidateRecord] = {}
         self.validation_query_count = 0
         self.validation_selection_count = 0
+        self._cancellation_event = threading.Event()
         service_impl = _EngineControllerServices(self)
         self.controller_services = ControllerServices(
             run_trusted_agent=service_impl.run_trusted_agent,
@@ -184,8 +196,65 @@ class EvolutionEngine:
             register_finalist=service_impl.register_finalist,
         )
 
+    def _run_worker_adapter(self, request: WorkerRequest) -> WorkerOutcome:
+        """Invoke one adapter behind a controller-owned trace boundary."""
+
+        paths = prepare_trace(
+            root=request.trace_dir,
+            prompt=request.prompt,
+            command=["<worker-adapter>", self.worker_adapter.name],
+            worker=request.worker,
+            workers=request.workers,
+            sandbox=request.sandbox,
+            context=request.trace_context,
+            secret_values=request.worker.env,
+        )
+        try:
+            outcome = self.worker_adapter.run(request)
+        except Exception as exc:
+            request.transcript.parent.mkdir(parents=True, exist_ok=True)
+            request.transcript.write_text(
+                f"[controller] worker adapter failed: {type(exc).__name__}: {exc}\n",
+                encoding="utf-8",
+            )
+            outcome = WorkerOutcome(
+                1,
+                request.transcript,
+                cancelled=self._cancellation_event.is_set(),
+                termination_reason="adapter_exception",
+                capture_error=f"adapter: {type(exc).__name__}: {exc}",
+            )
+        cancelled = outcome.cancelled or self._cancellation_event.is_set()
+        paths = finalize_adapter_trace(
+            paths,
+            transcript=outcome.transcript,
+            native_trace=outcome.native_trace,
+            stderr_trace=outcome.stderr_trace,
+            returncode=outcome.returncode,
+            timed_out=outcome.timed_out,
+            cancelled=cancelled,
+            capture_error=outcome.capture_error,
+        )
+        return replace(
+            outcome,
+            native_trace=paths.stdout,
+            stderr_trace=paths.stderr,
+            trace_chunks=paths.chunks,
+            trace_outcome=paths.outcome,
+            cancelled=cancelled,
+            termination_reason=(
+                outcome.termination_reason
+                or ("controller_cancelled" if cancelled else "adapter_exit")
+            ),
+        )
+
+    def _raise_if_cancelled(self) -> None:
+        if self._cancellation_event.is_set():
+            raise _RunCancelled("Evolution run cancelled by controller signal.")
+
     def run(self) -> EvolveResult:
         self._initialize_run_directory()
+        self._cancellation_event.clear()
         self.events = EventWriter(self.run_dir / "events.jsonl")
         provenance = build_run_provenance(
             self.config,
@@ -197,19 +266,25 @@ class EvolutionEngine:
         _write_json(self.run_dir / "provenance.json", provenance)
         self._emit("run_started", "running", data=provenance)
         try:
-            self._run_phases()
-            if self.result is None:
-                raise RuntimeError("Workflow completed without producing EvolveResult.")
-            self._emit(
-                "run_finished",
-                "succeeded",
-                data={"best_candidate_id": self.result.best_candidate_id},
-            )
+            with _controller_cancellation(self._cancellation_event):
+                self._run_phases()
+                self._raise_if_cancelled()
+                if self.result is None:
+                    raise RuntimeError("Workflow completed without producing EvolveResult.")
+                self._emit(
+                    "run_finished",
+                    "succeeded",
+                    data={"best_candidate_id": self.result.best_candidate_id},
+                )
+                self._refresh_status()
+                render_final_report(
+                    self.run_dir / "public_events.jsonl", self.run_dir / "report.html"
+                )
+                return self.result
+        except _RunCancelled as exc:
+            self._emit("run_finished", "cancelled", data={"error": str(exc)})
             self._refresh_status()
-            render_final_report(
-                self.run_dir / "public_events.jsonl", self.run_dir / "report.html"
-            )
-            return self.result
+            raise
         except Exception as exc:
             self._emit(
                 "run_finished",
@@ -219,12 +294,14 @@ class EvolutionEngine:
             self._refresh_status()
             raise
         finally:
+            recover_incomplete_traces(self.run_dir)
             if self.events is not None:
                 self.events.close()
                 self.events = None
 
     def _run_phases(self) -> None:
         for spec, phase in zip(self.config.workflow.phases, self.phases, strict=True):
+            self._raise_if_cancelled()
             missing = phase.requires.difference(self.artifacts)
             if missing:
                 raise RuntimeError(
@@ -255,6 +332,9 @@ class EvolutionEngine:
                     scope=scope,
                     data={"artifacts": sorted(result.artifacts)},
                 )
+            except _RunCancelled:
+                self._emit("phase_finished", "cancelled", scope=scope)
+                raise
             except Exception as exc:
                 self._emit(
                     "phase_finished",
@@ -265,6 +345,7 @@ class EvolutionEngine:
                 raise
             finally:
                 self._refresh_status()
+            self._raise_if_cancelled()
 
     def _invoke_core_phase(self, action: str) -> Mapping[str, object]:
         actions: Mapping[str, Callable[[], Mapping[str, object]]] = {
@@ -355,6 +436,7 @@ class EvolutionEngine:
         self.direction_assignments = _direction_assignments(self.artifacts.get("directions"))
         should_stop = False
         for iteration in range(1, self.config.evolution.iterations + 1):
+            self._raise_if_cancelled()
             iteration_scope = {"phase": "explore", "iteration": iteration}
             self._emit("iteration_started", "running", scope=iteration_scope)
             jobs: list[tuple[int, int, CandidateRecord, WorkerConfig]] = []
@@ -419,6 +501,7 @@ class EvolutionEngine:
                             )
                         )
 
+            self._raise_if_cancelled()
             # Explicit iteration barrier: only the engine accepts and records.
             for attempt in sorted(
                 attempts,
@@ -737,6 +820,8 @@ class EvolutionEngine:
             "changed_files": list(attempt.changed),
             "worker_returncode": attempt.worker_outcome.returncode,
             "worker_timed_out": attempt.worker_outcome.timed_out,
+            "worker_cancelled": attempt.worker_outcome.cancelled,
+            "worker_termination_reason": attempt.worker_outcome.termination_reason,
             "transcript": str(attempt.worker_outcome.transcript),
             "native_trace": str(attempt.worker_outcome.native_trace)
             if attempt.worker_outcome.native_trace
@@ -746,6 +831,9 @@ class EvolutionEngine:
             else None,
             "trace_chunks": str(attempt.worker_outcome.trace_chunks)
             if attempt.worker_outcome.trace_chunks
+            else None,
+            "trace_outcome": str(attempt.worker_outcome.trace_outcome)
+            if attempt.worker_outcome.trace_outcome
             else None,
             "trace_capture_error": attempt.worker_outcome.capture_error,
         }
@@ -1102,7 +1190,7 @@ class _EngineControllerServices:
             },
         )
         try:
-            outcome = engine.worker_adapter.run(
+            outcome = engine._run_worker_adapter(
                 WorkerRequest(
                     worker=worker,
                     workers=workers,
@@ -1123,6 +1211,7 @@ class _EngineControllerServices:
                         },
                         "inputs": sorted(job.inputs),
                     },
+                    cancellation_event=engine._cancellation_event,
                 )
             )
         except Exception as exc:
@@ -1144,29 +1233,41 @@ class _EngineControllerServices:
                 continue
             outputs[relative] = path
         missing_outputs = sorted(set(job.expected_outputs).difference(outputs))
-        succeeded = outcome.returncode == 0 and not outcome.timed_out and not missing_outputs
+        succeeded = (
+            outcome.returncode == 0
+            and not outcome.timed_out
+            and not outcome.cancelled
+            and not missing_outputs
+        )
         engine._emit(
             "role_agent_finished",
-            "succeeded" if succeeded else "failed",
+            "cancelled" if outcome.cancelled else "succeeded" if succeeded else "failed",
             scope=scope,
             data={
                 "returncode": outcome.returncode,
                 "timed_out": outcome.timed_out,
+                "cancelled": outcome.cancelled,
+                "termination_reason": outcome.termination_reason,
                 "transcript": str(outcome.transcript),
                 "native_trace": str(outcome.native_trace) if outcome.native_trace else None,
                 "stderr_trace": str(outcome.stderr_trace) if outcome.stderr_trace else None,
                 "trace_chunks": str(outcome.trace_chunks) if outcome.trace_chunks else None,
+                "trace_outcome": str(outcome.trace_outcome) if outcome.trace_outcome else None,
                 "trace_capture_error": outcome.capture_error,
                 "outputs": sorted(outputs),
                 "missing_outputs": missing_outputs,
             },
         )
+        if outcome.cancelled:
+            raise _RunCancelled("Trusted role agent cancelled by controller signal.")
         if not succeeded:
             details = []
             if outcome.returncode != 0:
                 details.append(f"returncode={outcome.returncode}")
             if outcome.timed_out:
                 details.append("timed_out=true")
+            if outcome.cancelled:
+                details.append("cancelled=true")
             if missing_outputs:
                 details.append(f"missing_outputs={missing_outputs!r}")
             raise RuntimeError(
@@ -1503,7 +1604,7 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
                 scope=self._scope(),
                 data={"worker": f"{self._worker.harness}:{self._worker.model}"},
             )
-            outcome = engine.worker_adapter.run(
+            outcome = engine._run_worker_adapter(
                 WorkerRequest(
                     worker=self._worker,
                     workers=engine.config.workers,
@@ -1525,6 +1626,7 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
                         "parent_id": self._parent.candidate_id,
                         "parent_tree_hash": self._parent.tree_hash,
                     },
+                    cancellation_event=engine._cancellation_event,
                 )
             )
         except Exception as exc:
@@ -1539,15 +1641,24 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
         self.worker_outcome = outcome
         engine._emit(
             "worker_finished",
-            "failed" if outcome.returncode else "succeeded",
+            (
+                "cancelled"
+                if outcome.cancelled
+                else "failed"
+                if outcome.returncode
+                else "succeeded"
+            ),
             scope=self._scope(),
             data={
                 "returncode": outcome.returncode,
                 "timed_out": outcome.timed_out,
+                "cancelled": outcome.cancelled,
+                "termination_reason": outcome.termination_reason,
                 "transcript": str(outcome.transcript),
                 "native_trace": str(outcome.native_trace) if outcome.native_trace else None,
                 "stderr_trace": str(outcome.stderr_trace) if outcome.stderr_trace else None,
                 "trace_chunks": str(outcome.trace_chunks) if outcome.trace_chunks else None,
+                "trace_outcome": str(outcome.trace_outcome) if outcome.trace_outcome else None,
                 "trace_capture_error": outcome.capture_error,
             },
         )
@@ -1698,6 +1809,32 @@ def _apply_patch(root: Path, patch: Path) -> None:
         diagnostics.append(applied.stdout.strip())
     detail = next((item for item in diagnostics if item), "patch did not apply")
     raise ValueError(f"Patch conflict: {detail[:1000]}")
+
+
+@contextmanager
+def _controller_cancellation(event: threading.Event) -> Iterator[None]:
+    """Translate SIGINT/SIGTERM into a cooperative controller cancellation."""
+
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    watched = tuple(
+        item
+        for item in (getattr(signal, "SIGINT", None), getattr(signal, "SIGTERM", None))
+        if item is not None
+    )
+    previous = {item: signal.getsignal(item) for item in watched}
+
+    def request_cancellation(_signum: int, _frame: object) -> None:
+        event.set()
+
+    try:
+        for item in watched:
+            signal.signal(item, request_cancellation)
+        yield
+    finally:
+        for item, handler in previous.items():
+            signal.signal(item, handler)
 
 
 def _write_json(path: Path, value: Any) -> None:

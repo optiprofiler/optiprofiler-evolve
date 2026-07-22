@@ -48,6 +48,9 @@
 - Raw worker and role-agent streams, prompts, sanitized invocation metadata, and
   chunk indexes are stored under private per-invocation directories. Public
   projections never expose those paths. See [Agent trace retention](traces.md).
+- On POSIX, timeout and controller cancellation terminate the worker process
+  group rather than only the CLI parent. Trace outcome manifests distinguish
+  complete, truncated, timed-out, cancelled, and crash-inferred evidence.
 
 Each attempt receives a distinct workspace, broker token, container, and
 temporary Docker network, including workers on the same island. Enabling web

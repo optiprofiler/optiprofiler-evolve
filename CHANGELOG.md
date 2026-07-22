@@ -9,6 +9,9 @@
 - Preserve built-in CLI worker and research-role stdout/stderr incrementally in
   private per-invocation traces, including partial output on timeout, while
   keeping readable transcripts as derived artifacts.
+- Add trace invocation/outcome manifests, process-group timeout cleanup,
+  cooperative SIGINT/SIGTERM cancellation, idempotent interrupted-run recovery,
+  and a controller-owned fallback for injected worker adapters.
 - Keep remote model-API transport enabled for strategy-analysis agents while
   leaving their web-search tools disabled by default.
 - Preserve nested component options as structured JSON in provenance and run

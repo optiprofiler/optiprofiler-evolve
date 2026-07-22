@@ -44,6 +44,10 @@ The supported extension slots are `Phase`, `AttemptStep`,
   framework is introduced before an external plugin actually requires it.
 - Process executors and Docker mechanics remain internal in v1. Harbor may be a
   future worker backend, but it is not a core dependency or public abstraction.
+- `WorkerAdapter` receives a controller-prepared private trace directory and a
+  cooperative cancellation event. It may add native evidence there, but it
+  cannot replace controller-owned input/outcome manifests. A transcript-only
+  adapter is supported with an explicitly degraded fallback trace.
 - Trusted phases receive one frozen `ControllerServices` value capped at five
   operations: run a sanitized role agent, materialize a gated variant, evaluate
   a public variant, select IDs by controller validation, and register a finalist.
@@ -97,6 +101,10 @@ components.
   in controller-private per-invocation directories. Readable transcripts are
   derived evidence, never replacements for the raw streams. See
   [Agent trace retention](traces.md).
+- Every invocation has an input manifest and a terminal outcome manifest. A
+  timeout or SIGINT/SIGTERM cancellation terminates the complete worker process
+  group on POSIX; incomplete invocations are marked by an idempotent crash
+  scanner rather than silently treated as complete.
 - Status values are `pending`, `running`, `succeeded`, `failed`, `skipped`, or
   `cancelled`.
 - `public_run_state.json`, `status.html`, shareable reports, GitHub Actions

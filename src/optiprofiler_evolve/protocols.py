@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Event
 from typing import Any, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -34,6 +35,7 @@ class WorkerRequest:
     transcript: Path
     trace_dir: Path
     trace_context: Mapping[str, object] = field(default_factory=dict)
+    cancellation_event: Event | None = None
 
 
 @dataclass(frozen=True)
@@ -46,7 +48,10 @@ class WorkerOutcome:
     native_trace: Path | None = None
     stderr_trace: Path | None = None
     trace_chunks: Path | None = None
+    trace_outcome: Path | None = None
     capture_error: str | None = None
+    cancelled: bool = False
+    termination_reason: str | None = None
 
 
 @dataclass(frozen=True)

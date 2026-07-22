@@ -32,18 +32,30 @@ input/
 raw.stdout.stream
 raw.stderr.stream
 chunks.jsonl
+invocation.json
+outcome.json
 ```
 
 The trace and input directories use mode `0700`; files use `0600`. Output is
 drained from stdout and stderr concurrently, flushed after every captured chunk,
-and periodically synchronized to disk. A timeout preserves bytes flushed before
-the process is killed. `chunks.jsonl` records controller-observed chunk order,
+and periodically synchronized to disk. On POSIX systems the CLI starts in a new
+process group; timeout or controller cancellation terminates the group, so a
+descendant cannot keep the trace pipes open indefinitely. A timeout preserves
+bytes flushed before termination. `chunks.jsonl` records controller-observed chunk order,
 stream, byte offset, length, and monotonic timestamp. It must not be interpreted
 as provider-internal token timing or exact ordering inside the child process.
 
 The existing transcript path is reconstructed from the chunk index after the
 process exits. Native stdout and stderr remain separate so later ATIF conversion
 or provider-specific parsing does not depend on a lossy merged file.
+
+`invocation.json` hashes the controller inputs that existed before launch.
+`outcome.json` records terminal state, return code, timeout/cancellation reason,
+duration when known, capture/derivation errors, explicit completeness and
+truncation flags, and byte counts plus SHA-256 hashes for each raw stream and the
+chunk index. Missing outcome manifests can be marked `interrupted`
+idempotently by the controller's crash scanner; recovery never invents missing
+bytes.
 
 ## Privacy and limitations
 
@@ -55,9 +67,16 @@ or provider-specific parsing does not depend on a lossy merged file.
 - The package can preserve only bytes and metadata delivered to or observed by
   the local CLI. It cannot record hidden model reasoning or provider-internal
   state that the provider does not return.
-- The current raw-capture path covers the built-in CLI adapter. Owner-supplied
-  worker adapters must return their evidence paths; a controller-side fallback
-  and crash-finalization manifest are part of the next stabilization slice.
+- Built-in CLI adapters preserve native stdout/stderr and chunk timing. An
+  owner-supplied adapter runs behind the same controller trace boundary. When it
+  returns only the legacy transcript, the controller imports that transcript as
+  a private fallback and marks the missing native chunk timing explicitly in
+  `outcome.json`.
+- SIGINT/SIGTERM requests cooperative cancellation. Built-in CLI workers receive
+  it immediately; an owner-supplied adapter must honor the cancellation event in
+  `WorkerRequest` to avoid delaying controller shutdown.
+- Windows does not provide the POSIX process-group guarantee. Container isolation
+  remains the recommended backend for strict descendant cleanup.
 
 Trace retention is mandatory for research runs. Retention duration, compression,
 and deletion are deployment policies and must not silently truncate a live run.

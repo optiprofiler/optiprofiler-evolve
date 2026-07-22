@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,38 @@ from optiprofiler_evolve.traces import CapturedProcess
 
 
 class SandboxCommandTests(unittest.TestCase):
+    def test_launch_failure_still_writes_terminal_trace_outcome(self) -> None:
+        worker = WorkerConfig(harness="codex", model="test")
+        workers = WorkersConfig(pool=(worker,), timeout_seconds=5)
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "optiprofiler_evolve.sandbox.build_harness_command",
+            return_value=[str(Path(directory) / "missing-command")],
+        ):
+            root = Path(directory)
+            (root / "workspace").mkdir()
+            with self.assertRaises(FileNotFoundError):
+                run_agent(
+                    worker=worker,
+                    workers=workers,
+                    sandbox=SandboxConfig(backend="unsafe_local"),
+                    workspace=root / "workspace",
+                    tools_dir=root / "tools",
+                    broker=BrokerConnection(
+                        str(root / "broker"),
+                        str(root / "artifacts"),
+                        "token",
+                        root / "broker",
+                        root / "artifacts",
+                    ),
+                    prompt="probe",
+                    transcript=root / "transcript.jsonl",
+                    trace_dir=root / "trace",
+                )
+
+            outcome = json.loads((root / "trace" / "outcome.json").read_text())
+            self.assertEqual(outcome["state"], "launch_failed")
+            self.assertIn("FileNotFoundError", outcome["capture_error"])
+
     def test_local_agent_returns_native_trace_and_readable_transcript(self) -> None:
         worker = WorkerConfig(harness="codex", model="test")
         workers = WorkersConfig(

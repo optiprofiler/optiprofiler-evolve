@@ -60,6 +60,12 @@ plugin discovery, DAG compiler, or arbitrary configuration language. A trusted
 owner extension may be supplied directly in Python. Package entry points should
 be added only after a real external plugin package needs them.
 
+Before a `WorkerAdapter` runs, the engine creates its private trace inputs and
+passes both `trace_dir` and `cancellation_event` in `WorkerRequest`. Built-in CLI
+workers add exact native stream evidence. A custom adapter should do the same;
+when it returns only a transcript, the engine imports that file and marks the
+missing native timing in the terminal trace manifest.
+
 The `budget` field is reserved for a future scheduler. The alpha engine raises
 on a nonempty budget proposal so an apparently successful experiment cannot
 silently ignore a budget policy.

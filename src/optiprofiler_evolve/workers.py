@@ -28,6 +28,7 @@ class CliWorkerAdapter:
             transcript=request.transcript,
             trace_dir=request.trace_dir,
             trace_context=request.trace_context,
+            cancellation_event=request.cancellation_event,
         )
         return WorkerOutcome(
             returncode=result.returncode,
@@ -36,7 +37,10 @@ class CliWorkerAdapter:
             native_trace=result.native_trace,
             stderr_trace=result.stderr_trace,
             trace_chunks=result.trace_chunks,
+            trace_outcome=result.trace_outcome,
             capture_error=result.capture_error,
+            cancelled=result.cancelled,
+            termination_reason=result.termination_reason,
         )
 
     def provenance(self, workers: Sequence[WorkerConfig]) -> Mapping[str, object]:

@@ -307,6 +307,13 @@ class ResearchHarnessTests(unittest.TestCase):
             result = engine.run()
 
             self.assertEqual(tree_hash(source), source_hash)
+            role_outcomes = sorted(
+                (root / "run" / "research" / "traces").glob("*/*/outcome.json")
+            )
+            self.assertTrue(role_outcomes)
+            self.assertTrue(
+                all(json.loads(path.read_text())["state"] == "completed" for path in role_outcomes)
+            )
             self.assertEqual(result.public_score, 0.7)
             self.assertEqual(sum(mode == "hidden" for _name, mode in ResearchEvaluator.calls), 1)
             directions = json.loads(

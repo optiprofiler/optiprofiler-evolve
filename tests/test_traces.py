@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 import sys
 import tempfile
@@ -17,6 +18,7 @@ from optiprofiler_evolve.config import (
 )
 from optiprofiler_evolve.traces import (
     prepare_trace,
+    recover_incomplete_traces,
     render_transcript,
     run_captured_process,
 )
@@ -103,6 +105,11 @@ class TraceCaptureTests(unittest.TestCase):
             self.assertIn("first", rendered)
             self.assertIn("diagnostic", rendered)
             self.assertIn("second", rendered)
+            terminal = json.loads(paths.outcome.read_text(encoding="utf-8"))
+            self.assertEqual(terminal["state"], "completed")
+            self.assertTrue(terminal["complete"])
+            self.assertEqual(terminal["streams"]["stdout"]["bytes"], len(b"first\nsecond\n"))
+            self.assertEqual(len(terminal["streams"]["stdout"]["sha256"]), 64)
 
     def test_timeout_keeps_flushed_partial_output(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -138,6 +145,88 @@ class TraceCaptureTests(unittest.TestCase):
             self.assertTrue(result.timed_out)
             self.assertEqual(result.returncode, 124)
             self.assertEqual(paths.stdout.read_bytes(), b"before-timeout\n")
+
+    @unittest.skipUnless(os.name == "posix", "process-group test requires POSIX")
+    def test_timeout_terminates_descendants_that_inherit_trace_pipes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            worker = WorkerConfig(harness="codex", model="test-model")
+            workers = WorkersConfig(pool=(worker,), timeout_seconds=1)
+            command = ["/bin/sh", "-c", "printf inherited-pipe; sleep 30"]
+            paths = prepare_trace(
+                root=root / "trace",
+                prompt="",
+                command=command,
+                worker=worker,
+                workers=workers,
+                sandbox=SandboxConfig(backend="unsafe_local"),
+            )
+
+            started = time.monotonic()
+            result = run_captured_process(
+                command=command,
+                prompt="",
+                paths=paths,
+                timeout_seconds=1,
+                environment={},
+                cwd=root,
+            )
+
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertTrue(result.timed_out)
+            self.assertEqual(paths.stdout.read_bytes(), b"inherited-pipe")
+
+    def test_cancellation_event_terminates_process_and_records_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            worker = WorkerConfig(harness="codex", model="test-model")
+            workers = WorkersConfig(pool=(worker,), timeout_seconds=30)
+            command = [sys.executable, "-c", "import time; time.sleep(30)"]
+            paths = prepare_trace(
+                root=root / "trace",
+                prompt="",
+                command=command,
+                worker=worker,
+                workers=workers,
+                sandbox=SandboxConfig(backend="unsafe_local"),
+            )
+            cancellation = threading.Event()
+            threading.Timer(0.2, cancellation.set).start()
+
+            result = run_captured_process(
+                command=command,
+                prompt="",
+                paths=paths,
+                timeout_seconds=30,
+                environment={},
+                cwd=root,
+                cancellation_event=cancellation,
+            )
+
+            self.assertTrue(result.cancelled)
+            self.assertEqual(result.returncode, 130)
+            terminal = json.loads(paths.outcome.read_text(encoding="utf-8"))
+            self.assertEqual(terminal["state"], "cancelled")
+            self.assertEqual(terminal["termination_reason"], "controller_cancelled")
+
+    def test_recovery_marks_missing_outcome_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            worker = WorkerConfig(harness="codex", model="test-model")
+            paths = prepare_trace(
+                root=run_dir / "traces" / "it001-i00-a00",
+                prompt="private",
+                command=["codex"],
+                worker=worker,
+                workers=WorkersConfig(pool=(worker,)),
+                sandbox=SandboxConfig(backend="unsafe_local"),
+            )
+
+            self.assertEqual(recover_incomplete_traces(run_dir), (paths.root,))
+            self.assertEqual(recover_incomplete_traces(run_dir), ())
+            terminal = json.loads(paths.outcome.read_text(encoding="utf-8"))
+            self.assertEqual(terminal["state"], "interrupted")
+            self.assertTrue(terminal["truncated"])
 
 
 if __name__ == "__main__":

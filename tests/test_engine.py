@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
 from optiprofiler_evolve.config import load_config
-from optiprofiler_evolve.engine import EvolutionEngine
+from optiprofiler_evolve.engine import EvolutionEngine, _controller_cancellation
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.sandbox import AgentRunResult
 from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
@@ -84,6 +87,18 @@ class EngineTests(unittest.TestCase):
             self.assertNotIn("controller/data_manifest", public_manifest)
             self.assertNotIn("P1", public_manifest)
             self.assertTrue((result.run_dir / "checkpoints" / "iteration_001.json").is_file())
+            for trace_root in sorted((result.run_dir / "traces").iterdir()):
+                self.assertEqual((trace_root / "raw.stdout.stream").read_text(), "fake worker\n")
+                terminal = json.loads((trace_root / "outcome.json").read_text())
+                self.assertEqual(terminal["state"], "completed")
+                self.assertIn("without native chunk timing", terminal["capture_error"])
+
+    @unittest.skipUnless(os.name == "posix", "signal test requires POSIX")
+    def test_controller_signal_scope_requests_cooperative_cancellation(self) -> None:
+        event = threading.Event()
+        with _controller_cancellation(event):
+            os.kill(os.getpid(), signal.SIGTERM)
+            self.assertTrue(event.wait(timeout=1))
 
 
 if __name__ == "__main__":
