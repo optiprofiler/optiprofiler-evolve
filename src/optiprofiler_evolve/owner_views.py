@@ -17,12 +17,16 @@ from urllib.parse import quote
 
 from ._owner_evidence import (
     DIFF_PREVIEW_LINES,
+    PHASE_EVENT_LIMIT,
     compact_text,
     parse_transcript,
+    phase_artifacts,
+    phase_component,
     preview_stream,
     read_json,
     resolve_recorded_path,
     resolve_role_output,
+    safe_page_name,
     unified_diff,
     write_owner_manifest,
 )
@@ -39,7 +43,6 @@ from .viewers import (
     _render_coverage,
     _render_iterations,
     _render_matrix,
-    _render_phase_graph,
     _safe_status,
     _sequence,
     _status_icon,
@@ -111,12 +114,96 @@ _OWNER_STYLE = """
     .step-detail .dur { margin-left: auto; color: var(--muted); font-size: 12px;
       font-weight: 400; }
     .step-detail .body { padding: 0 14px 12px; }
+    .wf-controls { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+    .wf-controls button { padding: 4px 12px; border: 1px solid var(--line);
+      border-radius: 6px; background: var(--panel); color: var(--text);
+      font: inherit; font-size: 12px; cursor: pointer; }
+    .wf-controls button:hover { background: var(--hover); }
+    .wf-level { color: var(--muted); font-size: 12px; min-width: 44px; }
+    .wf-canvas { overflow: auto; max-height: 420px; border: 1px solid var(--line);
+      border-radius: 8px; background: var(--bg); cursor: grab; }
+    .wf-canvas.dragging { cursor: grabbing; user-select: none; }
+    .wf-inner { display: inline-block; min-width: 100%; padding: 12px 16px; }
+    .wf-inner .job-graph { overflow: visible; padding: 4px 2px; }
+    .job-graph a.job-node { color: var(--text); }
+    .job-graph a.job-node:hover { border-color: var(--blue); text-decoration: none; }
+    .phase-events td { font-size: 12px; }
     @media (max-width: 820px) {
       .kv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .population-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .attempt-link code { min-width: 0; flex: 1 1 140px; }
     }
 """
+
+# Static pan/zoom controller for the owner workflow canvas. It interpolates no
+# run data and talks to no network; the canvas degrades to a plain scrollable
+# strip when scripting is unavailable. Owner pages only — the public bundle
+# stays script-free and is test-pinned to stay that way.
+_WF_SCRIPT = """<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("wf-canvas");
+  var inner = document.getElementById("wf-inner");
+  var level = document.getElementById("wf-level");
+  if (!canvas || !inner) { return; }
+  var scale = 1;
+  var supportsZoom = "zoom" in inner.style;
+  function apply() {
+    if (supportsZoom) {
+      inner.style.zoom = scale;
+    } else {
+      inner.style.transformOrigin = "0 0";
+      inner.style.transform = "scale(" + scale + ")";
+    }
+    if (level) { level.textContent = Math.round(scale * 100) + "%"; }
+  }
+  function set(next) { scale = Math.min(2, Math.max(0.25, next)); apply(); }
+  function fit() {
+    if (supportsZoom) { inner.style.zoom = 1; } else { inner.style.transform = "none"; }
+    var natural = inner.scrollWidth;
+    var available = canvas.clientWidth - 2;
+    set(natural > 0 ? Math.min(1, available / natural) : 1);
+  }
+  var buttons = document.querySelectorAll("[data-wf]");
+  Array.prototype.forEach.call(buttons, function (button) {
+    button.addEventListener("click", function () {
+      var action = button.getAttribute("data-wf");
+      if (action === "in") { set(scale * 1.25); }
+      else if (action === "out") { set(scale / 1.25); }
+      else if (action === "reset") { set(1); }
+      else if (action === "fit") { fit(); }
+    });
+  });
+  var drag = null;
+  var suppressClick = false;
+  canvas.addEventListener("pointerdown", function (event) {
+    if (event.button !== 0) { return; }
+    drag = { x: event.clientX, y: event.clientY,
+             left: canvas.scrollLeft, top: canvas.scrollTop, moved: false };
+  });
+  window.addEventListener("pointermove", function (event) {
+    if (!drag) { return; }
+    var dx = event.clientX - drag.x;
+    var dy = event.clientY - drag.y;
+    if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 6) { return; }
+    drag.moved = true;
+    canvas.classList.add("dragging");
+    canvas.scrollLeft = drag.left - dx;
+    canvas.scrollTop = drag.top - dy;
+  });
+  window.addEventListener("pointerup", function () {
+    if (drag && drag.moved) {
+      suppressClick = true;
+      window.setTimeout(function () { suppressClick = false; }, 0);
+    }
+    canvas.classList.remove("dragging");
+    drag = null;
+  });
+  canvas.addEventListener("click", function (event) {
+    if (suppressClick) { event.preventDefault(); event.stopPropagation(); }
+  }, true);
+})();
+</script>"""
 
 
 def render_owner_views(events_path: Path, run_dir: Path, *, final: bool = False) -> None:
@@ -130,6 +217,21 @@ def render_owner_views(events_path: Path, run_dir: Path, *, final: bool = False)
     owner_dir = run_dir / "owner"
     (owner_dir / "attempts").mkdir(parents=True, exist_ok=True)
     (owner_dir / "roles").mkdir(parents=True, exist_ok=True)
+    (owner_dir / "phases").mkdir(parents=True, exist_ok=True)
+
+    for value in _sequence(state.get("phases")):
+        phase = _mapping(value)
+        page_name = safe_page_name(phase.get("name"))
+        if page_name is None:
+            continue
+        page = owner_dir / "phases" / f"{page_name}.html"
+        terminal = _safe_status(phase.get("status")) not in {"pending", "running"}
+        if terminal and page.is_file() and not final:
+            continue
+        _atomic_write(
+            page,
+            _render_phase_page(phase, events, state, details, run_dir, now),
+        )
 
     for value in _sequence(state.get("attempts")):
         attempt = _mapping(value)
@@ -229,7 +331,7 @@ def _render_owner_index(
         '<meta http-equiv="refresh" content="5">' if run_status in {"pending", "running"} else ""
     )
     head = _owner_run_head(run, run_status, state, now)
-    phases = _render_phase_graph(state.get("phases"), now)
+    phases = _render_owner_phase_graph(state, now)
     iterations = _render_iterations(state.get("iterations"), now)
     attempts_by_id = {
         str(_mapping(value).get("attempt_id")): _mapping(value)
@@ -315,6 +417,265 @@ def _render_population_policy(run_dir: Path) -> str:
     )
 
 
+# One-line orientation for each built-in phase; unknown phases fall back to a
+# generic line so custom components never break the page.
+_PHASE_NOTES = {
+    "prepare": (
+        "Freezes the data split and manifest, snapshots the seed candidate and "
+        "reference solver, and records the seed baselines."
+    ),
+    "explore": (
+        "Island-parallel candidate attempts: worker mutation, static audit, smoke "
+        "and public evaluation, mandatory integrity review, and population "
+        "retention with after-iteration policies."
+    ),
+    "validate": (
+        "Controller-only validation evaluations select the champion. Scores stay "
+        "owner-side and are never fed back to workers."
+    ),
+    "hidden": (
+        "One-shot hidden holdout evaluation of the fixed champion. Results are "
+        "owner-only evidence."
+    ),
+    "report": "Writes the private final report and materializes the public bundle.",
+    "direction_scout": (
+        "Trusted research agent proposes direction cards later assigned to islands."
+    ),
+    "strategy_analysis": (
+        "Per-island strategy attribution with executable leave-one-out ablations."
+    ),
+    "recombine": "Bounded cross-island recombination of analyzed strategies.",
+    "challenger": "Post-selection strong-challenger comparison against the champion.",
+}
+
+
+def _matrix_summary(state: Mapping[str, Any]) -> dict[str, int]:
+    islands: set[object] = set()
+    iterations: set[object] = set()
+    attempts = 0
+    accepted = 0
+    quarantined = 0
+    for value in _sequence(state.get("matrix")):
+        cell = _mapping(value)
+        islands.add(cell.get("island"))
+        iterations.add(cell.get("iteration"))
+        counts = _mapping(cell.get("counts"))
+        attempts += len(_sequence(cell.get("attempt_ids")))
+        accepted += int(counts.get("accepted", 0) or 0)
+        quarantined += int(counts.get("quarantined", 0) or 0)
+    return {
+        "islands": len(islands),
+        "iterations": len(iterations),
+        "attempts": attempts,
+        "accepted": accepted,
+        "quarantined": quarantined,
+    }
+
+
+def _render_owner_phase_graph(state: Mapping[str, Any], now: datetime | None) -> str:
+    phases = _sequence(state.get("phases"))
+    if not phases:
+        return '<p class="empty">No phases recorded yet.</p>'
+    summary = _matrix_summary(state)
+    nodes = []
+    for value in phases:
+        phase = _mapping(value)
+        name = str(phase.get("name", "phase"))
+        status = _safe_status(phase.get("status"))
+        sub = _label(status)
+        duration = _duration_text(phase, now)
+        if duration:
+            sub += f" · {duration}"
+        extra = ""
+        if name == "explore" and summary["attempts"]:
+            extra = (
+                '<span class="sub">'
+                f"{summary['islands']} islands · {summary['iterations']} iterations · "
+                f"{summary['attempts']} attempts · {summary['accepted']} accepted · "
+                f"{summary['quarantined']} quarantined</span>"
+            )
+        body = (
+            f"{_status_icon(status)}<div><strong>{_h(name)}</strong>"
+            f'<span class="sub">{_h(sub)}</span>{extra}</div>'
+        )
+        page_name = safe_page_name(name)
+        if page_name is not None:
+            nodes.append(
+                f'<a class="job-node" href="{_href("owner/phases", page_name)}">{body}</a>'
+            )
+        else:
+            nodes.append(f'<span class="job-node">{body}</span>')
+    controls = (
+        '<div class="wf-controls">'
+        '<button type="button" data-wf="fit">Fit</button>'
+        '<button type="button" data-wf="out" aria-label="Zoom out">−</button>'
+        '<button type="button" data-wf="reset">100%</button>'
+        '<button type="button" data-wf="in" aria-label="Zoom in">+</button>'
+        '<span class="wf-level" id="wf-level">100%</span></div>'
+    )
+    return (
+        controls
+        + '<div class="wf-canvas" id="wf-canvas"><div class="wf-inner" id="wf-inner">'
+        + f'<div class="job-graph">{"".join(nodes)}</div></div></div>'
+        + _WF_SCRIPT
+    )
+
+
+def _render_phase_page(
+    phase: Mapping[str, Any],
+    events: list[dict[str, Any]],
+    state: Mapping[str, Any],
+    details: Mapping[str, Any],
+    run_dir: Path,
+    now: datetime | None,
+) -> str:
+    name = str(phase.get("name", "phase"))
+    status = _safe_status(phase.get("status"))
+    refresh = (
+        '<meta http-equiv="refresh" content="5">' if status in {"pending", "running"} else ""
+    )
+    page_dir = run_dir / "owner" / "phases"
+    phase_names = [str(_mapping(item).get("name")) for item in _sequence(state.get("phases"))]
+    position = (
+        f"Phase {phase_names.index(name) + 1} of {len(phase_names)}"
+        if name in phase_names
+        else "Phase"
+    )
+    parts = [_label(status)]
+    duration = _duration_text(phase, now)
+    if duration:
+        parts.append(f"Duration {duration}")
+    parts.append(position)
+    subhead = " · ".join(_h(part) for part in parts)
+
+    note = _PHASE_NOTES.get(name, "Configured workflow phase.")
+    component = phase_component(read_json(run_dir / "provenance.json"), name)
+    options = _mapping(component.get("options"))
+    if options:
+        option_rows = "".join(
+            f"<tr><td><code>{_h(key)}</code></td><td><code>{_h(compact_text(value))}"
+            "</code></td></tr>"
+            for key, value in sorted(options.items())
+        )
+        config_html = (
+            f'<div class="table-wrap"><table><thead><tr><th>Option</th><th>Value</th>'
+            f"</tr></thead><tbody>{option_rows}</tbody></table></div>"
+        )
+    elif component:
+        config_html = "<p>No options configured; the phase runs with its defaults.</p>"
+    else:
+        config_html = '<p class="missing">Phase provenance unavailable.</p>'
+
+    sections = [f'<section class="owner-section"><h2>About</h2><p>{_h(note)}</p>{config_html}</section>']
+
+    if name == "explore":
+        attempts_by_id = {
+            str(_mapping(value).get("attempt_id")): _mapping(value)
+            for value in _sequence(state.get("attempts"))
+        }
+        matrix = _render_matrix(state.get("matrix"), attempts_by_id, now)
+        policy = _render_population_policy(run_dir)
+        attempts = _render_owner_attempt_groups(
+            state.get("attempts"), details, now, prefix="../attempts"
+        )
+        sections.append(
+            f'<section class="owner-section"><h2>Island matrix</h2>{matrix}</section>'
+        )
+        sections.append(
+            f'<section class="owner-section"><h2>Population policy</h2>{policy}</section>'
+        )
+        sections.append(
+            f'<section class="owner-section"><h2>Attempts</h2>{attempts}</section>'
+        )
+
+    phase_roles = [
+        value
+        for value in _sequence(state.get("roles"))
+        if str(_mapping(value).get("phase") or "") == name
+    ]
+    roles_html = _render_owner_roles(phase_roles, now, prefix="../roles")
+    sections.append(
+        f'<section class="owner-section"><h2>Agent jobs in this phase</h2>{roles_html}</section>'
+    )
+
+    artifact_items = [
+        f"<li>{_relative_link(target, page_dir, run_dir)} — {_h(label)}</li>"
+        for label, target in phase_artifacts(run_dir, name)
+    ]
+    artifacts_html = (
+        f'<ul class="evidence-list">{"".join(artifact_items)}</ul>'
+        if artifact_items
+        else '<p class="missing">No phase evidence recorded yet.</p>'
+    )
+    sections.append(
+        f'<section class="owner-section"><h2>Evidence</h2>{artifacts_html}</section>'
+    )
+    sections.append(
+        '<section class="owner-section"><h2>Key events</h2>'
+        f"{_render_phase_events(events, name)}</section>"
+    )
+
+    document = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  {refresh}
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phase {_h(name)} — Owner Console</title>
+  <style>{_STYLE}{_OWNER_STYLE}</style>
+</head>
+<body>
+  <header class="topbar"><strong>OptiProfiler Evolve</strong><span>Owner console</span></header>
+  {_BANNER}
+  <main class="report">
+    <p><a href="../../status.html">&larr; Owner console</a></p>
+    <div class="run-head">{_status_icon(status)}<div><h1><code>{_h(name)}</code><span class="owner-tag">Private</span></h1><p class="subhead">{subhead}</p></div></div>
+    {"".join(sections)}
+    <p class="footnote">Private owner evidence page. Share only the public/ bundle.</p>
+  </main>
+</body>
+</html>
+"""
+    return document
+
+
+def _render_phase_events(events: list[dict[str, Any]], phase_name: str) -> str:
+    rows = []
+    for event in events:
+        scope = _mapping(event.get("scope"))
+        if str(scope.get("phase") or "") != phase_name or "attempt_id" in scope:
+            continue
+        context_bits = [
+            f"{key} {scope[key]}"
+            for key in ("iteration", "island", "job_id", "role", "step")
+            if key in scope
+        ]
+        moment = _parse_ts(event.get("ts"))
+        rows.append(
+            "<tr>"
+            f"<td>{_h(event.get('seq'))}</td>"
+            f"<td>{_h(moment.strftime('%H:%M:%S') if moment else '-')}</td>"
+            f"<td><code>{_h(event.get('kind'))}</code></td>"
+            f"<td>{_status_line(_safe_status(event.get('status')))}</td>"
+            f"<td>{_h(', '.join(context_bits) or '-')}</td>"
+            "</tr>"
+        )
+    if not rows:
+        return '<p class="missing">No phase-level events recorded yet.</p>'
+    omitted = ""
+    if len(rows) > PHASE_EVENT_LIMIT:
+        omitted = (
+            f'<p class="truncated">{len(rows) - PHASE_EVENT_LIMIT} earlier events '
+            "omitted; the full ledger is events.jsonl.</p>"
+        )
+        rows = rows[-PHASE_EVENT_LIMIT:]
+    return (
+        '<div class="table-wrap phase-events"><table><thead><tr><th>Seq</th><th>Time</th><th>Event</th><th>Status</th><th>Context</th></tr></thead><tbody>'
+        + "".join(rows)
+        + f"</tbody></table></div>{omitted}"
+    )
+
+
 def _owner_run_head(
     run: Mapping[str, Any],
     run_status: str,
@@ -347,7 +708,11 @@ def _owner_run_head(
 
 
 def _render_owner_attempt_groups(
-    values: object, details: Mapping[str, Any], now: datetime | None
+    values: object,
+    details: Mapping[str, Any],
+    now: datetime | None,
+    *,
+    prefix: str = "owner/attempts",
 ) -> str:
     attempts = _sequence(values)
     if not attempts:
@@ -389,7 +754,7 @@ def _render_owner_attempt_groups(
             )
             island = member.get("island")
             rows.append(
-                f'<a class="attempt-link" href="{_href("owner/attempts", attempt_id)}">'
+                f'<a class="attempt-link" href="{_href(prefix, attempt_id)}">'
                 f"{_status_icon(status)}<code>{_h(attempt_id)}</code>"
                 f'<span class="grow">Island {_h(island if island is not None else "-")}</span>'
                 f'<span class="score">Public {_h(score_text)}</span>'
@@ -404,7 +769,12 @@ def _render_owner_attempt_groups(
     return "".join(sections)
 
 
-def _render_owner_roles(values: object, now: datetime | None) -> str:
+def _render_owner_roles(
+    values: object,
+    now: datetime | None,
+    *,
+    prefix: str = "owner/roles",
+) -> str:
     roles = _sequence(values)
     if not roles:
         return '<p class="empty">No trusted agent jobs recorded.</p>'
@@ -414,7 +784,7 @@ def _render_owner_roles(values: object, now: datetime | None) -> str:
         job_id = str(role.get("job_id"))
         rows.append(
             "<tr>"
-            f'<td><a href="{_href("owner/roles", job_id)}"><code>{_h(job_id)}</code></a></td>'
+            f'<td><a href="{_href(prefix, job_id)}"><code>{_h(job_id)}</code></a></td>'
             f"<td>{_h(role.get('role'))}</td>"
             f"<td>{_h(role.get('phase') or '-')}</td>"
             f"<td>{_status_line(_safe_status(role.get('status')))}</td>"

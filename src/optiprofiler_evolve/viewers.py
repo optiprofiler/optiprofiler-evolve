@@ -84,15 +84,14 @@ _STYLE = """
     .metric:last-child { border-right: 0; }
     .metric span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; }
     .metric strong { overflow-wrap: anywhere; }
-    .job-graph { display: grid; grid-template-columns: repeat(3, minmax(158px, 1fr));
-      align-items: stretch; gap: 26px 34px; margin: 0; padding: 12px 4px;
-      list-style: none; }
+    .job-graph { display: flex; align-items: stretch; margin: 0; padding: 12px 4px;
+      list-style: none; overflow-x: auto; }
     .job-node { position: relative; display: flex; align-items: center; gap: 10px;
-      min-width: 0; padding: 11px 14px; border: 1px solid var(--line);
+      min-width: 158px; padding: 11px 14px; border: 1px solid var(--line);
       border-radius: 8px; background: var(--panel); }
+    .job-node + .job-node { margin-left: 34px; }
     .job-node + .job-node::before { content: ""; position: absolute; top: 50%; left: -35px;
       width: 34px; height: 2px; background: var(--edge); }
-    .job-node:nth-child(3n+1)::before { display: none; }
     .job-node strong { display: block; font-size: 13px; }
     .job-node .sub, .matrix-chip .sub { display: block; color: var(--muted); font-size: 11px; }
     .matrix-group + .matrix-group { margin-top: 16px; }
@@ -161,13 +160,6 @@ _STYLE = """
       .attempt > summary code { min-width: 0; flex: 1 1 140px; }
       .attempt .dur { min-width: 0; text-align: left; }
       .matrix-chip { min-width: 0; flex: 1 1 46%; }
-      .job-graph { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .job-node:nth-child(3n+1)::before { display: block; }
-      .job-node:nth-child(2n+1)::before { display: none; }
-    }
-    @media (max-width: 520px) {
-      .job-graph { grid-template-columns: minmax(0, 1fr); }
-      .job-node::before { display: none !important; }
     }
 """
 

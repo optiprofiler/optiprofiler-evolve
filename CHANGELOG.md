@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Owner console workflow is now a continuous pan/zoom canvas (Fit, zoom in,
+  zoom out; drag or scroll to pan) so long research pipelines keep unbroken
+  connectors at every width; the sanitized public page stays a script-free
+  scrollable strip. Every phase node links to a private
+  `owner/phases/<phase>.html` page derived from the event ledger and run
+  evidence: status and duration, configured options from provenance, phase
+  roles, evidence links, and a bounded phase-event table. The explore node
+  shows an islands/iterations/attempts/accepted/quarantined summary and its
+  page carries the full island-by-iteration matrix plus the effective
+  population-policy mode (metric_pareto reports its scalar fallback when
+  only one objective is configured).
+
 - Turn the run-directory root `status.html` into the PRIVATE owner console:
   every attempt, integrity-review invocation, and research-role job links to a
   static per-invocation evidence page (transcript and tool calls, bounded

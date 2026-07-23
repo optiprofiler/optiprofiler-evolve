@@ -152,9 +152,10 @@ matrices, island bundles, recombination conflicts/results, and a challenger
 report under `research/`.
 
 Open `status.html` for the PRIVATE owner console: a server-free Actions-style
-view with a connected phase job graph, iteration-by-island matrix cards, and
-per-phase/attempt/step durations, where every attempt, integrity-review
-invocation, and research-role job links to a detail page with full private
+view with a continuous, pannable phase workflow canvas (Fit and zoom
+controls), iteration-by-island matrix cards, and per-phase/attempt/step
+durations, where every phase, attempt, integrity-review invocation, and
+research-role job links to a detail page with full private
 evidence — transcripts and tool calls, bounded stdout/stderr previews, source
 diffs, benchmark artifacts, reviewer findings, gateway outcomes, and
 owner-only validation/hidden results. The complete run directory is private.

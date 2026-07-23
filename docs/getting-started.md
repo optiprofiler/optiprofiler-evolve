@@ -100,8 +100,9 @@ controller-only final score. A timestamped run directory is created under
 `runs/` unless `run_dir` is supplied explicitly.
 
 Open `<run_dir>/status.html` — the PRIVATE owner console — to inspect the
-workflow job graph, island matrix cards, and attempt list with event-derived
-durations, and click any attempt, integrity-review invocation, or
+workflow canvas (continuous connectors with Fit/zoom/pan for long research
+pipelines), island matrix cards, and attempt list with event-derived
+durations, and click any phase, attempt, integrity-review invocation, or
 research-role job for its full evidence page: transcript and tool calls,
 bounded stdout/stderr previews with raw-file links, source diff versus the
 parent, benchmark artifacts, reviewer findings, gateway outcome, and

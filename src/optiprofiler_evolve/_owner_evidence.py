@@ -10,6 +10,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import re
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -256,6 +257,67 @@ def write_owner_manifest(state: Mapping[str, Any], run_dir: Path) -> None:
         run_dir / "owner" / "MANIFEST.json",
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
     )
+
+
+PHASE_EVENT_LIMIT = 100
+
+_PAGE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
+
+# Known evidence roots per phase, probed on disk; only existing entries render.
+_PHASE_ARTIFACTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "prepare": (
+        ("Seed candidate", "candidates/seed"),
+        ("Reference solver", "controller/reference"),
+        ("Seed public evaluation", "controller/evaluations/seed/public"),
+        ("Seed validation evaluation", "controller/evaluations/seed/validation"),
+    ),
+    "explore": (
+        ("Attempt ledger", "attempts.jsonl"),
+        ("Iteration checkpoints", "checkpoints"),
+    ),
+    "validate": (("Validation queries", "controller/validation_queries.jsonl"),),
+    "hidden": (("Final evaluations", "controller/final_evaluations"),),
+    "report": (("Final report (private)", "FINAL_REPORT.md"),),
+    "direction_scout": (
+        ("Direction cards", "research/directions.json"),
+        ("Research artifacts", "research"),
+    ),
+    "strategy_analysis": (("Research artifacts", "research"),),
+    "recombine": (("Research artifacts", "research"),),
+    "challenger": (
+        ("Challenger evidence", "controller/challengers"),
+        ("Research artifacts", "research"),
+    ),
+}
+
+
+def safe_page_name(value: object) -> str | None:
+    """Return the value when it is safe to use as an owner page basename."""
+
+    text = str(value or "")
+    return text if _PAGE_NAME.fullmatch(text) else None
+
+
+def phase_component(provenance: object, name: str) -> Mapping[str, Any]:
+    """Return the provenance component entry for one workflow phase."""
+
+    components = _mapping(_mapping(provenance).get("components"))
+    for value in _sequence(components.get("phases")):
+        entry = _mapping(value)
+        if str(entry.get("name")) == name:
+            return entry
+    return {}
+
+
+def phase_artifacts(run_dir: Path, phase_name: str) -> list[tuple[str, Path]]:
+    """Existing, symlink-free evidence roots associated with one phase."""
+
+    found = []
+    for label, relative in _PHASE_ARTIFACTS.get(phase_name, ()):
+        target = run_dir / relative
+        if target.exists() and not target.is_symlink():
+            found.append((label, target))
+    return found
 
 
 def tree_bytes(root: Path) -> int:

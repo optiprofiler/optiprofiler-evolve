@@ -213,6 +213,7 @@ def _build_run_dir(root: Path, *, terminal: bool = True) -> Path:
     (traces / "chunks.jsonl").write_text("{}\n", encoding="utf-8")
     (traces / "outcome.json").write_text("{}\n", encoding="utf-8")
 
+    (run_dir / "attempts.jsonl").write_text("{}\n", encoding="utf-8")
     (run_dir / "candidates" / "seed").mkdir(parents=True)
     (run_dir / "candidates" / "seed" / "solver.py").write_text(
         "def solver(fun, x0):\n    return x0\n", encoding="utf-8"
@@ -281,7 +282,8 @@ class OwnerViewTests(unittest.TestCase):
             attempt_page = run_dir / "owner" / "attempts" / f"{ATTEMPT}.html"
             review_page = run_dir / "owner" / "roles" / f"{REVIEW_JOB}.html"
             role_page = run_dir / "owner" / "roles" / f"{ROLE_JOB}.html"
-            for page in (index, attempt_page, review_page, role_page):
+            phase_page = run_dir / "owner" / "phases" / "explore.html"
+            for page in (index, attempt_page, review_page, role_page, phase_page):
                 self.assertTrue(page.is_file(), page)
 
             index_text = index.read_text(encoding="utf-8")
@@ -323,7 +325,7 @@ class OwnerViewTests(unittest.TestCase):
             self.assertLess(attempt_page.stat().st_size, 400_000)
 
             # Every relative link on every owner page resolves on disk.
-            for page in (index, attempt_page, review_page, role_page):
+            for page in (index, attempt_page, review_page, role_page, phase_page):
                 for href in _hrefs(page):
                     if href.startswith("#"):
                         continue
@@ -379,6 +381,100 @@ class OwnerViewTests(unittest.TestCase):
             self.assertIn("fitness", owner)
             self.assertIn("Scalar fallback (one objective)", owner)
             self.assertIn("top_biased_validation_weighted", owner)
+
+
+    def test_workflow_canvas_and_phase_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = _build_run_dir(Path(directory))
+            (run_dir / "provenance.json").write_text(
+                json.dumps(
+                    {
+                        "components": {
+                            "phases": [
+                                {"name": "explore", "options": {"population": 2}}
+                            ],
+                            "retention": {
+                                "name": "metric_pareto",
+                                "options": {"objectives": ["fitness"]},
+                            },
+                            "parent_sampler": {"name": "uniform", "options": {}},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            hostile = [
+                json.dumps(
+                    {
+                        "seq": 100,
+                        "ts": "2026-07-23T10:07:00+00:00",
+                        "kind": "phase_started",
+                        "scope": {"phase": "../evil"},
+                        "status": "running",
+                        "data": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "seq": 101,
+                        "ts": "2026-07-23T10:07:01+00:00",
+                        "kind": "phase_finished",
+                        "scope": {"phase": "../evil"},
+                        "status": "succeeded",
+                        "data": {},
+                    }
+                ),
+            ]
+            with (run_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write("\n".join(hostile) + "\n")
+
+            render_owner_views(run_dir / "events.jsonl", run_dir, final=True)
+
+            index = (run_dir / "status.html").read_text(encoding="utf-8")
+            # Continuous canvas with Fit/zoom controls on the owner index only.
+            self.assertIn('class="wf-canvas"', index)
+            self.assertIn('data-wf="fit"', index)
+            self.assertIn('data-wf="in"', index)
+            self.assertIn('data-wf="out"', index)
+            # Explore node is a link and carries the matrix summary.
+            self.assertIn('href="owner/phases/explore.html"', index)
+            self.assertIn(
+                "1 islands · 1 iterations · 1 attempts · 1 accepted · 0 quarantined",
+                index,
+            )
+
+            phase_page = run_dir / "owner" / "phases" / "explore.html"
+            self.assertTrue(phase_page.is_file())
+            page = phase_page.read_text(encoding="utf-8")
+            self.assertIn("PRIVATE", page)
+            self.assertIn("Island matrix", page)
+            self.assertIn("Population policy", page)
+            self.assertIn("Scalar fallback (one objective)", page)
+            self.assertIn(f'href="../attempts/{ATTEMPT}.html"', page)
+            self.assertIn(f'href="../roles/{REVIEW_JOB}.html"', page)
+            self.assertIn("population", page)
+            self.assertIn("attempts.jsonl", page)
+            self.assertIn("Key events", page)
+            self.assertIn("role_agent_finished", page)
+            # Attempt-scoped noise stays off the phase event table.
+            self.assertNotIn("worker_finished", page)
+
+            # Hostile phase names never become files and never become links.
+            self.assertFalse((run_dir / "owner" / "evil.html").exists())
+            self.assertFalse((run_dir / "evil.html").exists())
+            self.assertFalse((Path(directory) / "evil.html").exists())
+            names = {path.name for path in (run_dir / "owner" / "phases").iterdir()}
+            self.assertEqual(names, {"explore.html"})
+            self.assertNotIn('href="owner/phases/../evil', index)
+
+            # The sanitized public page keeps zero scripts and zero controls.
+            public_events = run_dir / "public_events.jsonl"
+            project_public_events(run_dir / "events.jsonl", public_events)
+            render_status(public_events, run_dir / "public_status.html")
+            public = (run_dir / "public_status.html").read_text(encoding="utf-8")
+            self.assertNotIn("<script", public.lower())
+            self.assertNotIn("data-wf", public)
+            self.assertNotIn("owner/", public)
 
     def test_public_bundle_never_contains_owner_material(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
