@@ -105,6 +105,40 @@ class PackOwnerEvidenceTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0, bad)
                 self.assertIn("refus", result.stderr.lower(), bad)
 
+    def test_refuses_malicious_identifiers_and_creates_nothing_outside(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run_dir = self._prepared_run(root)
+            manifest_path = run_dir / "owner" / "MANIFEST.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["attempts"].append(
+                {
+                    "attempt_id": "../../evil",
+                    "evidence": {
+                        "transcript": {
+                            "path": f"transcripts/{ATTEMPT}.jsonl",
+                            "bytes": 1,
+                        }
+                    },
+                }
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            before = set(root.rglob("*"))
+            for bad in ("../../evil", "/abs", "a/b", ".hidden"):
+                result = _run(str(run_dir), "--attempt", bad)
+                self.assertNotEqual(result.returncode, 0, bad)
+                self.assertIn("refus", result.stderr.lower(), bad)
+            result = _run(str(run_dir), "--role", "../../evil")
+            self.assertNotEqual(result.returncode, 0)
+
+            after = set(root.rglob("*"))
+            created = {path for path in after - before if path.suffix in {".gz", ".tmp"}}
+            self.assertEqual(created, set())
+            self.assertFalse((run_dir / "evil.tar.gz").exists())
+            self.assertFalse((run_dir / "owner" / "evil.tar.gz").exists())
+            self.assertFalse((root / "evil.tar.gz").exists())
+
     def test_unknown_attempt_is_an_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = self._prepared_run(Path(directory))

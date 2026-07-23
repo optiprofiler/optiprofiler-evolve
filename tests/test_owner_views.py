@@ -20,6 +20,7 @@ MODEL_CANARY = "MODEL_SECRET_881"
 VALIDATION_CANARY = "0.428142"
 FINDING_CANARY = "REVIEWER_FINDING_SECRET_881"
 TRANSCRIPT_CANARY = "RAW_TRACE_SECRET_881"
+STDOUT_CANARY = "STDOUT_STREAM_SECRET_881"
 
 ATTEMPT = "it001-i00-a00"
 REVIEW_JOB = f"{ATTEMPT}-r01"
@@ -105,7 +106,11 @@ def _attempt_rows(run_dir: Path, *, terminal: bool = True) -> list:
             "role_agent_finished",
             "succeeded",
             {"role": "integrity-reviewer", "job_id": REVIEW_JOB, "phase": "explore"},
-            {"returncode": 0, "timed_out": False, "outputs": ["review.json"]},
+            {
+                "returncode": 0,
+                "timed_out": False,
+                "outputs": ["review.json", "missing.json", "../escape.json"],
+            },
         ),
         (
             _ts(3, 2),
@@ -199,8 +204,12 @@ def _build_run_dir(root: Path, *, terminal: bool = True) -> Path:
 
     traces = run_dir / "traces" / ATTEMPT
     traces.mkdir(parents=True)
-    (traces / "raw.stdout.stream").write_text("worker stdout\n", encoding="utf-8")
-    (traces / "raw.stderr.stream").write_text("worker stderr\n", encoding="utf-8")
+    (traces / "raw.stdout.stream").write_text(
+        STDOUT_CANARY + "\nworker stdout\n", encoding="utf-8"
+    )
+    (traces / "raw.stderr.stream").write_text(
+        "".join(f"stderr line {index}\n" for index in range(300)), encoding="utf-8"
+    )
     (traces / "chunks.jsonl").write_text("{}\n", encoding="utf-8")
     (traces / "outcome.json").write_text("{}\n", encoding="utf-8")
 
@@ -245,6 +254,10 @@ def _build_run_dir(root: Path, *, terminal: bool = True) -> Path:
     (research / "traces" / "integrity-reviewer" / REVIEW_JOB).mkdir(parents=True)
     (research / "traces" / "integrity-reviewer" / REVIEW_JOB / "raw.stdout.stream").write_text(
         "reviewer stdout\n", encoding="utf-8"
+    )
+    (research / "roles" / "integrity-reviewer" / REVIEW_JOB).mkdir(parents=True)
+    (research / "roles" / "integrity-reviewer" / REVIEW_JOB / "review.json").write_text(
+        "{}", encoding="utf-8"
     )
     (research / "transcripts" / "director").mkdir(parents=True)
     (research / "transcripts" / "director" / f"{ROLE_JOB}.jsonl").write_text(
@@ -291,6 +304,18 @@ class OwnerViewTests(unittest.TestCase):
             self.assertIn("diff.patch", attempt_text)
             self.assertIn(f"../roles/{REVIEW_JOB}.html", attempt_text)
             self.assertIn("completed", attempt_text)
+
+            # Bounded raw stream previews with full-file links.
+            self.assertIn(STDOUT_CANARY, attempt_text)
+            self.assertIn("Captured stdout", attempt_text)
+            self.assertIn("lines omitted", attempt_text)
+
+            # Declared role outputs resolve to safe links or say so honestly.
+            review_text = review_page.read_text(encoding="utf-8")
+            self.assertIn("research/roles/integrity-reviewer", review_text)
+            self.assertIn("missing.json (unavailable)", review_text)
+            self.assertIn("../escape.json (unavailable)", review_text)
+            self.assertIn("reviewer stdout", review_text)
 
             # Hostile transcript content is escaped, and previews are bounded.
             self.assertNotIn("<script", attempt_text.lower())
@@ -355,6 +380,7 @@ class OwnerViewTests(unittest.TestCase):
             )
             for canary in (
                 MODEL_CANARY,
+                STDOUT_CANARY,
                 VALIDATION_CANARY,
                 FINDING_CANARY,
                 TRANSCRIPT_CANARY,

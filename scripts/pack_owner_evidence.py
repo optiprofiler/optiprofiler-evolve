@@ -12,13 +12,25 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tarfile
 from pathlib import Path
 
+# Same shape the engine enforces for attempt and job identifiers. It excludes
+# path separators and leading dots, so a validated identifier can never steer
+# the archive name outside the output directory.
+_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
+
 
 class PackError(RuntimeError):
     """A manifest entry or filesystem state that must not be packed."""
+
+
+def _safe_identifier(value: str) -> str:
+    if not _IDENTIFIER.fullmatch(value):
+        raise PackError(f"Refusing unsafe identifier: {value!r}")
+    return value
 
 
 def load_manifest(run_dir: Path) -> dict:
@@ -144,11 +156,13 @@ def main(argv: list[str] | None = None) -> int:
             written.append(_pack(run_dir, output_dir / "owner_evidence.tar.gz", entries))
         else:
             for attempt in args.attempt:
+                attempt = _safe_identifier(attempt)
                 entries = _entries_for(payload, "attempts", {attempt})
                 if not entries:
                     raise PackError(f"Attempt not present in manifest: {attempt!r}")
                 written.append(_pack(run_dir, output_dir / f"{attempt}.tar.gz", entries))
             for role in args.role:
+                role = _safe_identifier(role)
                 entries = _entries_for(payload, "roles", {role})
                 if not entries:
                     raise PackError(f"Agent job not present in manifest: {role!r}")

@@ -8,15 +8,24 @@ sanitized pages remain the responsibility of :mod:`.viewers`.
 
 from __future__ import annotations
 
-import difflib
-import json
 import os
 from collections.abc import Mapping
 from datetime import datetime
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from ._owner_evidence import (
+    DIFF_PREVIEW_LINES,
+    compact_text,
+    parse_transcript,
+    preview_stream,
+    read_json,
+    resolve_recorded_path,
+    resolve_role_output,
+    unified_diff,
+    write_owner_manifest,
+)
 from .events import read_events, rebuild_run_state
 from .viewers import (
     _STYLE,
@@ -37,16 +46,6 @@ from .viewers import (
     _status_line,
 )
 
-
-PREVIEW_MAX_BYTES = 65_536
-PREVIEW_HEAD_LINES = 100
-PREVIEW_TAIL_LINES = 60
-TRANSCRIPT_MAX_ENTRIES = 80
-TRANSCRIPT_ENTRY_CHARS = 400
-DIFF_MAX_FILES = 200
-DIFF_FILE_MAX_BYTES = 200_000
-DIFF_PATCH_MAX_BYTES = 512_000
-DIFF_PREVIEW_LINES = 160
 
 _TRACE_FILES = (
     "raw.stdout.stream",
@@ -153,7 +152,7 @@ def render_owner_views(events_path: Path, run_dir: Path, *, final: bool = False)
 
     _atomic_write(run_dir / "status.html", _render_owner_index(state, details, now))
     if final:
-        _write_owner_manifest(state, run_dir)
+        write_owner_manifest(state, run_dir)
 
 
 def _collect_private_details(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -539,6 +538,7 @@ def _attempt_worker_section(
         else ""
     )
     transcript_html = _transcript_preview(transcript, run_dir, page_dir)
+    streams_html = _stream_previews(trace_dir, run_dir, page_dir)
     links = [
         _link_or_missing(run_dir, trace_dir / name, page_dir, name) for name in _TRACE_FILES
     ]
@@ -547,9 +547,36 @@ def _attempt_worker_section(
         f'<div class="kv">{kv}</div>{capture}'
         "<h3>Transcript (messages and tool calls)</h3>"
         f"{transcript_html}"
+        f"{streams_html}"
         "<h3>Raw capture</h3>"
         f'<ul class="evidence-list">{"".join(f"<li>{item}</li>" for item in links)}</ul>'
     )
+
+
+def _stream_previews(trace_dir: Path, run_dir: Path, page_dir: Path) -> str:
+    sections = []
+    for name, title in (
+        ("raw.stdout.stream", "Captured stdout"),
+        ("raw.stderr.stream", "Captured stderr"),
+    ):
+        preview = preview_stream(trace_dir / name)
+        if preview is None:
+            sections.append(
+                f'<h3>{_h(title)}</h3><p class="missing">{_h(name)} (unavailable)</p>'
+            )
+            continue
+        text, truncated = preview
+        note = (
+            '<p class="truncated">Preview truncated; open the full stream below.</p>'
+            if truncated
+            else ""
+        )
+        link = _relative_link(trace_dir / name, page_dir, run_dir)
+        sections.append(
+            f'<h3>{_h(title)}</h3><pre class="preview">{_h(text)}</pre>{note}'
+            f"<p>Full stream: {link}</p>"
+        )
+    return "".join(sections)
 
 
 def _attempt_steps_section(
@@ -573,7 +600,7 @@ def _attempt_steps_section(
         duration = _duration_text(step, now)
         metrics = _mapping(data.get("metrics"))
         metric_rows = "".join(
-            f"<tr><td>{_h(key)}</td><td><code>{_h(_compact(value))}</code></td></tr>"
+            f"<tr><td>{_h(key)}</td><td><code>{_h(compact_text(value))}</code></td></tr>"
             for key, value in sorted(metrics.items())
         )
         metrics_html = (
@@ -583,7 +610,7 @@ def _attempt_steps_section(
         )
         artifact_items = []
         for artifact in _sequence(data.get("artifacts")):
-            resolved = _resolve_recorded_path(str(artifact), run_dir)
+            resolved = resolve_recorded_path(str(artifact), run_dir)
             if resolved is not None:
                 artifact_items.append(_relative_link(resolved, page_dir, run_dir))
             else:
@@ -636,7 +663,7 @@ def _attempt_diff_section(
                 break
     diff_html = '<p class="missing">Diff unavailable (missing candidate or parent tree).</p>'
     if candidate_root.is_dir() and parent_root is not None:
-        patch, truncated = _unified_diff(parent_root, candidate_root)
+        patch, truncated = unified_diff(parent_root, candidate_root)
         if not patch:
             diff_html = '<p class="missing">No textual differences from parent.</p>'
         else:
@@ -676,7 +703,7 @@ def _attempt_review_section(
     decision_path = review_root / "decision.json"
     decision_html = '<p class="missing">Decision file unavailable.</p>'
     if decision_path.is_file():
-        decision = _read_json(decision_path)
+        decision = read_json(decision_path)
         findings = _sequence(_mapping(decision).get("findings"))
         finding_items = []
         for value in findings:
@@ -715,7 +742,7 @@ def _attempt_review_section(
             if job_id is not None
             else "-"
         )
-        report = _resolve_recorded_path(str(invocation.get("report") or ""), run_dir)
+        report = resolve_recorded_path(str(invocation.get("report") or ""), run_dir)
         report_html = (
             _relative_link(report, page_dir, run_dir)
             if report is not None
@@ -726,7 +753,7 @@ def _attempt_review_section(
             "<tr>"
             f"<td>{_h(number if number is not None else '-')}</td>"
             f"<td>{_status_line(_safe_status(invocation.get('status')))}</td>"
-            f"<td><code>{_h(_compact(outcome))}</code></td>"
+            f"<td><code>{_h(compact_text(outcome))}</code></td>"
             f"<td>{job_link}</td>"
             f"<td>{report_html}</td>"
             "</tr>"
@@ -766,7 +793,7 @@ def _attempt_gateway_section(
     worker = _mapping(private.get("worker"))
     outcome = worker.get("provider_gateway_outcome")
     count = worker.get("provider_gateway_request_count")
-    manifest = _resolve_recorded_path(
+    manifest = resolve_recorded_path(
         str(worker.get("provider_gateway_manifest") or ""), run_dir
     )
     manifest_html = (
@@ -817,19 +844,29 @@ def _render_role_page(
         f"<div><span>{_h(name)}</span><strong>{_h(value)}</strong></div>"
         for name, value in facts
     )
+    workspace = run_dir / "research" / "roles" / role_name / job_id
     outputs = _sequence(private.get("outputs"))
+    output_items = []
+    for name in outputs:
+        target = resolve_role_output(workspace, str(name))
+        if target is not None:
+            output_items.append(_relative_link(target, page_dir, run_dir))
+        else:
+            output_items.append(f'<span class="missing">{_h(name)} (unavailable)</span>')
     outputs_html = (
         '<ul class="evidence-list">'
-        + "".join(f"<li><code>{_h(item)}</code></li>" for item in outputs)
+        + "".join(f"<li>{item}</li>" for item in output_items)
         + "</ul>"
-        if outputs
+        if output_items
         else '<p class="missing">No declared outputs.</p>'
     )
     links = [
         _link_or_missing(run_dir, trace_dir / name, page_dir, name) for name in _TRACE_FILES
     ]
     links.append(_link_or_missing(run_dir, trace_dir, page_dir, "trace directory"))
+    links.append(_link_or_missing(run_dir, workspace, page_dir, "role workspace"))
     transcript_html = _transcript_preview(transcript, run_dir, page_dir)
+    streams_html = _stream_previews(trace_dir, run_dir, page_dir)
     document = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -847,7 +884,7 @@ def _render_role_page(
     <div class="run-head">{_status_icon(status)}<div><h1><code>{_h(job_id)}</code><span class="owner-tag">Private</span></h1><p class="subhead">{subhead}</p></div></div>
     <div class="kv">{kv}</div>
     <section class="owner-section"><h2>Transcript (messages and tool calls)</h2>{transcript_html}</section>
-    <section class="owner-section"><h2>Raw capture</h2><ul class="evidence-list">{"".join(f"<li>{item}</li>" for item in links)}</ul></section>
+    <section class="owner-section"><h2>Raw capture</h2>{streams_html}<ul class="evidence-list">{"".join(f"<li>{item}</li>" for item in links)}</ul></section>
     <section class="owner-section"><h2>Declared outputs</h2>{outputs_html}</section>
     <p class="footnote">Private owner evidence page. Share only the public/ bundle.</p>
   </main>
@@ -857,73 +894,10 @@ def _render_role_page(
     return document
 
 
-def _write_owner_manifest(state: Mapping[str, Any], run_dir: Path) -> None:
-    """Write the derived evidence index. It never holds content or secrets."""
-
-    attempts = []
-    for value in _sequence(state.get("attempts")):
-        attempt = _mapping(value)
-        attempt_id = str(attempt.get("attempt_id"))
-        evidence = {}
-        for name, relative in (
-            ("workspace", f"workspaces/{attempt_id}"),
-            ("candidate_snapshot", f"candidates/{attempt_id}"),
-            ("transcript", f"transcripts/{attempt_id}.jsonl"),
-            ("traces", f"traces/{attempt_id}"),
-            ("evaluations", f"controller/evaluations/{attempt_id}"),
-            ("final_evaluation", f"controller/final_evaluations/{attempt_id}"),
-            ("integrity_reviews", f"controller/integrity_reviews/{attempt_id}"),
-            ("broker", f"controller/brokers/{attempt_id}"),
-        ):
-            target = run_dir / relative
-            if target.exists() and not target.is_symlink():
-                evidence[name] = {"path": relative, "bytes": _tree_bytes(target)}
-        attempts.append({"attempt_id": attempt_id, "evidence": evidence})
-    roles = []
-    for value in _sequence(state.get("roles")):
-        role = _mapping(value)
-        job_id = str(role.get("job_id"))
-        role_name = str(role.get("role", ""))
-        evidence = {}
-        for name, relative in (
-            ("transcript", f"research/transcripts/{role_name}/{job_id}.jsonl"),
-            ("traces", f"research/traces/{role_name}/{job_id}"),
-        ):
-            target = run_dir / relative
-            if target.exists() and not target.is_symlink():
-                evidence[name] = {"path": relative, "bytes": _tree_bytes(target)}
-        roles.append({"job_id": job_id, "role": role_name, "evidence": evidence})
-    manifest = {
-        "schema": "optiprofiler_evolve_owner_manifest/1",
-        "note": (
-            "Derived evidence index for pack_owner_evidence.py. The event ledger "
-            "and the files on disk remain the sources of truth."
-        ),
-        "attempts": attempts,
-        "roles": roles,
-    }
-    _atomic_write(
-        run_dir / "owner" / "MANIFEST.json",
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-    )
-
-
-def _tree_bytes(root: Path) -> int:
-    if root.is_file():
-        return root.stat().st_size
-    total = 0
-    for base, _dirs, files in os.walk(root, followlinks=False):
-        for name in files:
-            path = Path(base) / name
-            if not path.is_symlink():
-                total += path.stat().st_size
-    return total
-
-
 def _transcript_preview(transcript: Path, run_dir: Path, page_dir: Path) -> str:
     if not transcript.is_file():
         return '<p class="missing">Transcript unavailable.</p>'
-    entries, fallback, truncated = _parse_transcript(transcript)
+    entries, fallback, truncated = parse_transcript(transcript)
     if entries:
         body = "".join(
             f'<div class="tr-entry"><span>{_h(label)}</span><pre>{_h(text)}</pre></div>'
@@ -941,144 +915,6 @@ def _transcript_preview(transcript: Path, run_dir: Path, page_dir: Path) -> str:
     return f"{preview}{note}<p>Full transcript: {link}</p>"
 
 
-def _parse_transcript(path: Path) -> tuple[list[tuple[str, str]], str, bool]:
-    raw = path.read_bytes()
-    truncated = len(raw) > PREVIEW_MAX_BYTES
-    text = raw[:PREVIEW_MAX_BYTES].decode("utf-8", errors="replace")
-    entries: list[tuple[str, str]] = []
-    parsed_any = False
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(payload, Mapping):
-            continue
-        parsed_any = True
-        label_bits = [
-            str(payload.get(key))
-            for key in ("type", "role", "subtype", "tool", "name")
-            if payload.get(key)
-        ]
-        label = " / ".join(label_bits[:3]) or "entry"
-        snippet = _extract_text(payload)
-        entries.append((label, snippet[:TRANSCRIPT_ENTRY_CHARS]))
-        if len(entries) >= TRANSCRIPT_MAX_ENTRIES:
-            truncated = True
-            break
-    if parsed_any:
-        return entries, "", truncated
-    preview, text_truncated = _bounded_lines(text)
-    return [], preview, truncated or text_truncated
-
-
-def _extract_text(payload: Mapping[str, Any]) -> str:
-    for key in ("text", "content", "message", "prompt", "output", "input", "data"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value
-        if isinstance(value, Mapping):
-            nested = _extract_text(value)
-            if nested:
-                return nested
-        if isinstance(value, list):
-            parts = []
-            for item in value:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, Mapping):
-                    nested = _extract_text(item)
-                    if nested:
-                        parts.append(nested)
-            if parts:
-                return "\n".join(parts)
-    return json.dumps(payload, sort_keys=True)[:TRANSCRIPT_ENTRY_CHARS]
-
-
-def _bounded_lines(text: str) -> tuple[str, bool]:
-    lines = text.splitlines()
-    if len(lines) <= PREVIEW_HEAD_LINES + PREVIEW_TAIL_LINES:
-        return text, False
-    head = lines[:PREVIEW_HEAD_LINES]
-    tail = lines[-PREVIEW_TAIL_LINES:]
-    omitted = len(lines) - PREVIEW_HEAD_LINES - PREVIEW_TAIL_LINES
-    return "\n".join([*head, f"... [{omitted} lines omitted] ...", *tail]), True
-
-
-def _unified_diff(parent: Path, candidate: Path) -> tuple[str, bool]:
-    names: set[str] = set()
-    for root in (parent, candidate):
-        for base, dirs, files in os.walk(root, followlinks=False):
-            dirs[:] = [name for name in dirs if name not in {"__pycache__", ".git"}]
-            for name in files:
-                path = Path(base) / name
-                if path.is_symlink():
-                    continue
-                names.add(str(path.relative_to(root)))
-    chunks: list[str] = []
-    total = 0
-    truncated = False
-    for relative in sorted(names)[:DIFF_MAX_FILES]:
-        before = _read_text_bounded(parent / relative)
-        after = _read_text_bounded(candidate / relative)
-        if before is None and after is None:
-            continue
-        if before == after:
-            continue
-        diff = "".join(
-            difflib.unified_diff(
-                (before or "").splitlines(keepends=True),
-                (after or "").splitlines(keepends=True),
-                fromfile=f"parent/{relative}",
-                tofile=f"candidate/{relative}",
-            )
-        )
-        if not diff:
-            continue
-        total += len(diff)
-        chunks.append(diff)
-        if total > DIFF_PATCH_MAX_BYTES:
-            truncated = True
-            break
-    if len(names) > DIFF_MAX_FILES:
-        truncated = True
-    return "".join(chunks), truncated
-
-
-def _read_text_bounded(path: Path) -> str | None:
-    if not path.is_file() or path.is_symlink():
-        return None
-    if path.stat().st_size > DIFF_FILE_MAX_BYTES:
-        return f"[file larger than {DIFF_FILE_MAX_BYTES} bytes; diff skipped]\n"
-    data = path.read_bytes()
-    if b"\x00" in data:
-        return "[binary file; diff skipped]\n"
-    return data.decode("utf-8", errors="replace")
-
-
-def _resolve_recorded_path(recorded: str, run_dir: Path) -> Path | None:
-    """Map a path recorded at run time onto the current run directory."""
-
-    if not recorded:
-        return None
-    parts = PurePosixPath(recorded.replace("\\", "/")).parts
-    for start in range(len(parts)):
-        suffix = parts[start:]
-        if not suffix or ".." in suffix:
-            continue
-        candidate = run_dir.joinpath(*suffix)
-        if candidate.exists() and not candidate.is_symlink():
-            try:
-                candidate.resolve().relative_to(run_dir.resolve())
-            except ValueError:
-                return None
-            return candidate
-    return None
-
-
 def _relative_link(target: Path, page_dir: Path, run_dir: Path) -> str:
     relative = os.path.relpath(target, page_dir)
     href = quote(relative.replace(os.sep, "/"))
@@ -1094,18 +930,6 @@ def _link_or_missing(run_dir: Path, target: Path, page_dir: Path, label: str) ->
 
 def _href(prefix: str, name: str) -> str:
     return _h(f"{prefix}/{quote(str(name))}.html")
-
-
-def _compact(value: object) -> str:
-    text = str(value)
-    return text if len(text) <= 200 else text[:200] + "…"
-
-
-def _read_json(path: Path) -> object:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
 
 
 __all__: list[str] = []
