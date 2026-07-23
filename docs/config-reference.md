@@ -94,6 +94,7 @@ normalization, and other identity-sensitive fields.
 | `workers.timeout_seconds` | positive integer | `1800` | Wall-time limit for one coding-agent process. |
 | `workers.token_budget` | positive integer or `null` | `null` | Advisory token budget inserted into the worker task. |
 | `workers.max_budget_usd` | positive number or `null` | `null` | Claude Code per-worker cost limit. Other providers enforce their own limits. |
+| `workers.prompt_note` | non-empty string (≤2000 chars) or `null` | `null` | Extra run-owner work constraint rendered into the worker task card as `Experiment note (must follow)`. It shapes how workers spend the budget; it never replaces isolation, evaluation policy, or safety limits. |
 | `workers.adapter` | registered name | `cli` | Worker lifecycle adapter. The built-in adapter runs Codex or Claude Code. `provider_gateway` currently requires `cli`; custom adapters do not implement that credential boundary. |
 | `workers.allow_direct_provider` | boolean | `false` | First unsafe opt-in for bypassing the provider gateway. Docker direct mode also requires `sandbox.allow_direct_network=true`. |
 | `workers.pool[].harness` | `claude` or `codex` | **required** | Coding-agent CLI adapter. |

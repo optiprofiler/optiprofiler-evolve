@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import tempfile
 import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from optiprofiler_evolve.broker import EvaluationBroker
 from optiprofiler_evolve.config import EvaluationConfig
 from optiprofiler_evolve.data import DataPlan
 from optiprofiler_evolve.evaluation import (
@@ -211,5 +213,156 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
         self.assertEqual(_problems_for_mode(data, "public_score"), ("PUBLIC",))
 
 
+class DockerRequestStagingTests(unittest.TestCase):
+    """The /request bind source must be run-owned, short-lived, and private."""
+
+    def _make_evaluator(self, root: Path) -> DockerOptiProfilerEvaluator:
+        data = DataPlan(
+            library="s2mpj",
+            selection={},
+            universe=("SECRET_NAME",),
+            public=("SECRET_NAME",),
+            validation=(),
+            hidden=(),
+            smoke=("SECRET_NAME",),
+            split_seed=0,
+            manifest_hash="test",
+            aliases={"SECRET_NAME": "P_OPAQUE"},
+        )
+        reference = root / "reference"
+        reference.mkdir(exist_ok=True)
+        return DockerOptiProfilerEvaluator(
+            reference=reference,
+            interface=InterfaceSpec.parse("solver.py:solver"),
+            data=data,
+            config=EvaluationConfig(backend="docker", docker_image="evaluator:test"),
+        )
+
+    def _run_and_capture(self, evaluator, candidate, output_dir, *, timeout=False):
+        seen = {}
+
+        def fake_run(command, **kwargs):
+            if list(command[:2]) == ["docker", "rm"]:
+                return types.SimpleNamespace(returncode=0, stdout="")
+            mount = next(item for item in command if ",dst=/request" in str(item))
+            source = Path(str(mount).split("src=", 1)[1].split(",dst=", 1)[0])
+            seen["source"] = source
+            seen["existed_during_call"] = source.is_dir()
+            seen["request_file_during_call"] = (
+                source / "evaluation_request.json"
+            ).is_file()
+            if timeout:
+                raise subprocess.TimeoutExpired(cmd=command, timeout=1, output=b"late")
+            return types.SimpleNamespace(returncode=7, stdout="evaluator refused")
+
+        with patch(
+            "optiprofiler_evolve.evaluation.subprocess.run", side_effect=fake_run
+        ):
+            result = evaluator.evaluate(candidate, "smoke", output_dir)
+        return seen, result
+
+    def _assert_no_request_leftovers(self, root: Path) -> None:
+        leftovers = [
+            path
+            for path in root.rglob(".ope-evaluator-request-*")
+            if path.exists()
+        ]
+        self.assertEqual(leftovers, [])
+
+    def test_bind_source_is_sibling_of_output_and_exists_during_call(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evaluator = self._make_evaluator(root)
+            output_dir = root / "controller" / "evaluations" / "seed" / "public"
+            seen, result = self._run_and_capture(
+                evaluator, root / "candidate", output_dir
+            )
+
+            self.assertTrue(seen["existed_during_call"])
+            self.assertTrue(seen["request_file_during_call"])
+            self.assertEqual(seen["source"].parent, output_dir.resolve().parent)
+            self.assertTrue(seen["source"].name.startswith(".ope-evaluator-request-"))
+            self.assertFalse(result.success)
+            self._assert_no_request_leftovers(root)
+
+    def test_staging_is_cleaned_after_failure_and_timeout(self) -> None:
+        for timeout in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                evaluator = self._make_evaluator(root)
+                output_dir = root / "controller" / "evaluations" / "cand" / "public"
+                seen, result = self._run_and_capture(
+                    evaluator, root / "candidate", output_dir, timeout=timeout
+                )
+                self.assertFalse(result.success)
+                self.assertFalse(seen["source"].exists())
+                self._assert_no_request_leftovers(root)
+
+    def test_request_mount_writable_and_hardening_flags_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evaluator = self._make_evaluator(root)
+            request = root / "controller-only" / "evaluation_request.json"
+            request.parent.mkdir()
+            request.write_text("{}", encoding="utf-8")
+            output = root / "output"
+            output.mkdir()
+            command = evaluator.command(root / "candidate", output, "name", request)
+
+            request_mount = next(item for item in command if ",dst=/request" in item)
+            # Writable on purpose: the in-container runner unlinks the request
+            # (real problem names) before candidate code can run.
+            self.assertNotIn("readonly", request_mount)
+            for destination in ("/candidate", "/reference"):
+                mount = next(item for item in command if f",dst={destination}" in item)
+                self.assertIn("readonly", mount)
+            joined = " ".join(command)
+            self.assertIn("--network none", joined)
+            self.assertIn("--cap-drop ALL", joined)
+            self.assertIn("--read-only", joined)
+            self.assertIn("no-new-privileges", joined)
+
+    def test_request_staging_never_enters_published_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evaluator = self._make_evaluator(root)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            control = root / "controller" / "brokers" / "cand"
+            broker = EvaluationBroker(
+                workspace=workspace,
+                control_dir=control,
+                evaluator=evaluator,
+                max_smoke_calls=5,
+                max_public_calls=5,
+                candidate_validator=lambda candidate_root: None,
+            )
+            output = control / "artifacts" / "evaluations" / "smoke" / "000"
+
+            seen = {}
+
+            def fake_run(command, **kwargs):
+                if list(command[:2]) == ["docker", "rm"]:
+                    return types.SimpleNamespace(returncode=0, stdout="")
+                mount = next(item for item in command if ",dst=/request" in str(item))
+                source = Path(str(mount).split("src=", 1)[1].split(",dst=", 1)[0])
+                seen["source_parent"] = source.parent
+                return types.SimpleNamespace(returncode=7, stdout="refused")
+
+            with patch(
+                "optiprofiler_evolve.evaluation.subprocess.run", side_effect=fake_run
+            ):
+                broker._evaluate_and_publish("smoke", output)
+
+            self.assertEqual(seen["source_parent"], (control / "staging").resolve())
+            self.assertTrue(output.is_dir())
+            self._assert_no_request_leftovers(control)
+            published = {path.name for path in output.iterdir()}
+            self.assertNotIn(
+                True, [name.startswith(".ope-evaluator-request-") for name in published]
+            )
+
+
 if __name__ == "__main__":
+
     unittest.main()

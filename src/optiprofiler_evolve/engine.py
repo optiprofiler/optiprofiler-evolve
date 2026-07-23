@@ -973,6 +973,19 @@ class EvolutionEngine:
                     verdict="reject",
                     error=f"{type(exc).__name__}: {exc}",
                 )
+            # Non-removable admission gate: a worker that did not finish
+            # cleanly (nonzero exit such as budget exhaustion, or a timeout)
+            # must not feed its half-finished workspace into later steps,
+            # evaluation, review, or the population. The trace and workspace
+            # stay on disk for post-mortem analysis.
+            failure = _worker_failure(capabilities.worker_outcome)
+            if failure is not None and result.verdict != "reject":
+                result = StepResult(
+                    verdict="reject",
+                    metrics=result.metrics,
+                    artifacts=result.artifacts,
+                    error=result.error or failure,
+                )
             results.append(result)
             status = "failed" if result.verdict == "reject" else "succeeded"
             self._emit(
@@ -1108,6 +1121,9 @@ class EvolutionEngine:
                 valid=False,
                 error="cancelled_candidate_not_admitted",
             )
+        failure = _worker_failure(attempt.worker_outcome)
+        if failure is not None and record.valid:
+            record = replace(record, valid=False, error=failure)
         if record.valid:
             population = [*self.populations[record.island], record]
             try:
@@ -2024,6 +2040,7 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
             max_public_calls=engine.config.evaluation.max_public_calls_per_worker,
             forbidden_candidate_imports=engine.config.evaluation.forbidden_candidate_imports,
             direction=engine.direction_assignments.get(self._island),
+            prompt_note=engine.config.workers.prompt_note,
         )
         try:
             engine._emit(
@@ -2165,6 +2182,21 @@ def _direction_assignments(artifact: object) -> dict[int, dict[str, object]]:
 
 def _guidance_id(direction: Mapping[str, object] | None) -> str | None:
     return str(direction["card_id"]) if direction and direction.get("card_id") else None
+
+
+def _worker_failure(outcome: WorkerOutcome | None) -> str | None:
+    """Describe why a finished worker invocation must not be admitted."""
+
+    if outcome is None or outcome.cancelled:
+        return None
+    if outcome.returncode == 0 and not outcome.timed_out:
+        return None
+    parts = [f"worker_failed_not_admitted: returncode={outcome.returncode}"]
+    if outcome.timed_out:
+        parts.append("timed_out")
+    if outcome.termination_reason:
+        parts.append(f"termination={outcome.termination_reason}")
+    return ", ".join(parts)
 
 
 def _safe_identifier(value: str, label: str) -> str:

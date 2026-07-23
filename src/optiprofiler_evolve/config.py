@@ -444,6 +444,7 @@ class WorkersConfig:
     timeout_seconds: int = 1800
     token_budget: int | None = None
     max_budget_usd: float | None = None
+    prompt_note: str | None = None
     tools: ToolConfig = dataclasses.field(default_factory=ToolConfig)
     adapter: str = "cli"
     allow_direct_provider: bool = False
@@ -457,6 +458,11 @@ class WorkersConfig:
             raise ValueError("workers.token_budget must be positive when set.")
         if self.max_budget_usd is not None and self.max_budget_usd <= 0:
             raise ValueError("workers.max_budget_usd must be positive when set.")
+        if self.prompt_note is not None:
+            if not isinstance(self.prompt_note, str) or not self.prompt_note.strip():
+                raise ValueError("workers.prompt_note must be a non-empty string when set.")
+            if len(self.prompt_note) > 2000:
+                raise ValueError("workers.prompt_note must be at most 2000 characters.")
         if not self.adapter or not self.adapter.replace("-", "_").isidentifier():
             raise ValueError("workers.adapter must be a registered component name.")
         for worker in self.pool:

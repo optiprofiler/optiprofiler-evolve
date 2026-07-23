@@ -395,6 +395,111 @@ class ProviderGatewayTests(unittest.TestCase):
 
             self.assertEqual(upstream.requests, [])
 
+
+    def test_forwards_allowlisted_beta_query_to_pinned_upstream(self) -> None:
+        with _FakeUpstream() as upstream, tempfile.TemporaryDirectory() as directory:
+            audit = Path(directory) / "gateway.jsonl"
+            route = _route(upstream.base_url + "/anthropic")
+            with ProviderGatewayServer(route, audit_path=audit) as gateway:
+                status, payload, _headers = _request(
+                    gateway,
+                    "POST",
+                    "/v1/messages?beta=true",
+                    b'{"prompt":"x"}',
+                    {"Content-Type": "application/json"},
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(payload), {"ok": True})
+            self.assertEqual(
+                upstream.requests[0]["path"], "/anthropic/v1/messages?beta=true"
+            )
+            record = json.loads(audit.read_text(encoding="utf-8"))
+            self.assertEqual(record["outcome"], "completed")
+            self.assertEqual(record["path"], "/v1/messages?beta=true")
+
+    def test_rejects_queries_outside_the_route_allowlist(self) -> None:
+        with _FakeUpstream() as upstream, tempfile.TemporaryDirectory() as directory:
+            audit = Path(directory) / "gateway.jsonl"
+            with ProviderGatewayServer(
+                _route(upstream.base_url), audit_path=audit
+            ) as gateway:
+                cases = [
+                    ("POST", "/v1/messages?debug=1"),
+                    ("POST", "/v1/messages?beta=true&beta=true"),
+                    ("POST", "/v1/messages?beta=%74rue"),
+                    ("POST", "/v1/messages?beta=true/../etc"),
+                    ("POST", "/v1/messages?beta="),
+                    ("POST", "/v1/messages?BETA=true"),
+                    ("POST", "/v1/messages?beta=true&extra=1"),
+                    ("GET", "/v1/models?beta=true"),
+                ]
+                for method, path in cases:
+                    body = b"{}" if method == "POST" else b""
+                    status, payload, _ = _request(gateway, method, path, body)
+                    self.assertEqual(status, 400, path)
+                    self.assertEqual(
+                        json.loads(payload), {"error": "query_not_allowed"}, path
+                    )
+
+            self.assertEqual(upstream.requests, [])
+            records = [
+                json.loads(line)
+                for line in audit.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(len(records), len(cases))
+            for record in records:
+                self.assertEqual(record["outcome"], "rejected")
+                self.assertEqual(record["error_type"], "query_not_allowed")
+                self.assertEqual(record["path"], "<rejected>")
+
+    def test_codex_responses_route_accepts_no_query(self) -> None:
+        with _FakeUpstream() as upstream:
+            route = _route(upstream.base_url, protocol="openai_responses", auth_mode="bearer")
+            with ProviderGatewayServer(route) as gateway:
+                status, payload, _ = _request(
+                    gateway, "POST", "/v1/responses?beta=true", b"{}"
+                )
+            self.assertEqual(status, 400)
+            self.assertEqual(json.loads(payload), {"error": "query_not_allowed"})
+            self.assertEqual(upstream.requests, [])
+
+    def test_rejects_absolute_targets_even_with_the_gateway_authority(self) -> None:
+        with _FakeUpstream() as upstream:
+            with ProviderGatewayServer(_route(upstream.base_url)) as gateway:
+                host, port = gateway.address
+                # http.server collapses a leading double slash before the
+                # handler runs, so the protocol-relative form is rejected
+                # by the route allowlist (404) instead; both stay
+                # fail-closed with zero upstream requests.
+                targets = [
+                    (f"http://{host}:{port}/v1/messages?beta=true".encode(), b" 400 "),
+                    (b"http://user@evil.example/v1/messages", b" 400 "),
+                    (b"http://evil.example:8443/v1/messages", b" 400 "),
+                    (b"//evil.example/v1/messages", b" 404 "),
+                    (b"/v1/messages#fragment", b" 400 "),
+                ]
+                for target, expected_status in targets:
+                    with socket.create_connection((host, port), timeout=5) as connection:
+                        connection.sendall(
+                            b"POST " + target + b" HTTP/1.1\r\n"
+                            b"Host: gateway\r\nContent-Length: 0\r\n"
+                            b"Connection: close\r\n\r\n"
+                        )
+                        chunks = []
+                        while chunk := connection.recv(4096):
+                            chunks.append(chunk)
+                        response = b"".join(chunks)
+                    self.assertIn(expected_status, response.split(b"\r\n", 1)[0], target)
+                    if expected_status == b" 400 ":
+                        self.assertIn(
+                            b"absolute_or_qualified_target_not_allowed", response, target
+                        )
+                    else:
+                        self.assertIn(b"route_not_allowed", response, target)
+
+            self.assertEqual(upstream.requests, [])
+
     def test_streams_sse_without_buffering_the_complete_response(self) -> None:
         first = b"data: first\n\n"
         second = b"data: second\n\n"

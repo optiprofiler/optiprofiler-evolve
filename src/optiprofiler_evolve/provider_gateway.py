@@ -8,6 +8,7 @@ import http.client
 import ipaddress
 import json
 import os
+import re
 import secrets
 import signal
 import socket
@@ -37,6 +38,14 @@ _PROTOCOL_ROUTES = {
         }
     ),
 }
+# Default-deny query allowlist per (protocol, method, path). Anthropic SDK
+# clients qualify the messages routes with ?beta=true; every other route
+# rejects any query.
+_ROUTE_QUERY_KEYS: dict[tuple[str, str, str], frozenset[str]] = {
+    ("anthropic", "POST", "/v1/messages"): frozenset({"beta"}),
+    ("anthropic", "POST", "/v1/messages/count_tokens"): frozenset({"beta"}),
+}
+_QUERY_PAIR = re.compile(r"[a-z][a-z0-9_]{0,31}=[A-Za-z0-9_.\-]{1,64}")
 _HOP_BY_HOP_HEADERS = frozenset(
     {
         "connection",
@@ -381,13 +390,32 @@ class _GatewayHandler(BaseHTTPRequestHandler):
         if len(self.headers.get_all("Host", [])) > 1:
             raise _GatewayRejection(400, "duplicate_host")
         target = urlsplit(self.path)
-        if target.scheme or target.netloc or target.fragment or target.query:
+        if target.scheme or target.netloc or target.fragment:
             raise _GatewayRejection(400, "absolute_or_qualified_target_not_allowed")
         if "%" in target.path or unquote(target.path) != target.path:
             raise _GatewayRejection(400, "encoded_path_not_allowed")
         if (method, target.path) not in self.server.route.allowed_routes:
             raise _GatewayRejection(404, "route_not_allowed")
-        return target.path
+        if not target.query:
+            return target.path
+        # Anthropic-compatible CLIs qualify some allowlisted routes with a
+        # plain query (Claude Code posts /v1/messages?beta=true). Queries stay
+        # default-deny: only allowlisted keys on allowlisted routes, with
+        # unencoded conservative values and no duplicates, are forwarded to
+        # the pinned upstream; the authority and route allowlists are
+        # unchanged.
+        allowed_keys = _ROUTE_QUERY_KEYS.get(
+            (self.server.route.protocol, method, target.path), frozenset()
+        )
+        seen_keys: set[str] = set()
+        for pair in target.query.split("&"):
+            if not _QUERY_PAIR.fullmatch(pair):
+                raise _GatewayRejection(400, "query_not_allowed")
+            key = pair.split("=", 1)[0]
+            if key not in allowed_keys or key in seen_keys:
+                raise _GatewayRejection(400, "query_not_allowed")
+            seen_keys.add(key)
+        return f"{target.path}?{target.query}"
 
     def _read_request_body(self, method: str) -> bytes:
         values = self.headers.get_all("Content-Length", [])

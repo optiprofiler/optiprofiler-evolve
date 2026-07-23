@@ -27,6 +27,7 @@ def build_worker_prompt(
     max_public_calls: int,
     forbidden_candidate_imports: Sequence[str],
     direction: dict[str, object] | None = None,
+    prompt_note: str | None = None,
 ) -> str:
     """Describe one bounded mutation job without exposing hidden data."""
 
@@ -111,7 +112,7 @@ Required work order
    and finish with a bounded smoke check when quota remains.
 Do not spend the worker budget only studying or reimplementing the public problem. The
 deliverable is an edited, valid solver in /workspace.
-
+{_experiment_note(prompt_note)}
 Public experiment manifest
 {json.dumps(data.public_manifest(), indent=2, sort_keys=True)}
 
@@ -128,6 +129,19 @@ local generator with a stable seed rather than mutating global random state. You
 your own local tests and use the enabled research tools. Do not attempt to modify
 OptiProfiler, the problem library, evaluation tools, or files outside /workspace.
 """
+
+
+def _experiment_note(prompt_note: str | None) -> str:
+    """Render the run-owner work constraint; never a security or data boundary."""
+
+    if prompt_note is None:
+        return ""
+    return (
+        "\nExperiment note (must follow)\n"
+        f"{prompt_note.strip()}\n"
+        "This note constrains how you spend the work budget. It does not change "
+        "the contract above, the evaluation tools, or any isolation rule.\n"
+    )
 
 
 __all__: list[str] = []

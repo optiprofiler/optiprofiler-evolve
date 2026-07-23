@@ -28,6 +28,28 @@ def minimal_config() -> dict:
 
 
 class ConfigTests(unittest.TestCase):
+
+    def test_prompt_note_is_validated(self) -> None:
+        raw = minimal_config()
+        raw["workers"]["prompt_note"] = "One local change, two smoke calls, then finish."
+        config = load_config(raw)
+        self.assertEqual(
+            config.workers.prompt_note,
+            "One local change, two smoke calls, then finish.",
+        )
+
+        raw["workers"]["prompt_note"] = "   "
+        with self.assertRaisesRegex(ValueError, "prompt_note"):
+            load_config(raw)
+
+        raw["workers"]["prompt_note"] = "x" * 2001
+        with self.assertRaisesRegex(ValueError, "2000"):
+            load_config(raw)
+
+        raw["workers"]["prompt_note"] = 7
+        with self.assertRaises((TypeError, ValueError)):
+            load_config(raw)
+
     def test_nested_config_is_strict_and_typed(self) -> None:
         config = load_config(minimal_config())
         self.assertEqual(config.evolution.islands, 2)

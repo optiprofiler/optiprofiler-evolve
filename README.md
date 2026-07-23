@@ -164,6 +164,20 @@ sanitized event ledger, versioned run state, the sanitized `status.html` and
 `report.html`, aggregate coverage, and `PUBLIC_REPORT.md`. Never upload or
 share the whole run directory or the root `status.html`.
 
+## Serve a dashboard
+
+```bash
+python -m optiprofiler_evolve.serve runs/my_solver            # PRIVATE owner console
+python -m optiprofiler_evolve.serve runs/my_solver --public   # sanitized public bundle only
+```
+
+Both commands bind to `127.0.0.1`, serve only the selected run directory (or
+its `public/` subtree), and print the exact URL to open; `--port` selects a
+port (the default `0` picks a free one and prints it). Pass `--host 0.0.0.0`
+explicitly to allow external access — do that only with `--public`, because
+the owner console is private evidence. `evolve(...)` remains the only
+evolution API; this is a viewing helper.
+
 ## Documentation map
 
 - [Agent guide](AGENTS.md): compact repository navigation, invariants, and

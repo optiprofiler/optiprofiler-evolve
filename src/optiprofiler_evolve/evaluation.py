@@ -187,7 +187,15 @@ class DockerOptiProfilerEvaluator:
             "evaluation": plain_data(self.config) | {"backend": "unsafe_local"},
         }
         container_name = f"ope-evaluator-{uuid.uuid4().hex[:12]}"
-        with tempfile.TemporaryDirectory(prefix="ope-evaluator-request-") as request_dir:
+        # The request directory is a Docker bind source, so it must live under
+        # a run-owned path: output_dir.parent is controller-private at every
+        # call site and shared into Docker VMs, unlike the macOS system
+        # tempdir (/var/folders is invisible to Colima and the mount fails).
+        # As a sibling of output_dir it is never published with the results.
+        with tempfile.TemporaryDirectory(
+            prefix=".ope-evaluator-request-",
+            dir=output_dir.parent,
+        ) as request_dir:
             request_path = Path(request_dir) / "evaluation_request.json"
             request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
             command = self.command(candidate, output_dir, container_name, request_path)
@@ -304,6 +312,9 @@ class DockerOptiProfilerEvaluator:
             "--mount",
             f"type=bind,src={output_dir},dst=/output",
             "--mount",
+            # Deliberately writable: the in-container runner unlinks the
+            # request (it carries real problem names) before candidate code
+            # can run, and a readonly bind would break that scrubbing.
             f"type=bind,src={request_path.parent},dst=/request",
         ]
         if self.data.custom_problem_libraries_path:

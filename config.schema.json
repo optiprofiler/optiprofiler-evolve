@@ -357,6 +357,15 @@
           "exclusiveMinimum": 0,
           "default": null
         },
+        "prompt_note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 2000,
+          "default": null
+        },
         "adapter": {
           "type": "string",
           "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",

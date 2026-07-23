@@ -118,6 +118,94 @@ def reviewer_config(*, strict: bool = False) -> dict:
 
 
 class EngineTests(unittest.TestCase):
+
+    def test_nonzero_worker_exit_blocks_admission_and_keeps_evidence(self) -> None:
+        def budget_exhausted_runner(**kwargs) -> AgentRunResult:
+            workspace = kwargs["workspace"]
+            transcript = kwargs["transcript"]
+            solver = workspace / "solver.py"
+            solver.write_text(solver.read_text() + "\n# improved but unfinished\n")
+            transcript.parent.mkdir(parents=True, exist_ok=True)
+            transcript.write_text("ran out of budget mid-edit\n")
+            return AgentRunResult(
+                1, transcript, termination_reason="error_max_budget_usd"
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            FakeEvaluator.calls = []
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            config = load_config(minimal_config())
+            engine = EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=(".",),
+                config=config,
+                run_dir=root / "run",
+                agent_runner=budget_exhausted_runner,
+                evaluator_factory=fake_evaluator_factory,
+            )
+            result = engine.run()
+
+            # The half-finished workspace never becomes a candidate: the seed
+            # stays champion and no attempt reaches smoke/public evaluation.
+            self.assertEqual(result.public_score, 0.5)
+            self.assertNotIn("improved", (result.best_solver / "solver.py").read_text())
+            self.assertEqual(FakeEvaluator.calls.count("public_score"), 1)
+            self.assertEqual(FakeEvaluator.calls.count("smoke"), 0)
+
+            events = [
+                json.loads(line)
+                for line in (result.run_dir / "events.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            finished = [
+                event for event in events if event["kind"] == "attempt_finished"
+            ]
+            self.assertTrue(finished)
+            for event in finished:
+                self.assertEqual(event["status"], "failed")
+                self.assertFalse(event["data"]["accepted"])
+                self.assertFalse(event["data"]["valid"])
+                self.assertIn("worker_failed_not_admitted", event["data"]["error"])
+                self.assertIn("error_max_budget_usd", event["data"]["error"])
+            mutate_steps = [
+                event
+                for event in events
+                if event["kind"] == "step_finished"
+                and event["scope"].get("step") == "mutate"
+            ]
+            self.assertTrue(mutate_steps)
+            for event in mutate_steps:
+                self.assertEqual(event["status"], "failed")
+            # Rejection precedes audit, evaluation, and integrity review.
+            self.assertFalse(
+                [
+                    event
+                    for event in events
+                    if event["kind"].startswith("integrity_review")
+                ]
+            )
+            later_steps = [
+                event
+                for event in events
+                if event["kind"] == "step_finished"
+                and event["scope"].get("step") in {"static_audit", "smoke", "public_evaluate"}
+            ]
+            self.assertEqual(later_steps, [])
+
+            # Evidence stays on disk for post-mortem analysis.
+            workspace = result.run_dir / "workspaces" / "it001-i00-a00"
+            self.assertIn(
+                "improved but unfinished", (workspace / "solver.py").read_text()
+            )
+            transcript = result.run_dir / "transcripts" / "it001-i00-a00.jsonl"
+            self.assertIn("ran out of budget", transcript.read_text())
+
     def test_population_loop_preserves_source_and_tests_one_validated_champion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             FakeEvaluator.calls = []
