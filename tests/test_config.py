@@ -143,6 +143,94 @@ class ConfigTests(unittest.TestCase):
             ('model_providers.compatible.base_url="https://example.invalid/v1"',),
         )
 
+    def test_docker_provider_transport_is_gateway_first_and_direct_is_double_opt_in(self) -> None:
+        raw = minimal_config()
+        raw["evaluation"] = {
+            "backend": "docker",
+            "docker_image": "evaluator:test",
+        }
+        raw["sandbox"] = {"backend": "docker", "worker_image": "worker:test"}
+        with self.assertRaisesRegex(ValueError, "both workers.allow_direct_provider"):
+            load_config(raw)
+
+        raw["workers"]["allow_direct_provider"] = True
+        with self.assertRaisesRegex(ValueError, "both workers.allow_direct_provider"):
+            load_config(raw)
+
+        raw["sandbox"]["allow_direct_network"] = True
+        config = load_config(raw)
+        self.assertTrue(config.workers.allow_direct_provider)
+        self.assertTrue(config.sandbox.allow_direct_network)
+
+    def test_gateway_route_is_strict_and_credential_value_is_redacted(self) -> None:
+        raw = minimal_config()
+        raw["evaluation"] = {
+            "backend": "docker",
+            "docker_image": "evaluator:test",
+        }
+        raw["sandbox"] = {"backend": "docker", "worker_image": "worker:test"}
+        raw["workers"]["pool"][0].update(
+            {
+                "env": {"OPENAI_API_KEY": "secret"},
+                "provider_gateway": {
+                    "upstream_base_url": "https://api.example/v1",
+                    "credential_env": "OPENAI_API_KEY",
+                },
+            }
+        )
+        config = load_config(raw)
+        gateway = config.workers.pool[0].provider_gateway
+        assert gateway is not None
+        self.assertEqual(gateway.resolved_protocol("codex"), "openai_responses")
+        self.assertEqual(
+            config.redacted_dict()["workers"]["pool"][0]["env"]["OPENAI_API_KEY"],
+            "<redacted>",
+        )
+
+        raw["workers"]["pool"][0]["provider_gateway"]["upstream_base_url"] = (
+            "http://metadata.internal"
+        )
+        with self.assertRaisesRegex(ValueError, "https origin"):
+            load_config(raw)
+
+    def test_gateway_cannot_be_claimed_by_unsafe_local_or_overridden_by_codex_args(self) -> None:
+        raw = minimal_config()
+        raw["workers"]["pool"][0].update(
+            {
+                "env": {"OPENAI_API_KEY": "secret"},
+                "provider_gateway": {
+                    "upstream_base_url": "https://api.example/v1",
+                    "credential_env": "OPENAI_API_KEY",
+                },
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "requires the Docker sandbox"):
+            load_config(raw)
+
+        raw["workers"]["pool"][0]["args"] = ['model_provider="worker_override"']
+        with self.assertRaisesRegex(ValueError, "controller-owned"):
+            load_config(raw)
+
+    def test_custom_worker_adapter_cannot_claim_the_builtin_gateway(self) -> None:
+        raw = minimal_config()
+        raw["evaluation"] = {
+            "backend": "docker",
+            "docker_image": "evaluator:test",
+        }
+        raw["sandbox"] = {"backend": "docker", "worker_image": "worker:test"}
+        raw["workers"]["adapter"] = "custom"
+        raw["workers"]["pool"][0].update(
+            {
+                "env": {"OPENAI_API_KEY": "secret"},
+                "provider_gateway": {
+                    "upstream_base_url": "https://api.example/v1",
+                    "credential_env": "OPENAI_API_KEY",
+                },
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "requires workers.adapter='cli'"):
+            load_config(raw)
+
 
 if __name__ == "__main__":
     unittest.main()

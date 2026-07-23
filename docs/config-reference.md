@@ -94,7 +94,8 @@ normalization, and other identity-sensitive fields.
 | `workers.timeout_seconds` | positive integer | `1800` | Wall-time limit for one coding-agent process. |
 | `workers.token_budget` | positive integer or `null` | `null` | Advisory token budget inserted into the worker task. |
 | `workers.max_budget_usd` | positive number or `null` | `null` | Claude Code per-worker cost limit. Other providers enforce their own limits. |
-| `workers.adapter` | registered name | `cli` | Worker lifecycle adapter. The built-in adapter runs Codex or Claude Code. |
+| `workers.adapter` | registered name | `cli` | Worker lifecycle adapter. The built-in adapter runs Codex or Claude Code. `provider_gateway` currently requires `cli`; custom adapters do not implement that credential boundary. |
+| `workers.allow_direct_provider` | boolean | `false` | First unsafe opt-in for bypassing the provider gateway. Docker direct mode also requires `sandbox.allow_direct_network=true`. |
 | `workers.pool[].harness` | `claude` or `codex` | **required** | Coding-agent CLI adapter. |
 | `workers.pool[].model` | string | **required** | Model identifier passed unchanged to the selected CLI. |
 | `workers.pool[].weight` | positive integer | `1` | Relative probability of selecting this worker entry. |
@@ -102,15 +103,24 @@ normalization, and other identity-sensitive fields.
 | `workers.pool[].args` | list of strings | `[]` | Extra CLI arguments appended to the harness command. |
 | `workers.pool[].env` | string mapping | `{}` | Explicit environment values or `${ENV_NAME}` references passed to the worker. |
 | `workers.pool[].pass_env` | list of names | `[]` | Host environment variables copied into the worker; missing names fail early. |
+| `workers.pool[].provider_gateway.upstream_base_url` | HTTPS base URL | **required for gateway mode** | Controller-owned provider origin. It is never supplied to the worker. A base path such as `/v1` or `/anthropic` is allowed. |
+| `workers.pool[].provider_gateway.credential_env` | environment name | **required for gateway mode** | Name of the one resolved credential delivered to the gateway sidecar, not the worker. |
+| `workers.pool[].provider_gateway.protocol` | `auto`, `anthropic`, or `openai_responses` | `auto` | Fixed wire protocol. `auto` maps Claude to Anthropic Messages and Codex to OpenAI Responses. |
+| `workers.pool[].provider_gateway.auth_mode` | `auto`, `bearer`, or `x-api-key` | `auto` | Upstream credential header. Auto uses `x-api-key` for Anthropic API keys and Bearer otherwise. |
+| `workers.pool[].provider_gateway.max_request_bytes` | positive integer | `16000000` | Maximum worker-to-gateway request body. Responses are streamed and bounded by timeout/token policy, not buffered to this size. |
+| `workers.pool[].provider_gateway.connect_timeout_seconds` | positive integer | `15` | Upstream connection timeout. |
+| `workers.pool[].provider_gateway.response_timeout_seconds` | positive integer | `900` | Idle timeout while receiving the provider response stream. |
 
 Do not store credentials directly in YAML. Prefer `pass_env` or an
 `${ENV_NAME}` reference. Keys containing common credential markers are redacted
 from `resolved_config.json`.
 
-`profile` is useful only when the selected worker image contains the matching
-Codex profile under its own `CODEX_HOME`. The default image uses an ephemeral
-home and deliberately does not inherit host Codex profiles. Prefer explicit
-provider `args` for portable experiment configs.
+When `provider_gateway` is configured, provider routing is controller-owned.
+Claude receives only the internal gateway URL and a dummy API key. Codex
+receives a generated Responses provider definition and ignores user config.
+Conflicting provider arguments, provider profiles, and base-URL environment
+variables fail before launch. Unrelated secret or `pass_env` values also fail
+rather than entering a worker container.
 
 ## Integrity review
 
@@ -126,6 +136,20 @@ transcript.
 | `integrity_review.component.name` | registered reviewer name | `agent_integrity` | Reviewer implementation. `unsafe_approve` is restricted to explicit tests/ablations. |
 | `integrity_review.component.options` | object | `{}` | Constructor options for an owner-supplied reviewer. |
 | `integrity_review.worker` | worker mapping or `null` | `null` | Dedicated reviewer worker. Required unless same-model reuse is explicitly allowed. |
+| `integrity_review.worker.harness` | `claude` or `codex` | inherited only when worker is `null` | Dedicated reviewer CLI. |
+| `integrity_review.worker.model` | string | inherited only when worker is `null` | Dedicated reviewer model identifier. |
+| `integrity_review.worker.weight` | positive integer | `1` | Scheduling weight; retained for the shared worker schema. |
+| `integrity_review.worker.profile` | string or `null` | `null` | Codex profile; incompatible with gateway routing. |
+| `integrity_review.worker.args` | list of strings | `[]` | Extra non-provider CLI arguments. |
+| `integrity_review.worker.env` | string mapping | `{}` | Explicit reviewer environment values. |
+| `integrity_review.worker.pass_env` | list of names | `[]` | Reviewer host variables resolved by the controller. |
+| `integrity_review.worker.provider_gateway.upstream_base_url` | HTTPS base URL | **required for gateway mode** | Same pinned provider route as a mutation worker; may point to a different provider. |
+| `integrity_review.worker.provider_gateway.credential_env` | environment name | **required for gateway mode** | Reviewer gateway credential name. |
+| `integrity_review.worker.provider_gateway.protocol` | `auto`, `anthropic`, or `openai_responses` | `auto` | Reviewer wire protocol. |
+| `integrity_review.worker.provider_gateway.auth_mode` | `auto`, `bearer`, or `x-api-key` | `auto` | Reviewer upstream authentication mode. |
+| `integrity_review.worker.provider_gateway.max_request_bytes` | positive integer | `16000000` | Reviewer request-body limit. |
+| `integrity_review.worker.provider_gateway.connect_timeout_seconds` | positive integer | `15` | Reviewer upstream connection timeout. |
+| `integrity_review.worker.provider_gateway.response_timeout_seconds` | positive integer | `900` | Reviewer response-stream idle timeout. |
 | `integrity_review.allow_same_model` | boolean | `false` | Permit reuse of the first mutation worker identity. This is an explicit ablation, not the recommended research setup. |
 | `integrity_review.allow_unsafe_stub` | boolean | `false` | Required second opt-in when `component.name` is `unsafe_approve`. |
 | `integrity_review.retries` | nonnegative integer | `1` | Additional attempts after malformed output or reviewer unavailability. |
@@ -135,8 +159,8 @@ transcript.
 | `integrity_review.max_budget_usd` | positive number or `null` | `null` | Reviewer-specific Claude Code cost cap. |
 
 The nested `integrity_review.worker` accepts the same fields as
-`workers.pool[]`: `harness`, `model`, `weight`, `profile`, `args`, `env`, and
-`pass_env`. When `allow_same_model` is false, its harness/model identity must not
+`workers.pool[]`, including `provider_gateway`. When `allow_same_model` is false,
+its harness/model identity must not
 appear in the mutation pool. Every review attempt retains a complete private
 trace under `research/traces/integrity-reviewer/`.
 
@@ -172,6 +196,7 @@ agent.
 | `sandbox.pids_limit` | integer at least `16` | `512` | Worker-container process limit. |
 | `sandbox.max_candidate_files` | positive integer | `2000` | Maximum files accepted from one worker workspace. |
 | `sandbox.max_candidate_bytes` | positive integer | `200000000` | Maximum total bytes accepted from one worker workspace. |
+| `sandbox.allow_direct_network` | boolean | `false` | Second unsafe opt-in for a Docker worker to bypass the provider gateway and use direct egress. |
 
 The worker receives only a private solver copy, public manifests, and bounded
 evaluation tools. It does not receive the immutable reference, hidden manifest,
@@ -246,12 +271,9 @@ behavior, patch portability, and validation-query semantics.
 
 ## Provider configuration
 
-The package passes model names, environment variables, profiles, and extra
-arguments to Codex or Claude Code. It does not maintain a vendor registry. A
-compatible provider can be configured in one worker entry. Compatibility means
-that the endpoint implements the selected CLI's API dialect and tool calling,
-not merely that it accepts a model string. For Claude Code, map host-side
-package variables to the names expected by the CLI:
+Each Docker worker declares one pinned `provider_gateway`. Compatibility still
+depends on the selected CLI's wire protocol and tool loop; a model name and base
+URL alone are not sufficient. For Claude Code:
 
 ```yaml
 workers:
@@ -259,13 +281,16 @@ workers:
     - harness: claude
       model: ${OPTIPROFILER_EVOLVE_MODEL}
       env:
-        ANTHROPIC_BASE_URL: ${OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL}
         ANTHROPIC_AUTH_TOKEN: ${OPTIPROFILER_EVOLVE_API_KEY}
+      provider_gateway:
+        upstream_base_url: ${OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL}
+        credential_env: ANTHROPIC_AUTH_TOKEN
+        auth_mode: bearer
 ```
 
-Codex custom providers require the Responses wire protocol. Configure the
-provider explicitly rather than treating `OPENAI_BASE_URL` as an analogue of
-Claude Code's gateway variable:
+Codex custom providers require the Responses wire protocol. The controller
+generates the Codex provider definition and pins it to the internal gateway;
+do not duplicate `model_provider` arguments in YAML:
 
 ```yaml
 workers:
@@ -274,19 +299,15 @@ workers:
       model: ${OPTIPROFILER_EVOLVE_CODEX_MODEL}
       env:
         CODEX_PROVIDER_API_KEY: ${OPTIPROFILER_EVOLVE_API_KEY}
-      args:
-        - --config
-        - 'model_provider="compatible"'
-        - --config
-        - 'model_providers.compatible.base_url="${OPTIPROFILER_EVOLVE_OPENAI_BASE_URL}"'
-        - --config
-        - 'model_providers.compatible.env_key="CODEX_PROVIDER_API_KEY"'
-        - --config
-        - 'model_providers.compatible.wire_api="responses"'
+      provider_gateway:
+        upstream_base_url: ${OPTIPROFILER_EVOLVE_OPENAI_BASE_URL}
+        credential_env: CODEX_PROVIDER_API_KEY
+        auth_mode: bearer
 ```
 
-Use the environment-variable names and model identifier expected by the
-installed CLI/provider. Provider support should be verified with that CLI
-before starting a multi-iteration experiment. See
+The real credential is resolved by the controller and delivered only to the
+gateway sidecar. The worker receives a dummy credential and the internal
+gateway URL. Direct Docker provider access requires both unsafe opt-ins and is
+recorded in provenance. See
 [Model providers and agent workers](providers.md) and the checked-in compatible
 provider examples for complete small runs.

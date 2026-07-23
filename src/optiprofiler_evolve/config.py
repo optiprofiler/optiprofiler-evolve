@@ -9,6 +9,7 @@ import types
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Generic, TypeVar, Union, get_args, get_origin, get_type_hints
+from urllib.parse import unquote, urlsplit
 
 import yaml
 
@@ -304,6 +305,56 @@ class EvolutionConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class ProviderGatewayConfig:
+    """Pinned provider route whose credential stays outside the worker."""
+
+    upstream_base_url: str
+    credential_env: str
+    protocol: str = "auto"
+    auth_mode: str = "auto"
+    max_request_bytes: int = 16_000_000
+    connect_timeout_seconds: int = 15
+    response_timeout_seconds: int = 900
+
+    def validate(self, harness: str) -> None:
+        expected = "anthropic" if harness == "claude" else "openai_responses"
+        if self.protocol not in {"auto", expected}:
+            raise ValueError(
+                f"provider_gateway.protocol for {harness!r} must be 'auto' or "
+                f"{expected!r}."
+            )
+        if self.auth_mode not in {"auto", "bearer", "x-api-key"}:
+            raise ValueError(
+                "provider_gateway.auth_mode must be auto, bearer, or x-api-key."
+            )
+        if not self.credential_env or not self.credential_env.replace("_", "A").isalnum():
+            raise ValueError("provider_gateway.credential_env must be an environment name.")
+        parsed = urlsplit(self.upstream_base_url)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ValueError(
+                "provider_gateway.upstream_base_url must be an https origin or base URL."
+            )
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError(
+                "provider_gateway.upstream_base_url cannot contain credentials, query, or fragment."
+            )
+        decoded_path = unquote(parsed.path)
+        if any(part in {".", ".."} for part in decoded_path.split("/")):
+            raise ValueError("provider_gateway.upstream_base_url contains path traversal.")
+        if self.max_request_bytes < 1:
+            raise ValueError("provider_gateway.max_request_bytes must be positive.")
+        if self.connect_timeout_seconds < 1 or self.response_timeout_seconds < 1:
+            raise ValueError("provider_gateway timeouts must be positive.")
+
+    def resolved_protocol(self, harness: str) -> str:
+        """Return the fixed wire protocol for one supported harness."""
+
+        return (
+            "anthropic" if harness == "claude" else "openai_responses"
+        ) if self.protocol == "auto" else self.protocol
+
+
+@dataclasses.dataclass(frozen=True)
 class WorkerConfig:
     """One coding-agent worker choice in the scheduling pool."""
 
@@ -314,6 +365,7 @@ class WorkerConfig:
     args: tuple[str, ...] = ()
     env: Mapping[str, str] = dataclasses.field(default_factory=dict)
     pass_env: tuple[str, ...] = ()
+    provider_gateway: ProviderGatewayConfig | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "env", _freeze_value(self.env))
@@ -328,6 +380,36 @@ class WorkerConfig:
         for key in (*self.env.keys(), *self.pass_env):
             if not key or not key.replace("_", "A").isalnum():
                 raise ValueError(f"Invalid worker environment variable name: {key!r}")
+        gateway = self.provider_gateway
+        if gateway is not None:
+            gateway.validate(self.harness)
+            if gateway.credential_env not in {*self.env, *self.pass_env}:
+                raise ValueError(
+                    "provider_gateway.credential_env must be supplied by worker env or pass_env."
+                )
+            if self.harness == "codex":
+                if self.profile is not None:
+                    raise ValueError(
+                        "A gateway-routed Codex worker cannot load a provider profile."
+                    )
+                if any(
+                    "model_provider" in argument or "model_providers." in argument
+                    for argument in self.args
+                ):
+                    raise ValueError(
+                        "Codex provider routing is controller-owned when provider_gateway is set."
+                    )
+            controlled = (
+                {"ANTHROPIC_BASE_URL"}
+                if self.harness == "claude"
+                else {"OPENAI_BASE_URL"}
+            )
+            overlap = controlled.intersection(self.env)
+            if overlap:
+                raise ValueError(
+                    "Provider base URLs are controller-owned when provider_gateway is set: "
+                    f"{sorted(overlap)!r}"
+                )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -364,6 +446,7 @@ class WorkersConfig:
     max_budget_usd: float | None = None
     tools: ToolConfig = dataclasses.field(default_factory=ToolConfig)
     adapter: str = "cli"
+    allow_direct_provider: bool = False
 
     def validate(self) -> None:
         if not self.pool:
@@ -463,6 +546,7 @@ class SandboxConfig:
     pids_limit: int = 512
     max_candidate_files: int = 2000
     max_candidate_bytes: int = 200_000_000
+    allow_direct_network: bool = False
 
     def validate(self) -> None:
         if self.backend not in {"docker", "unsafe_local"}:
@@ -512,6 +596,33 @@ class EvolveConfig:
         self.integrity_review.validate(self.workers)
         self.sandbox.validate()
         self.workflow.validate()
+        workers = list(self.workers.pool)
+        reviewer = self.integrity_review.resolved_worker(self.workers)
+        if reviewer is not None:
+            workers.append(reviewer)
+        gateway_workers = [worker for worker in workers if worker.provider_gateway is not None]
+        if gateway_workers and self.workers.adapter != "cli":
+            raise ValueError(
+                "provider_gateway currently requires workers.adapter='cli'; custom "
+                "worker adapters cannot claim the built-in gateway boundary."
+            )
+        if self.sandbox.backend == "unsafe_local":
+            if gateway_workers:
+                raise ValueError(
+                    "provider_gateway requires the Docker sandbox; unsafe_local remains direct."
+                )
+            return
+        direct_workers = [worker for worker in workers if worker.provider_gateway is None]
+        if direct_workers and not (
+            self.workers.allow_direct_provider and self.sandbox.allow_direct_network
+        ):
+            identities = sorted({f"{worker.harness}:{worker.model}" for worker in direct_workers})
+            raise ValueError(
+                "Docker workers without provider_gateway require both "
+                "workers.allow_direct_provider=true and "
+                "sandbox.allow_direct_network=true; direct workers: "
+                f"{identities!r}"
+            )
 
     def redacted_dict(self) -> dict[str, Any]:
         """Return a serializable config without credential values."""

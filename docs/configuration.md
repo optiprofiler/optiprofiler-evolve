@@ -64,11 +64,19 @@ workers:
       model: ${OPTIPROFILER_EVOLVE_MODEL}
       weight: 1
       pass_env: [ANTHROPIC_API_KEY]
+      provider_gateway:
+        upstream_base_url: https://api.anthropic.com
+        credential_env: ANTHROPIC_API_KEY
+        auth_mode: x-api-key
     - harness: codex
       model: ${OPTIPROFILER_EVOLVE_CODEX_MODEL}
       weight: 1
       pass_env: [OPENAI_API_KEY]
       args: []
+      provider_gateway:
+        upstream_base_url: https://api.openai.com/v1
+        credential_env: OPENAI_API_KEY
+        auth_mode: bearer
   tools:
     preset: research
     web_search: true
@@ -87,6 +95,10 @@ integrity_review:
     harness: claude
     model: ${OPTIPROFILER_EVOLVE_REVIEW_MODEL}
     pass_env: [ANTHROPIC_API_KEY]
+    provider_gateway:
+      upstream_base_url: https://api.anthropic.com
+      credential_env: ANTHROPIC_API_KEY
+      auth_mode: x-api-key
   retries: 1
   strict: false
   timeout_seconds: 600
@@ -156,10 +168,11 @@ entrypoint runtime, not every implementation language in the repository; a
 Python wrapper may call compiled Fortran or C code.
 
 `workers.pool` is weighted and may mix harnesses, providers, and models.
-Provider-specific base URLs can be supplied through `env`, `pass_env`, or CLI
-`args`. The package does not enumerate model vendors. Claude-compatible APIs
-and Codex custom providers are not interchangeable: Codex custom providers must
-implement the Responses protocol and function-tool loop. See
+Each worker pins its provider origin, credential name, and wire protocol under
+`provider_gateway`. The controller keeps the real credential in a per-invocation
+gateway and generates the CLI's internal route. Claude-compatible APIs and Codex
+custom providers are not interchangeable: Codex custom providers must implement
+the Responses protocol and function-tool loop. See
 [Model providers and agent workers](providers.md) for complete templates and a
 live agent-mode probe.
 
@@ -170,11 +183,11 @@ experiments, build separate `worker_image` variants. Only `web_search` and the
 Claude-specific shell setting alter harness-visible tools; the other capability
 fields cannot remove binaries already present in an image.
 
-With `tools.network: false`, an internal Docker network blocks external access.
-That mode requires a local/in-image model endpoint; a remote model API naturally
-requires network access. `web_search: false` removes Claude's built-in web tools,
-but strict network ablation also requires `network: false` or a controlled egress
-image.
+Provider transport is independent of general worker egress. A worker can reach
+its model through the gateway while `tools.network: false` blocks shell and
+package-manager egress. `web_search: false` removes harness-native search tools;
+provider-side search is requested only when the CLI and pinned endpoint support
+it.
 
 `tools.shell: false` removes `Bash` from Claude Code. Codex CLI does not expose an
 equivalent no-shell agent mode, so the built-in adapter rejects that combination

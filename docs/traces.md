@@ -23,6 +23,9 @@ L0 is authoritative for what the CLI delivered. L1 can be regenerated and must
 not overwrite L0. L2 records what the controller observed and decided; it does
 not duplicate the complete provider stream. L3 contains no prompt, model,
 provider output, trace path, evaluation secret, or private filesystem path.
+The provider gateway keeps a separate metadata-only transport audit. Its
+request IDs, paths, byte counts, status, and timing diagnose transport failures;
+it never replaces the CLI trace and never stores request or response bodies.
 
 ## Per-invocation layout
 

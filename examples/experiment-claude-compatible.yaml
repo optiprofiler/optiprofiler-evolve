@@ -34,8 +34,11 @@ workers:
     - harness: claude
       model: ${OPTIPROFILER_EVOLVE_MODEL}
       env:
-        ANTHROPIC_BASE_URL: ${OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL}
         ANTHROPIC_AUTH_TOKEN: ${OPTIPROFILER_EVOLVE_API_KEY}
+      provider_gateway:
+        upstream_base_url: ${OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL}
+        credential_env: ANTHROPIC_AUTH_TOKEN
+        auth_mode: bearer
   tools:
     preset: research
     web_search: true

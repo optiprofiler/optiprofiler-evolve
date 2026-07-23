@@ -54,6 +54,11 @@ def run_agent(
 ) -> AgentRunResult:
     """Run one coding worker and preserve its complete stdout/stderr transcript."""
 
+    if sandbox.backend == "docker" and worker.provider_gateway is not None:
+        raise RuntimeError(
+            "Provider gateway routing is configured but its Docker sidecar lifecycle "
+            "has not been attached to this worker launch. Refusing direct fallback."
+        )
     transcript.parent.mkdir(parents=True, exist_ok=True)
     selected_values = _selected_worker_values(worker)
     worker_network: str | None = None

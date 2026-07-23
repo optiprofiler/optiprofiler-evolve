@@ -626,6 +626,16 @@ def _redacted_worker(worker: WorkerConfig) -> dict[str, Any]:
         key: "<redacted>" if _is_secret_name(key) else item
         for key, item in value["env"].items()
     }
+    gateway = value.get("provider_gateway")
+    if isinstance(gateway, dict):
+        credential_env = gateway.get("credential_env")
+        if isinstance(credential_env, str):
+            value["env"].pop(credential_env, None)
+            value["pass_env"] = [
+                name for name in value["pass_env"] if name != credential_env
+            ]
+        gateway["upstream_base_url"] = "<controller-owned>"
+        gateway["credential_env"] = "<controller-owned>"
     return value
 
 

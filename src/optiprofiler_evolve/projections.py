@@ -81,6 +81,8 @@ _PUBLIC_DATA_KEYS: Mapping[str, frozenset[str]] = {
     ),
     "integrity_review_started": frozenset(),
     "integrity_review_finished": frozenset({"gate"}),
+    "provider_gateway_started": frozenset(),
+    "provider_gateway_finished": frozenset({"outcome", "request_count"}),
     "trace_coverage": frozenset(
         {
             "total",

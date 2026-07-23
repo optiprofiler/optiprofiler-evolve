@@ -60,8 +60,10 @@ class DocumentationTests(unittest.TestCase):
             research = load_config(research_path)
         self.assertEqual(claude.workers.pool[0].harness, "claude")
         self.assertEqual(compatible.workers.pool[0].harness, "claude")
+        compatible_gateway = compatible.workers.pool[0].provider_gateway
+        assert compatible_gateway is not None
         self.assertEqual(
-            compatible.workers.pool[0].env["ANTHROPIC_BASE_URL"],
+            compatible_gateway.upstream_base_url,
             "https://example.invalid/anthropic",
         )
         self.assertEqual(
@@ -70,14 +72,9 @@ class DocumentationTests(unittest.TestCase):
         )
         self.assertEqual(codex.workers.pool[0].harness, "codex")
         self.assertEqual(codex_compatible.workers.pool[0].harness, "codex")
-        self.assertIn(
-            'model_provider="compatible"',
-            codex_compatible.workers.pool[0].args,
-        )
-        self.assertIn(
-            'model_providers.compatible.base_url="https://example.invalid/v1"',
-            codex_compatible.workers.pool[0].args,
-        )
+        codex_gateway = codex_compatible.workers.pool[0].provider_gateway
+        assert codex_gateway is not None
+        self.assertEqual(codex_gateway.upstream_base_url, "https://example.invalid/v1")
         self.assertIn("strategy_analysis", [phase.name for phase in research.workflow.phases])
 
     def test_checked_in_solver_examples_declare_valid_interfaces(self) -> None:
@@ -94,15 +91,25 @@ def _dataclass_paths(cls: type[Any], prefix: str = "") -> set[str]:
             continue
         annotation = hints[field.name]
         path = f"{prefix}.{field.name}" if prefix else field.name
-        if isinstance(annotation, type) and dataclasses.is_dataclass(annotation):
-            paths.update(_dataclass_paths(annotation, path))
-            continue
         args = get_args(annotation)
         if get_origin(annotation) is tuple and args and dataclasses.is_dataclass(args[0]):
             paths.update(_dataclass_paths(args[0], f"{path}[]"))
             continue
+        nested = _nested_dataclass(annotation)
+        if nested is not None:
+            paths.update(_dataclass_paths(nested, path))
+            continue
         paths.add(path)
     return paths
+
+
+def _nested_dataclass(annotation: Any) -> type[Any] | None:
+    if isinstance(annotation, type) and dataclasses.is_dataclass(annotation):
+        return annotation
+    for option in get_args(annotation):
+        if isinstance(option, type) and dataclasses.is_dataclass(option):
+            return option
+    return None
 
 
 def _schema_paths(root: dict[str, Any], node: dict[str, Any], prefix: str = "") -> set[str]:
@@ -124,6 +131,10 @@ def _schema_paths(root: dict[str, Any], node: dict[str, Any], prefix: str = "") 
 
 
 def _resolve_schema(root: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    if "oneOf" in node:
+        candidates = [item for item in node["oneOf"] if "$ref" in item]
+        if len(candidates) == 1:
+            return _resolve_schema(root, candidates[0])
     if "$ref" not in node:
         return node
     prefix = "#/$defs/"

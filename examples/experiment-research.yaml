@@ -50,6 +50,10 @@ workers:
     - harness: claude
       model: ${OPTIPROFILER_EVOLVE_MODEL}
       pass_env: [ANTHROPIC_API_KEY]
+      provider_gateway:
+        upstream_base_url: https://api.anthropic.com
+        credential_env: ANTHROPIC_API_KEY
+        auth_mode: x-api-key
   tools:
     preset: research
     web_search: true

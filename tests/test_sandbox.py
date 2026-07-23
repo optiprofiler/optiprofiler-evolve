@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from optiprofiler_evolve.broker import BrokerConnection
 from optiprofiler_evolve.config import (
+    ProviderGatewayConfig,
     SandboxConfig,
     ToolConfig,
     WorkerConfig,
@@ -20,6 +21,40 @@ from optiprofiler_evolve.traces import CapturedProcess
 
 
 class SandboxCommandTests(unittest.TestCase):
+    def test_configured_gateway_never_falls_back_to_direct_worker_credentials(self) -> None:
+        worker = WorkerConfig(
+            harness="codex",
+            model="test",
+            env={"OPENAI_API_KEY": "must-not-enter-worker"},
+            provider_gateway=ProviderGatewayConfig(
+                upstream_base_url="https://api.openai.com/v1",
+                credential_env="OPENAI_API_KEY",
+            ),
+        )
+        workers = WorkersConfig(pool=(worker,))
+        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
+            RuntimeError,
+            "Refusing direct fallback",
+        ):
+            root = Path(directory)
+            run_agent(
+                worker=worker,
+                workers=workers,
+                sandbox=SandboxConfig(),
+                workspace=root / "workspace",
+                tools_dir=root / "tools",
+                broker=BrokerConnection(
+                    "/opt/broker",
+                    "/opt/artifacts",
+                    "token",
+                    root / "broker",
+                    root / "artifacts",
+                ),
+                prompt="probe",
+                transcript=root / "transcript.jsonl",
+                trace_dir=root / "trace",
+            )
+
     def test_launch_failure_still_writes_terminal_trace_outcome(self) -> None:
         worker = WorkerConfig(harness="codex", model="test")
         workers = WorkersConfig(pool=(worker,), timeout_seconds=5)

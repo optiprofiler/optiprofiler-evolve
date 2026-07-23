@@ -17,6 +17,7 @@ from pathlib import Path
 from optiprofiler_evolve.broker import BrokerConnection
 from optiprofiler_evolve.config import EvolveConfig, WorkerConfig, load_config
 from optiprofiler_evolve.harness import build_harness_command
+from optiprofiler_evolve.provider_transport import prepare_provider_transport
 from optiprofiler_evolve.sandbox import run_agent
 
 
@@ -39,13 +40,21 @@ def main() -> int:
     config = load_config(args.config)
     worker = _select_worker(config, args.worker_index)
     _check_required_environment(worker)
-    command = build_harness_command(worker, config.workers, config.workers.tools, Path("/workspace"))
-    _check_agent_flags(worker, command)
+    command_worker = _routed_static_worker(worker)
+    command = build_harness_command(
+        command_worker,
+        dataclasses.replace(config.workers, pool=(command_worker,)),
+        config.workers.tools,
+        Path("/workspace"),
+    )
+    _check_agent_flags(command_worker, command)
     _check_runtime(config, worker)
 
     print(f"worker: {worker.harness}:{worker.model}")
     print(f"sandbox: {config.sandbox.backend}")
     print("agent command: " + shlex.join(_redacted_command(worker, command)))
+    if worker.provider_gateway is not None:
+        print("provider route: controller-owned gateway (credential withheld from worker)")
     print("static worker check: ok")
 
     if not args.live:
@@ -70,6 +79,18 @@ def _check_required_environment(worker: WorkerConfig) -> None:
     missing = [name for name in worker.pass_env if name not in os.environ]
     if missing:
         raise SystemExit("missing required worker environment: " + ", ".join(missing))
+
+
+def _routed_static_worker(worker: WorkerConfig) -> WorkerConfig:
+    if worker.provider_gateway is None:
+        return worker
+    selected = dict(worker.env)
+    selected.update({name: os.environ[name] for name in worker.pass_env})
+    return prepare_provider_transport(
+        worker,
+        selected,
+        gateway_origin="http://provider-gateway:8080",
+    ).worker
 
 
 def _check_agent_flags(worker: WorkerConfig, command: list[str]) -> None:

@@ -35,17 +35,10 @@ workers:
       model: ${OPTIPROFILER_EVOLVE_CODEX_MODEL}
       env:
         CODEX_PROVIDER_API_KEY: ${OPTIPROFILER_EVOLVE_API_KEY}
-      args:
-        - --config
-        - 'model_provider="compatible"'
-        - --config
-        - 'model_providers.compatible.name="Compatible provider"'
-        - --config
-        - 'model_providers.compatible.base_url="${OPTIPROFILER_EVOLVE_OPENAI_BASE_URL}"'
-        - --config
-        - 'model_providers.compatible.env_key="CODEX_PROVIDER_API_KEY"'
-        - --config
-        - 'model_providers.compatible.wire_api="responses"'
+      provider_gateway:
+        upstream_base_url: ${OPTIPROFILER_EVOLVE_OPENAI_BASE_URL}
+        credential_env: CODEX_PROVIDER_API_KEY
+        auth_mode: bearer
   tools:
     preset: research
     # Enable only after the provider proves Responses web-search support.

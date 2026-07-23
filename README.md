@@ -73,8 +73,10 @@ PyPI, install the current OptiProfiler source before this package or build an
 experiment image from clean source checkouts. Bundled legacy libraries remain
 compatible with OptiProfiler 1.3.x.
 
-Provider base URLs and CLI-specific options belong in the worker entry of the
-YAML config. The engine does not hard-code model providers or credentials.
+Provider base URLs and credential names belong in the worker entry's
+`provider_gateway` block. The engine does not maintain a vendor registry or put
+real provider credentials inside worker containers; it does pin the Anthropic
+Messages or OpenAI Responses transport used by the selected CLI.
 Read [Model providers and agent workers](docs/providers.md) before using a
 third-party endpoint: Claude-compatible and Codex Responses-compatible APIs use
 different configuration, and a base URL alone does not prove agent-tool support.

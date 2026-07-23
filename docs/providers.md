@@ -1,41 +1,75 @@
-# Model Providers and Agent Workers
+# Model providers and agent workers
 
-OptiProfiler Evolve does not call a text-completion API directly. Each worker is
-a real coding-agent process: either Codex CLI or Claude Code. The selected CLI
-owns the model conversation and tool loop; OptiProfiler Evolve owns the private
-workspace, evaluation capabilities, timeout, transcript, and acceptance gates.
+OptiProfiler Evolve runs Codex CLI or Claude Code as a real coding agent. The
+CLI owns the model conversation and tool loop. The controller owns the private
+workspace, provider route, evaluation capabilities, timeout, raw trace, and
+acceptance gates.
 
-This distinction matters for compatibility. A provider is usable only when it
-implements the API dialect and tool-calling behavior required by the selected
-CLI. A model name and a base URL alone are not a compatibility guarantee.
+In the Docker backend, every agent invocation uses a short-lived provider
+gateway. This applies to explorer workers, integrity reviewers, and research
+roles. The gateway is model transport, not a general HTTP proxy.
+
+The reviewed 4A transport checkpoint deliberately refuses to launch a
+gateway-configured Docker worker until the 4B sidecar/network lifecycle is
+attached. It never falls back to the older direct-credential path during that
+intermediate state.
+
+## Credential and network boundary
+
+For a gateway-routed worker:
+
+1. the controller resolves exactly one provider credential;
+2. the real value is delivered only to the gateway sidecar;
+3. the worker receives a non-secret dummy credential and an internal gateway URL;
+4. the gateway replaces authentication and forwards only to the pinned origin;
+5. the gateway forwards request and response bodies without persisting them;
+   the controller separately preserves the effective prompt and every byte the
+   CLI emits on stdout/stderr in the private agent trace.
+
+Unrelated secret-named values and unrelated `pass_env` entries fail before
+launch. Codex provider profiles and worker-authored provider arguments also fail
+when gateway routing is enabled. This prevents a config from silently replacing
+the controller-owned route.
+
+General worker egress is a separate capability. `workers.tools.network` controls
+shell/package-manager networking; provider transport continues through the
+gateway when that setting is false. Direct provider access from a Docker worker
+requires both `workers.allow_direct_provider=true` and
+`sandbox.allow_direct_network=true`. These flags are unsafe experiment
+provenance, not recommended defaults. `unsafe_local` stays direct and does not
+claim gateway isolation.
 
 ## Compatibility matrix
 
-| Worker harness | Provider requirement | Agent tools | Recommended use |
+| Worker harness | Gateway protocol | Allowed provider paths | Requirement |
 |---|---|---|---|
-| Claude Code | Anthropic API or a sufficiently compatible Messages endpoint | `Read`, `Edit`, `Write`, optional `Bash`, `WebSearch`, and `WebFetch` | Broadest route for Anthropic-compatible gateways and coding plans |
-| Codex CLI with OpenAI | OpenAI authentication and a Codex-capable model | Local shell/edit loop; optional native Responses web search | OpenAI models |
-| Codex CLI with a custom provider | Responses API compatibility, including function tools and streaming | Local shell/edit loop; native web search only if the provider supports it | OpenAI Responses-compatible gateways |
-| Chat-Completions-only endpoint | Not sufficient for the built-in Codex harness | N/A | Put a compatible gateway in front of it or use a Claude-compatible endpoint |
+| Claude Code | Anthropic Messages | `POST /v1/messages`, `POST /v1/messages/count_tokens`, `GET /v1/models` | Anthropic API or a compatible Messages/tool endpoint |
+| Codex CLI | OpenAI Responses | `POST /v1/responses`, `GET /v1/models` | Responses streaming and function-tool compatibility |
 
-Codex officially exposes custom providers through `model_provider` and
-`model_providers.<id>` configuration. Its custom-provider wire protocol is the
-Responses API. Claude Code officially supports gateway routing through
-`ANTHROPIC_BASE_URL` and token environment variables. Provider implementations
-still differ in accepted content blocks, tool schemas, caching, and server-side
-search, so run the live probe below before a multi-iteration experiment.
+The gateway rejects every other path, `CONNECT`, absolute-form request targets,
+encoded paths, transfer-encoded requests, duplicate routing headers, and bodies
+over the configured request limit. It ignores the worker's `Host`, strips
+forwarding/hop-by-hop/authentication headers, does not follow redirects, and
+rejects upstream DNS results that are not public. Responses, including SSE, are
+forwarded incrementally rather than buffered to the request limit.
 
 ## Claude Code
 
-For Anthropic directly, copy `examples/experiment.yaml` and export:
+For Anthropic directly:
 
-```bash
-export OPTIPROFILER_EVOLVE_MODEL='<provider-model-id>'
-export ANTHROPIC_API_KEY='<provider-key>'
+```yaml
+workers:
+  pool:
+    - harness: claude
+      model: ${OPTIPROFILER_EVOLVE_MODEL}
+      pass_env: [ANTHROPIC_API_KEY]
+      provider_gateway:
+        upstream_base_url: https://api.anthropic.com
+        credential_env: ANTHROPIC_API_KEY
+        auth_mode: x-api-key
 ```
 
-For an Anthropic-compatible endpoint, copy
-`examples/experiment-claude-compatible.yaml`:
+For an Anthropic-compatible provider:
 
 ```yaml
 workers:
@@ -43,121 +77,93 @@ workers:
     - harness: claude
       model: ${OPTIPROFILER_EVOLVE_MODEL}
       env:
-        ANTHROPIC_BASE_URL: ${OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL}
         ANTHROPIC_AUTH_TOKEN: ${OPTIPROFILER_EVOLVE_API_KEY}
+      provider_gateway:
+        upstream_base_url: ${OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL}
+        credential_env: ANTHROPIC_AUTH_TOKEN
+        auth_mode: bearer
 ```
 
-```bash
-export OPTIPROFILER_EVOLVE_MODEL='<provider-model-id>'
-export OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL='<anthropic-compatible-base-url>'
-export OPTIPROFILER_EVOLVE_API_KEY='<provider-key>'
-python examples/run_claude_compatible.py
-```
-
-The harness starts Claude Code in non-interactive agent mode with a bounded tool
-list and stream-JSON tracing. `--print` means "run the agent and return when it
-finishes"; it does not turn Claude Code into a one-shot text completion.
+The controller sets `ANTHROPIC_BASE_URL` to the internal gateway and supplies a
+dummy `ANTHROPIC_API_KEY`; neither the true key nor the external base URL is
+worker-visible.
 
 ## Codex
 
-For OpenAI directly, copy `examples/experiment-codex.yaml` and export:
-
-```bash
-export OPTIPROFILER_EVOLVE_CODEX_MODEL='<codex-model-id>'
-export OPENAI_API_KEY='<openai-key>'
-```
-
-For a custom Responses-compatible endpoint, copy
-`examples/experiment-codex-compatible.yaml`. It passes an explicit provider
-definition to Codex instead of assuming that `OPENAI_BASE_URL` changes the
-built-in OpenAI provider:
+For OpenAI directly:
 
 ```yaml
 workers:
   pool:
     - harness: codex
       model: ${OPTIPROFILER_EVOLVE_CODEX_MODEL}
-      env:
-        CODEX_PROVIDER_API_KEY: ${OPTIPROFILER_EVOLVE_API_KEY}
-      args:
-        - --config
-        - 'model_provider="compatible"'
-        - --config
-        - 'model_providers.compatible.name="Compatible provider"'
-        - --config
-        - 'model_providers.compatible.base_url="${OPTIPROFILER_EVOLVE_OPENAI_BASE_URL}"'
-        - --config
-        - 'model_providers.compatible.env_key="CODEX_PROVIDER_API_KEY"'
-        - --config
-        - 'model_providers.compatible.wire_api="responses"'
+      pass_env: [OPENAI_API_KEY]
+      provider_gateway:
+        upstream_base_url: https://api.openai.com/v1
+        credential_env: OPENAI_API_KEY
+        auth_mode: bearer
 ```
 
-Environment references are expanded before the argv is built, including strings
-inside `args`. Use inline references only for non-secret values such as a base
-URL; arguments are preserved in provenance and are not a credential store:
+For another Responses-compatible provider, replace the upstream base URL and
+credential name. Do not add `model_provider` arguments. The controller launches
+Codex with ignored user config and a generated provider definition whose base
+URL is the internal gateway's `/v1` endpoint. If that mapping cannot be
+constructed, launch fails; it never falls back to the built-in provider.
+
+## Preflight
+
+The regular static check validates the worker config, credential names, CLI,
+and agent-mode flags without a model call:
 
 ```bash
-export OPTIPROFILER_EVOLVE_CODEX_MODEL='<provider-model-id>'
-export OPTIPROFILER_EVOLVE_OPENAI_BASE_URL='<responses-compatible-base-url>'
-export OPTIPROFILER_EVOLVE_API_KEY='<provider-key>'
-python examples/run_codex_compatible.py
+python scripts/check_worker_setup.py examples/experiment.yaml
 ```
 
-## Prove agent mode before evolving
-
-The static check validates the config, required credentials, selected CLI, and
-agent-mode flags without making a model request:
+The Codex route preflight uses the installed CLI but no provider token. It runs
+Codex against a local fake Responses server and succeeds only if the fake
+upstream observes exactly `POST /v1/responses` through the gateway:
 
 ```bash
-python scripts/check_worker_setup.py examples/experiment-claude-compatible.yaml
+PYTHONPATH=src python scripts/check_codex_gateway_route.py
 ```
 
-The live check consumes a small amount of provider quota. It launches the exact
-configured worker in its Docker boundary and succeeds only when the model uses a
-tool to create and read back a probe file in its private workspace:
+The normal `--live` worker preflight consumes provider quota. It launches the
+configured worker in its Docker boundary and requires the model to use a tool to
+create and verify a probe file:
 
 ```bash
-python scripts/check_worker_setup.py \
-  examples/experiment-claude-compatible.yaml --live
+python scripts/check_worker_setup.py examples/experiment.yaml --live
 ```
 
-Run the probe once for every distinct harness/provider/model entry used in an
-experiment. Use `--worker-index` for a mixed worker pool. The probe transcript is
-kept under `build/worker-preflight/`. The synthetic prompt contains no solver or
-experiment data; still treat provider transcripts as potentially sensitive
-diagnostic artifacts.
+Run the live check once for every distinct harness/provider/model entry before
+a long experiment.
 
 ## Web search
 
-`workers.tools.network: true` allows the remote model API and outbound shell
-networking. `workers.tools.web_search: true` additionally requests the harness's
-native search tool. Native search is provider-dependent:
+`workers.tools.web_search=true` requests the selected harness's native search
+tool. Claude receives `WebSearch` and `WebFetch`; Codex receives `--search`.
+Those tools work only when the pinned provider supports them. Worker shell
+networking is governed independently by `workers.tools.network` and the Docker
+egress policy. A no-search ablation disables the native search option and
+general egress; it does not disable model transport through the gateway.
 
-- Claude Code receives `WebSearch` and `WebFetch` when enabled.
-- Codex receives `--search`, which requires provider support for the Responses
-  web-search tool.
-- The worker image includes `ddgr` as a shell fallback. The worker prompt tells
-  agents to use it when a compatible endpoint lacks native search.
+## Evidence and reproducibility
 
-The fallback proves outbound search, not native server-tool compatibility. For a
-strict no-search ablation, disable both `web_search` and `network`; disabling only
-`web_search` still leaves shell networking available.
-
-## Credentials and reproducibility
-
-- Never commit credential values. Use `pass_env` or `${ENV_NAME}` references.
-- Resolved credentials are redacted from `resolved_config.json`.
-- The run records the harness, model identifier, CLI version, image identity,
-  and redacted provider configuration.
-- Pin the worker image and model identifier for a reported experiment. A provider
-  alias may change behavior without a package change.
-
-Provider configuration is intentionally data, not engine code. Adding a new
-compatible endpoint should require a new worker entry or example, not a change to
-the population controller.
+- Pin the worker image, CLI version, model identifier, protocol, and upstream
+  base URL for a reported experiment.
+- Gateway audit records contain request IDs, protocol/path, status, timing, and
+  byte counts only. They exclude bodies, headers, credentials, prompts, and
+  solver source.
+- Each record is appended and synchronized before the next request is counted.
+  A failed audit write marks the gateway unhealthy, stops the sidecar, and
+  makes its process exit nonzero. An upstream stream that ends early is recorded
+  as `stream_interrupted`; the gateway does not append a second HTTP response.
+- Worker stdout/stderr bytes remain authoritative in the private agent trace.
+- Public run projections contain only gateway lifecycle status and aggregate
+  request counts.
 
 ## Upstream references
 
 - [Codex configuration reference](https://developers.openai.com/codex/config-reference)
 - [Claude Code LLM gateway configuration](https://docs.anthropic.com/en/docs/claude-code/llm-gateway)
-- [Claude Code CLI reference](https://docs.anthropic.com/en/docs/claude-code/cli-usage)
+- [OpenAI Responses streaming events](https://platform.openai.com/docs/api-reference/responses-streaming)

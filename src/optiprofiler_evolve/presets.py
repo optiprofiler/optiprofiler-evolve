@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import os
 
-from .config import EvolveConfig, EvaluationConfig, SandboxConfig, WorkerConfig, WorkersConfig
+from .config import (
+    EvolveConfig,
+    EvaluationConfig,
+    ProviderGatewayConfig,
+    SandboxConfig,
+    WorkerConfig,
+    WorkersConfig,
+)
 
 
 def dfo_default(*, worker: WorkerConfig | None = None) -> EvolveConfig:
@@ -17,6 +24,11 @@ def dfo_default(*, worker: WorkerConfig | None = None) -> EvolveConfig:
     selected = worker or WorkerConfig(
         harness="codex",
         model=os.environ.get("OPTIPROFILER_EVOLVE_MODEL", "gpt-5.3-codex"),
+        pass_env=("OPENAI_API_KEY",),
+        provider_gateway=ProviderGatewayConfig(
+            upstream_base_url="https://api.openai.com/v1",
+            credential_env="OPENAI_API_KEY",
+        ),
     )
     return EvolveConfig(
         evaluation=EvaluationConfig(

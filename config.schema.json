@@ -364,6 +364,10 @@
         },
         "tools": {
           "$ref": "#/$defs/ToolConfig"
+        },
+        "allow_direct_provider": {
+          "type": "boolean",
+          "default": false
         }
       },
       "required": [
@@ -419,12 +423,55 @@
           },
           "uniqueItems": true,
           "default": []
+        },
+        "provider_gateway": {
+          "$ref": "#/$defs/ProviderGatewayConfig"
         }
       },
       "required": [
         "harness",
         "model"
       ]
+    },
+    "ProviderGatewayConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "upstream_base_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "credential_env": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "protocol": {
+          "type": "string",
+          "enum": ["auto", "anthropic", "openai_responses"],
+          "default": "auto"
+        },
+        "auth_mode": {
+          "type": "string",
+          "enum": ["auto", "bearer", "x-api-key"],
+          "default": "auto"
+        },
+        "max_request_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 16000000
+        },
+        "connect_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 15
+        },
+        "response_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 900
+        }
+      },
+      "required": ["upstream_base_url", "credential_env"]
     },
     "IntegrityReviewConfig": {
       "type": "object",
@@ -604,6 +651,10 @@
           "type": "integer",
           "minimum": 1,
           "default": 200000000
+        },
+        "allow_direct_network": {
+          "type": "boolean",
+          "default": false
         }
       }
     }

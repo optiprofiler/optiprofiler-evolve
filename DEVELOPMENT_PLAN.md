@@ -119,22 +119,23 @@ Implementation order for the stabilization pass:
    outcomes, including rejected, quarantined, failed, timed-out, cancelled, and
    interrupted attempts; never delete or lossy-compress traces during a live
    research run.
-5. Complete worker/evaluator/network isolation and controlled research tools.
-   Provider-gateway lifecycle and redacted transport metadata join the same
-   private trace index, while bodies, prompts, source, and credentials remain
-   excluded from gateway logs.
+5. Complete worker/evaluator/network isolation and controlled research tools in
+   two reviewed slices. Slice 4A defines the pinned provider transport,
+   credential split, Codex/Claude routing, SSE forwarding, exact path policy,
+   fake-upstream tests, and metadata-only audit contract. Slice 4B attaches that
+   transport as a per-invocation sidecar with separate worker/egress networks,
+   labeled lifecycle cleanup, and trace-index joins. Bodies, prompts, source,
+   and credentials remain excluded from gateway logs.
 6. Render the public projection as a local Actions-style workflow/island view
    and export the same vocabulary through a single-job GitHub Actions wrapper.
 
-Items 1-3 are implemented, locally tested, and independently reviewed. Item 3
-includes complete explorer/role/reviewer trace retention, the mandatory
-pre-validation integrity gate, explicit island retention and parent sampling,
-and a scalar-compatible Pareto interface. Item 4 is the next additive closeout:
-the raw per-invocation evidence already exists, but run-level indexing,
-completeness accounting, and provenance joins remain to be implemented and
-independently reviewed. Isolation and controlled tool/network transport follow
-that closeout; the Actions-style view remains a projection over the same event
-ledger.
+Items 1-4 are implemented, locally tested, and independently reviewed. They
+include complete explorer/role/reviewer trace retention, a run-level trace
+index and coverage accounting, the mandatory pre-validation integrity gate,
+explicit island retention and parent sampling, and a scalar-compatible Pareto
+interface. Item 5 is active: the pure provider transport is implemented and
+must pass independent review before Docker sidecar/network integration begins.
+The Actions-style view remains a later projection over the same event ledger.
 
 Each item is independently tested and reviewed before work starts on the next
 one. Changes remain inside this repository; OptiProfiler agent-output work is a

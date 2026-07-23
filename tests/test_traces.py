@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 from optiprofiler_evolve.config import (
+    ProviderGatewayConfig,
     SandboxConfig,
     ToolConfig,
     WorkerConfig,
@@ -28,6 +29,36 @@ from optiprofiler_evolve.traces import (
 
 
 class TraceCaptureTests(unittest.TestCase):
+    def test_provider_route_and_credential_name_stay_out_of_worker_trace_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            worker = WorkerConfig(
+                harness="codex",
+                model="test-model",
+                env={"PRIVATE_PROVIDER_TOKEN": "secret-value"},
+                provider_gateway=ProviderGatewayConfig(
+                    upstream_base_url="https://private-provider.example/v1",
+                    credential_env="PRIVATE_PROVIDER_TOKEN",
+                ),
+            )
+            paths = prepare_trace(
+                root=root / "trace",
+                prompt="private prompt",
+                command=["<worker-adapter>", "cli"],
+                worker=worker,
+                workers=WorkersConfig(pool=(worker,)),
+                sandbox=SandboxConfig(),
+                secret_values=worker.env,
+            )
+
+            resolved = (paths.input_dir / "resolved_worker.json").read_text(
+                encoding="utf-8"
+            )
+            self.assertNotIn("private-provider.example", resolved)
+            self.assertNotIn("PRIVATE_PROVIDER_TOKEN", resolved)
+            self.assertNotIn("secret-value", resolved)
+            self.assertEqual(resolved.count("<controller-owned>"), 2)
+
     def test_raw_streams_are_private_incremental_and_separate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

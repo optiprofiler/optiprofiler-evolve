@@ -159,11 +159,23 @@ class EventLedgerTests(unittest.TestCase):
                 "succeeded",
                 data={"payload": "SECRET_FUTURE"},
             )
+            writer.emit(
+                "provider_gateway_finished",
+                "succeeded",
+                scope={"attempt_id": "it001-i00-a00"},
+                data={
+                    "outcome": "completed",
+                    "request_count": 3,
+                    "upstream": "SECRET_PROVIDER_HOST",
+                    "credential": "SECRET_PROVIDER_KEY",
+                    "audit_path": "/private/SECRET_GATEWAY_TRACE",
+                },
+            )
             writer.close()
 
             projected = project_public_events(source, destination)
 
-            self.assertEqual(len(projected), 1)
+            self.assertEqual(len(projected), 2)
             serialized = destination.read_text(encoding="utf-8")
             self.assertIn("public_score", serialized)
             for secret in (
@@ -173,11 +185,16 @@ class EventLedgerTests(unittest.TestCase):
                 "SECRET_SCOPE",
                 "SECRET_FUTURE",
                 "SECRET_NESTED",
+                "SECRET_PROVIDER_HOST",
+                "SECRET_PROVIDER_KEY",
+                "SECRET_GATEWAY_TRACE",
             ):
                 self.assertNotIn(secret, serialized)
-            event = json.loads(serialized)
+            event = json.loads(serialized.splitlines()[0])
             self.assertEqual(event["seq"], 1)
             self.assertEqual(event["scope"]["attempt_id"], "it001-i00-a00")
+            gateway = json.loads(serialized.splitlines()[1])
+            self.assertEqual(gateway["data"], {"outcome": "completed", "request_count": 3})
 
 
 if __name__ == "__main__":
