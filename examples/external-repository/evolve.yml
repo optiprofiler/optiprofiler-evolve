@@ -1,0 +1,85 @@
+name: OptiProfiler Evolve
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: optiprofiler-evolve-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  evolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      OPTIPROFILER_EVOLVE_REF: f086cb398648a2946d2682493f9c299f701fa3bd
+      OPTIPROFILER_EVOLVE_SOURCE: ${{ runner.temp }}/optiprofiler-evolve
+      OPTIPROFILER_EVOLVE_RUN_DIR: runs/github-actions
+      OPTIPROFILER_EVOLVE_MODEL: ${{ vars.OPTIPROFILER_EVOLVE_MODEL }}
+    steps:
+      - name: Check out solver repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch pinned OptiProfiler Evolve source
+        shell: bash
+        run: |
+          git init "$OPTIPROFILER_EVOLVE_SOURCE"
+          git -C "$OPTIPROFILER_EVOLVE_SOURCE" remote add origin \
+            https://github.com/optiprofiler/optiprofiler-evolve.git
+          git -C "$OPTIPROFILER_EVOLVE_SOURCE" fetch --depth 1 origin \
+            "$OPTIPROFILER_EVOLVE_REF"
+          git -C "$OPTIPROFILER_EVOLVE_SOURCE" checkout --detach FETCH_HEAD
+
+      - name: Install OptiProfiler Evolve
+        run: python -m pip install "$OPTIPROFILER_EVOLVE_SOURCE"
+
+      - name: Build isolated runtime images
+        shell: bash
+        run: |
+          docker build \
+            -f "$OPTIPROFILER_EVOLVE_SOURCE/docker/worker/Dockerfile" \
+            -t optiprofiler-evolve-worker:latest \
+            "$OPTIPROFILER_EVOLVE_SOURCE"
+          docker build \
+            -f "$OPTIPROFILER_EVOLVE_SOURCE/docker/evaluator/Dockerfile" \
+            -t optiprofiler-evolve-evaluator:latest \
+            "$OPTIPROFILER_EVOLVE_SOURCE"
+          docker build \
+            -f "$OPTIPROFILER_EVOLVE_SOURCE/docker/gateway/Dockerfile" \
+            -t optiprofiler-evolve-gateway:latest \
+            "$OPTIPROFILER_EVOLVE_SOURCE"
+
+      - name: Run evolution experiment
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python evolve/run.py
+
+      - name: Publish sanitized Job Summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          summary="${OPTIPROFILER_EVOLVE_RUN_DIR}/public/PUBLIC_REPORT.md"
+          if test -f "$summary"; then
+            cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '# OptiProfiler Evolve\n\nNo public run summary was produced.\n' \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload sanitized public artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: optiprofiler-evolve-public-${{ github.run_id }}
+          path: ${{ env.OPTIPROFILER_EVOLVE_RUN_DIR }}/public
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false

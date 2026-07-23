@@ -22,6 +22,15 @@ The template has one job by design. Splitting phases or islands into GitHub jobs
 would create a second orchestration model with different resume, cancellation,
 and state semantics.
 
+The files above are the package-repository example. For a separate algorithm
+repository, use
+[`examples/external-repository/`](../examples/external-repository/README.md).
+That workflow fetches a pinned package revision into `$RUNNER_TEMP`, builds the
+three images from that clean source tree, and runs the experiment script stored
+with the solver. Merely copying `examples/github-actions/evolve.yml` into an
+algorithm repository is insufficient because `pip install -e .` and the Docker
+build contexts in that file deliberately refer to this package repository.
+
 ## Public artifact boundary
 
 The `always()` steps read
@@ -36,6 +45,7 @@ report.html                    # once available
 public_trace_coverage.json     # once available
 PUBLIC_REPORT.md
 ```
+
 
 Do not change the upload path to `<run_dir>`. The full directory contains
 controller-only validation and hidden results, reviewer findings, provider

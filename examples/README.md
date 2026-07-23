@@ -16,6 +16,7 @@ at least one review call.
 | Multi-file solver repository | `run_repository.py` | `experiment.yaml` | Same as Claude quick start |
 | Full research harness | `run.py` | `experiment-research.yaml` | Same as Claude quick start; edit `run.py` to point at this config |
 | Single-job GitHub Actions launch | `github-actions/run.py` | `experiment.yaml` | Repository variable and Actions provider secret; see `github-actions/evolve.yml` |
+| GitHub Actions from an external solver repository | `external-repository/evolve/run.py` | `external-repository/evolve/experiment.yaml` | Copy the shown repository layout and workflow |
 
 Build the worker and evaluator images once before running an example. See
 [Getting started](../docs/getting-started.md) for the commands.
