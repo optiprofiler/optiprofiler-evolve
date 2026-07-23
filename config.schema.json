@@ -627,6 +627,11 @@
           "minLength": 1,
           "default": "optiprofiler-evolve-worker:latest"
         },
+        "gateway_image": {
+          "type": "string",
+          "minLength": 1,
+          "default": "optiprofiler-evolve-gateway:latest"
+        },
         "cpus": {
           "type": "number",
           "exclusiveMinimum": 0,
@@ -641,6 +646,26 @@
           "type": "integer",
           "minimum": 16,
           "default": 512
+        },
+        "gateway_cpus": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 0.5
+        },
+        "gateway_memory": {
+          "type": "string",
+          "minLength": 1,
+          "default": "256m"
+        },
+        "gateway_pids_limit": {
+          "type": "integer",
+          "minimum": 16,
+          "default": 64
+        },
+        "gateway_start_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30
         },
         "max_candidate_files": {
           "type": "integer",

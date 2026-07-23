@@ -53,6 +53,9 @@ class WorkerOutcome:
     capture_error: str | None = None
     cancelled: bool = False
     termination_reason: str | None = None
+    provider_gateway_outcome: str | None = None
+    provider_gateway_request_count: int | None = None
+    provider_gateway_manifest: Path | None = None
 
 
 @dataclass(frozen=True)

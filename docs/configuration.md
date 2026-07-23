@@ -177,17 +177,18 @@ the Responses protocol and function-tool loop. See
 live agent-mode probe.
 
 The built-in research image contains Python, Git, rg, `ddgr`, C/C++ build tools,
-Codex, and Claude Code. `ddgr` is the fallback when a compatible model endpoint
-does not expose a harness-native web-search tool. For strict tool-ablation
-experiments, build separate `worker_image` variants. Only `web_search` and the
-Claude-specific shell setting alter harness-visible tools; the other capability
-fields cannot remove binaries already present in an image.
+Codex, and Claude Code. In gateway mode, installed network clients such as
+`ddgr` do not have shell egress; use harness-native search when the pinned
+provider supports it. For strict tool-ablation experiments, build separate
+`worker_image` variants. Only `web_search` and the Claude-specific shell setting
+alter harness-visible tools; the other capability fields cannot remove binaries
+already present in an image.
 
-Provider transport is independent of general worker egress. A worker can reach
-its model through the gateway while `tools.network: false` blocks shell and
-package-manager egress. `web_search: false` removes harness-native search tools;
-provider-side search is requested only when the CLI and pinned endpoint support
-it.
+Provider transport is independent of worker egress. A gateway-routed worker is
+always on an internal network, so shell and package-manager egress remain
+blocked even when `tools.network: true` permits a native network-backed harness
+tool. `web_search: false` removes harness-native search; model transport remains
+available through the sidecar.
 
 `tools.shell: false` removes `Bash` from Claude Code. Codex CLI does not expose an
 equivalent no-shell agent mode, so the built-in adapter rejects that combination

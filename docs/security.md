@@ -65,11 +65,11 @@ It is an independent semantic check, not a stronger sandbox or a formal proof
 that candidate code is harmless.
 
 Each attempt receives a distinct workspace, broker token, container, and
-temporary Docker network, including workers on the same island. Enabling web
-search deliberately gives that private network outbound access; it does not add
-host mounts or expose the controller-only data. Set both
-`workers.tools.web_search` and `workers.tools.network` to `false` for an
-internal, no-egress network.
+temporary internal Docker network, including workers on the same island. A
+short-lived provider gateway is the only container that also joins a separate
+egress network. Enabling native web search permits the selected harness to ask
+the pinned provider for that tool; it does not give worker shell commands a
+general network route.
 
 ## Current limitation
 
@@ -86,6 +86,7 @@ candidate execution protocol with a narrower callback boundary and adversarial
 runtime regression tests. The current reviewer is an independent semantic gate,
 not a substitute for process-level isolation from a hostile solver.
 
-When worker network is enabled for remote model APIs or web search, the current
-Docker bridge provides outbound access. A controlled egress proxy/allowlist is
-required for strict provider-only network experiments.
+The default gateway path is provider-only and route pinned. Brokered shell
+egress and package installation are intentionally unavailable. The optional
+direct-provider path gives the worker a regular Docker bridge only after both
+unsafe opt-ins are set; do not use it for strict experiments.

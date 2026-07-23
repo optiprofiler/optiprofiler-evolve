@@ -76,8 +76,9 @@ they do not receive the adapter or a subprocess capability.
 
 Each terminal invocation is joined to run/config/component provenance in
 `controller/trace_index.jsonl`. The separate
-`controller/trace_coverage.json` reports capture quality and worker outcomes;
-`public_trace_coverage.json` contains aggregate counts only.
+`controller/trace_coverage.json` reports capture quality, worker outcomes, and
+provider-gateway outcomes; `public_trace_coverage.json` contains aggregate
+counts only.
 
 The `budget` field is reserved for a future scheduler. The alpha engine raises
 on a nonempty budget proposal so an apparently successful experiment cannot
@@ -124,6 +125,7 @@ the optional `static_audit` evidence step is removed for an ablation.
 | `phases/`, `steps/`, `policies/` | Built-in orchestration components |
 | `engine.py` | Ordered execution, population ownership, selection, checkpoints, holdout |
 | `workers.py`, `harness.py`, `sandbox.py`, `traces.py` | Worker lifecycle, CLI commands, isolation, and per-invocation raw trace capture |
+| `provider_transport.py`, `provider_gateway.py`, `docker_runtime.py` | Provider route separation, pinned sidecar proxying, and internal Docker lifecycle/GC |
 | `trace_ledger.py` | Run-level trace indexing, crash reconciliation, and coverage summaries |
 | `evaluation.py`, `broker.py` | Evaluator adapter and bounded public worker tools |
 | `solver.py`, `data.py` | Solver tree checks and immutable problem splits |
@@ -141,6 +143,11 @@ Workers receive a private copy of one candidate, an anonymous public manifest,
 and brokered `smoke_test`/`evaluate` commands. They do not receive validation or
 hidden manifests, the fixed reference source, OptiProfiler/problem-library
 source, Docker socket, host home, or sibling repositories.
+
+Gateway-routed Docker workers receive only a dummy credential and an internal
+sidecar address. The worker stays on an invocation-only internal network; only
+the sidecar joins a separate egress network. Its route, credential, audit, and
+terminal evidence remain controller-owned.
 
 The engine records `attempt_id` across worker transcripts, step events, candidate
 lineage, and benchmark artifacts. Reproducible component seeds are derived from

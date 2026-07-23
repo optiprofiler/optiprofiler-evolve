@@ -9,11 +9,6 @@ In the Docker backend, every agent invocation uses a short-lived provider
 gateway. This applies to explorer workers, integrity reviewers, and research
 roles. The gateway is model transport, not a general HTTP proxy.
 
-The reviewed 4A transport checkpoint deliberately refuses to launch a
-gateway-configured Docker worker until the 4B sidecar/network lifecycle is
-attached. It never falls back to the older direct-credential path during that
-intermediate state.
-
 ## Credential and network boundary
 
 For a gateway-routed worker:
@@ -31,10 +26,20 @@ launch. Codex provider profiles and worker-authored provider arguments also fail
 when gateway routing is enabled. This prevents a config from silently replacing
 the controller-owned route.
 
-General worker egress is a separate capability. `workers.tools.network` controls
-shell/package-manager networking; provider transport continues through the
-gateway when that setting is false. Direct provider access from a Docker worker
-requires both `workers.allow_direct_provider=true` and
+Gateway mode always places the worker on an invocation-only internal network.
+The sidecar alone joins that network and a separate egress network. Therefore
+provider transport continues when `workers.tools.network` is false, but shell
+commands such as `curl`, `ddgr`, and package installers never receive general
+egress in gateway mode. `workers.tools.network` is still the explicit permission
+required by network-backed harness tools such as native web search. Brokered
+shell egress is not implemented in this release.
+
+This boundary requires Docker Engine 28 or newer. The runtime uses Docker's
+gateway-priority support so the sidecar's egress network is its deterministic
+default route while the worker remains attached only to the internal network.
+
+Direct provider and shell access from a Docker worker requires both
+`workers.allow_direct_provider=true` and
 `sandbox.allow_direct_network=true`. These flags are unsafe experiment
 provenance, not recommended defaults. `unsafe_local` stays direct and does not
 claim gateway isolation.
@@ -142,10 +147,10 @@ a long experiment.
 
 `workers.tools.web_search=true` requests the selected harness's native search
 tool. Claude receives `WebSearch` and `WebFetch`; Codex receives `--search`.
-Those tools work only when the pinned provider supports them. Worker shell
-networking is governed independently by `workers.tools.network` and the Docker
-egress policy. A no-search ablation disables the native search option and
-general egress; it does not disable model transport through the gateway.
+Those tools work only when the pinned provider supports them. In gateway mode
+they travel inside the provider request/tool loop; they do not grant shell
+egress. A no-search ablation disables the native search option but does not
+disable model transport through the gateway.
 
 ## Evidence and reproducibility
 
@@ -159,6 +164,12 @@ general egress; it does not disable model transport through the gateway.
   makes its process exit nonzero. An upstream stream that ends early is recorded
   as `stream_interrupted`; the gateway does not append a second HTTP response.
 - Worker stdout/stderr bytes remain authoritative in the private agent trace.
+- Gateway ready, request-audit, terminal-outcome, container-log, and Docker
+  lifecycle records are retained beside that invocation. Cleanup runs only
+  after worker and gateway terminal evidence is flushed.
+- If shutdown finds an upstream request still in flight, the sidecar records an
+  `interrupted` terminal outcome and the in-flight count instead of claiming a
+  clean completion or waiting for the full provider timeout.
 - Public run projections contain only gateway lifecycle status and aggregate
   request counts.
 

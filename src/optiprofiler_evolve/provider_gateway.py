@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.client
 import ipaddress
 import json
@@ -202,6 +203,10 @@ class ProviderGatewayServer:
     def failure(self) -> str | None:
         return self.audit.failure
 
+    @property
+    def active_request_count(self) -> int:
+        return self._server.active_request_count
+
     def start(self) -> ProviderGatewayServer:
         if self._thread is not None:
             raise RuntimeError("Provider gateway is already running.")
@@ -241,7 +246,24 @@ class _GatewayHTTPServer(ThreadingHTTPServer):
         self.route = route
         self.audit = audit
         self._audit_shutdown_started = threading.Event()
+        self._active_lock = threading.Lock()
+        self._active_requests = 0
         super().__init__(address, handler)
+
+    @property
+    def active_request_count(self) -> int:
+        with self._active_lock:
+            return self._active_requests
+
+    def request_started(self) -> None:
+        with self._active_lock:
+            self._active_requests += 1
+
+    def request_finished(self) -> None:
+        with self._active_lock:
+            if self._active_requests < 1:
+                raise RuntimeError("provider gateway active-request counter underflow")
+            self._active_requests -= 1
 
     def fail_after_audit_error(self) -> None:
         """Stop accepting provider traffic after durable audit capture fails."""
@@ -304,6 +326,7 @@ class _GatewayHandler(BaseHTTPRequestHandler):
         outcome = "gateway_error"
         error_type: str | None = None
         forward = _ForwardState()
+        self.server.request_started()
         try:
             path = self._validated_path(method)
             body = self._read_request_body(method)
@@ -329,25 +352,28 @@ class _GatewayHandler(BaseHTTPRequestHandler):
                     pass
         finally:
             try:
-                self.server.audit.append(
-                    {
-                        "schema": "provider_gateway_request/1",
-                        "request_id": request_id,
-                        "protocol": self.server.route.protocol,
-                        "method": method,
-                        "path": path,
-                        "started_at": started_at,
-                        "finished_at": _utc_now(),
-                        "duration_seconds": max(0.0, time.monotonic() - started),
-                        "outcome": outcome,
-                        "status": status,
-                        "request_bytes": request_bytes,
-                        "response_bytes": response_bytes,
-                        "error_type": error_type,
-                    }
-                )
-            except OSError:
-                self.server.fail_after_audit_error()
+                try:
+                    self.server.audit.append(
+                        {
+                            "schema": "provider_gateway_request/1",
+                            "request_id": request_id,
+                            "protocol": self.server.route.protocol,
+                            "method": method,
+                            "path": path,
+                            "started_at": started_at,
+                            "finished_at": _utc_now(),
+                            "duration_seconds": max(0.0, time.monotonic() - started),
+                            "outcome": outcome,
+                            "status": status,
+                            "request_bytes": request_bytes,
+                            "response_bytes": response_bytes,
+                            "error_type": error_type,
+                        }
+                    )
+                except OSError:
+                    self.server.fail_after_audit_error()
+            finally:
+                self.server.request_finished()
 
     def _validated_path(self, method: str) -> str:
         if any(value is not None for value in (self.headers.get("Transfer-Encoding"),)):
@@ -527,17 +553,83 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _write_ready_file(path: Path, server: ProviderGatewayServer) -> None:
+def _upstream_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _write_private_json(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "schema": "provider_gateway_ready/1",
-        "base_url": server.base_url,
-        "pid": os.getpid(),
-    }
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, sort_keys=True)
-        handle.write("\n")
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.unlink(missing_ok=True)
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", closefd=False) as handle:
+            json.dump(payload, handle, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    finally:
+        os.close(descriptor)
+    temporary.replace(path)
+    path.chmod(0o600)
+
+
+def _write_ready_file(
+    path: Path,
+    server: ProviderGatewayServer,
+    route: GatewayRoute,
+    *,
+    started_at: str,
+    advertised_base_url: str | None,
+) -> None:
+    _write_private_json(
+        path,
+        {
+            "schema": "provider_gateway_ready/1",
+            "base_url": advertised_base_url or server.base_url,
+            "pid": os.getpid(),
+            "protocol": route.protocol,
+            "started_at": started_at,
+            "upstream_hash": _upstream_hash(route.upstream_base_url),
+        },
+    )
+
+
+def _write_outcome_file(
+    path: Path,
+    server: ProviderGatewayServer,
+    route: GatewayRoute,
+    *,
+    started_at: str,
+    exit_code: int,
+    termination_reason: str,
+    inflight_request_count: int,
+) -> None:
+    failure = server.failure
+    outcome = (
+        "audit_failed"
+        if failure is not None
+        else "interrupted"
+        if inflight_request_count
+        else "completed"
+    )
+    _write_private_json(
+        path,
+        {
+            "schema": "provider_gateway_outcome/1",
+            "outcome": outcome,
+            "protocol": route.protocol,
+            "started_at": started_at,
+            "finished_at": _utc_now(),
+            "request_count": server.audit.count,
+            "inflight_request_count": inflight_request_count,
+            "audit_failure": failure is not None,
+            "audit_failure_reason": failure,
+            "exit_code": exit_code,
+            "termination_reason": termination_reason,
+            "upstream_hash": _upstream_hash(route.upstream_base_url),
+        },
+    )
 
 
 def _parse_listen(value: str) -> tuple[str, int]:
@@ -559,9 +651,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--auth-mode", choices=("bearer", "x-api-key"), required=True)
     parser.add_argument("--audit-log", type=Path, required=True)
     parser.add_argument("--ready-file", type=Path, required=True)
+    parser.add_argument("--outcome-file", type=Path, required=True)
+    parser.add_argument("--advertised-base-url")
     parser.add_argument("--max-request-bytes", type=int, default=16_000_000)
     parser.add_argument("--connect-timeout-seconds", type=int, default=15)
     parser.add_argument("--response-timeout-seconds", type=int, default=900)
+    parser.add_argument(
+        "--allow-private-upstream-for-tests",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args(argv)
     credential = os.environ.get(args.credential_env)
     if not credential:
@@ -574,23 +673,52 @@ def main(argv: list[str] | None = None) -> int:
         max_request_bytes=args.max_request_bytes,
         connect_timeout_seconds=args.connect_timeout_seconds,
         response_timeout_seconds=args.response_timeout_seconds,
+        allow_private_upstream=args.allow_private_upstream_for_tests,
     )
     host, port = args.listen
     server = ProviderGatewayServer(route, host=host, port=port, audit_path=args.audit_log)
 
-    def stop(_signum: int, _frame: object) -> None:
-        threading.Thread(target=server.close, daemon=True).start()
+    shutdown_reason = {"value": "exit"}
+    shutdown_requested = threading.Event()
+
+    def stop(signum: int, _frame: object) -> None:
+        shutdown_reason["value"] = signal.Signals(signum).name.lower()
+        shutdown_requested.set()
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    started_at = _utc_now()
     server.start()
-    _write_ready_file(args.ready_file, server)
     try:
+        _write_ready_file(
+            args.ready_file,
+            server,
+            route,
+            started_at=started_at,
+            advertised_base_url=args.advertised_base_url,
+        )
         while server._thread is not None and server._thread.is_alive():
-            server._thread.join(timeout=1)
+            if shutdown_requested.wait(timeout=0.2):
+                break
     finally:
         server.close()
-    return 1 if server.failure is not None else 0
+    if shutdown_requested.is_set() and server.active_request_count:
+        time.sleep(0.2)
+    inflight_request_count = server.active_request_count
+    exit_code = 1 if server.failure is not None or inflight_request_count else 0
+    try:
+        _write_outcome_file(
+            args.outcome_file,
+            server,
+            route,
+            started_at=started_at,
+            exit_code=exit_code,
+            termination_reason=shutdown_reason["value"],
+            inflight_request_count=inflight_request_count,
+        )
+    except OSError:
+        exit_code = 1
+    return exit_code
 
 
 if __name__ == "__main__":

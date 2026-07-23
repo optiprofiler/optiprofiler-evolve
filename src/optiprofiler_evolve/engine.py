@@ -24,6 +24,7 @@ from .broker import BrokerConnection, EvaluationBroker
 from .builtins import register_builtin_components
 from .config import EvolveConfig, ToolConfig, WorkerConfig
 from .data import DataPlan, resolve_data_plan, write_data_manifests
+from .docker_runtime import cleanup_managed_resources, read_gateway_outcome
 from .events import EventWriter
 from .models import CandidateRecord, EvaluationResult, EvolveResult, FinalistResult
 from .prompt import build_worker_prompt
@@ -239,6 +240,10 @@ class EvolutionEngine:
             context=request.trace_context,
             secret_values=request.worker.env,
         )
+        gateway_expected = request.worker.provider_gateway is not None
+        gateway_scope = _trace_event_scope(request.trace_context)
+        if gateway_expected:
+            self._emit("provider_gateway_started", "running", scope=gateway_scope)
         try:
             outcome = self.worker_adapter.run(request)
         except Exception as exc:
@@ -266,6 +271,24 @@ class EvolutionEngine:
             capture_error=outcome.capture_error,
         )
         self.trace_ledger.record(paths, workspace=request.workspace)
+        gateway = read_gateway_outcome(request.trace_dir) if gateway_expected else None
+        if gateway is not None:
+            outcome = replace(
+                outcome,
+                provider_gateway_outcome=gateway.outcome,
+                provider_gateway_request_count=gateway.request_count,
+                provider_gateway_manifest=gateway.manifest,
+            )
+        if gateway_expected:
+            self._emit(
+                "provider_gateway_finished",
+                "succeeded" if gateway is not None and gateway.healthy else "failed",
+                scope=gateway_scope,
+                data={
+                    "outcome": gateway.outcome if gateway is not None else "unavailable",
+                    "request_count": gateway.request_count if gateway is not None else 0,
+                },
+            )
         return replace(
             outcome,
             native_trace=paths.stdout,
@@ -482,7 +505,10 @@ class EvolutionEngine:
                 coverage = self.trace_ledger.recover_and_summarize()
                 capture = coverage["capture_quality"]
                 outcomes = coverage["outcomes"]
-                if not isinstance(capture, Mapping) or not isinstance(outcomes, Mapping):
+                gateway = coverage["provider_gateway"]
+                if not all(
+                    isinstance(value, Mapping) for value in (capture, outcomes, gateway)
+                ):
                     raise ValueError("Trace coverage has an invalid shape.")
                 self._emit(
                     "trace_coverage",
@@ -491,6 +517,7 @@ class EvolutionEngine:
                         "total": coverage["total"],
                         **{f"capture_{key}": value for key, value in capture.items()},
                         **{f"outcome_{key}": value for key, value in outcomes.items()},
+                        **{f"gateway_{key}": value for key, value in gateway.items()},
                     },
                 )
                 self._append_trace_coverage(coverage)
@@ -498,6 +525,30 @@ class EvolutionEngine:
                 trace_failure = exc
                 try:
                     self._emit("trace_coverage", "failed")
+                except Exception:
+                    pass
+            if self.config.sandbox.backend == "docker":
+                cleanup_errors: tuple[str, ...]
+                try:
+                    cleanup_errors = cleanup_managed_resources(
+                        run_id=self.run_id,
+                        include_active=True,
+                    )
+                except Exception as exc:
+                    cleanup_errors = (f"{type(exc).__name__}: {exc}",)
+                try:
+                    _write_json(
+                        self.run_dir / "controller" / "docker_gc.json",
+                        {
+                            "schema": "docker_gc_result/1",
+                            "complete": not cleanup_errors,
+                            "errors": cleanup_errors,
+                        },
+                    )
+                    self._emit(
+                        "docker_gc_finished",
+                        "failed" if cleanup_errors else "succeeded",
+                    )
                 except Exception:
                     pass
             try:
@@ -1328,7 +1379,10 @@ class EvolutionEngine:
             return
         capture = coverage.get("capture_quality", {})
         outcomes = coverage.get("outcomes", {})
-        if not isinstance(capture, Mapping) or not isinstance(outcomes, Mapping):
+        gateway = coverage.get("provider_gateway", {})
+        if not all(
+            isinstance(value, Mapping) for value in (capture, outcomes, gateway)
+        ):
             raise ValueError("Trace coverage has an invalid shape.")
         lines = [
             "",
@@ -1341,6 +1395,10 @@ class EvolutionEngine:
             f"- Failed worker outcomes: `{outcomes.get('failed', 0)}`",
             f"- Timed-out worker outcomes: `{outcomes.get('timed_out', 0)}`",
             f"- Cancelled worker outcomes: `{outcomes.get('cancelled', 0)}`",
+            f"- Gateway invocations: `{gateway.get('total', 0)}`",
+            f"- Completed gateways: `{gateway.get('completed', 0)}`",
+            f"- Failed gateways: `{gateway.get('failed', 0)}`",
+            f"- Interrupted gateways: `{gateway.get('interrupted', 0)}`",
             "- Private index: `controller/trace_index.jsonl`",
             "- Private coverage details: `controller/trace_coverage.json`",
         ]
@@ -1553,6 +1611,13 @@ class _EngineControllerServices:
                 "trace_chunks": str(outcome.trace_chunks) if outcome.trace_chunks else None,
                 "trace_outcome": str(outcome.trace_outcome) if outcome.trace_outcome else None,
                 "trace_capture_error": outcome.capture_error,
+                "provider_gateway_outcome": outcome.provider_gateway_outcome,
+                "provider_gateway_request_count": outcome.provider_gateway_request_count,
+                "provider_gateway_manifest": (
+                    str(outcome.provider_gateway_manifest)
+                    if outcome.provider_gateway_manifest
+                    else None
+                ),
                 "outputs": sorted(outputs),
                 "missing_outputs": missing_outputs,
             },
@@ -1998,6 +2063,13 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
                 "trace_chunks": str(outcome.trace_chunks) if outcome.trace_chunks else None,
                 "trace_outcome": str(outcome.trace_outcome) if outcome.trace_outcome else None,
                 "trace_capture_error": outcome.capture_error,
+                "provider_gateway_outcome": outcome.provider_gateway_outcome,
+                "provider_gateway_request_count": outcome.provider_gateway_request_count,
+                "provider_gateway_manifest": (
+                    str(outcome.provider_gateway_manifest)
+                    if outcome.provider_gateway_manifest
+                    else None
+                ),
             },
         )
         return outcome
@@ -2085,6 +2157,21 @@ def _copy_role_input(source: Path, destination: Path) -> None:
         shutil.copy2(source, destination)
     else:
         raise ValueError(f"Role input is not a regular file or directory: {source}")
+
+
+def _trace_event_scope(context: Mapping[str, object]) -> dict[str, object]:
+    join = context.get("join")
+    if not isinstance(join, Mapping):
+        return {}
+    allowed = {
+        "phase",
+        "iteration",
+        "island",
+        "attempt_id",
+        "role",
+        "job_id",
+    }
+    return {key: value for key, value in join.items() if key in allowed}
 
 
 def _redact_role_input(path: Path, replacements: Mapping[str, str]) -> None:

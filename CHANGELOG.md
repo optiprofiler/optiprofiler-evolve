@@ -12,6 +12,9 @@
 - Add trace invocation/outcome manifests, process-group timeout cleanup,
   cooperative SIGINT/SIGTERM cancellation, idempotent interrupted-run recovery,
   and a controller-owned fallback for injected worker adapters.
+- Route Docker worker model traffic through a pinned per-invocation provider
+  sidecar, with separate internal/egress networks, credential separation,
+  metadata-only request audit, terminal recovery, and labeled best-effort GC.
 - Make island retention and parent sampling explicit registered components while
   preserving the seeded legacy default, and add validated controller-only metric
   bundles plus scalar-compatible Pareto retention.
@@ -36,9 +39,9 @@
   YAML files synchronized.
 - Fixed Docker prompt delivery and Claude Code stream-JSON compatibility, and
   added a tested Anthropic-compatible provider example.
-- Gave every worker a dedicated temporary Docker network while preserving
-  outbound research access, and added `ddgr` as a provider-independent web
-  search fallback.
+- Give every worker a dedicated temporary Docker network. Gateway-routed
+  workers have provider transport and harness-native search without general
+  shell egress; direct network access remains an explicit unsafe ablation.
 - Reduced quick-start container defaults and bounded the example solvers so
   local worker tests cannot wait indefinitely.
 

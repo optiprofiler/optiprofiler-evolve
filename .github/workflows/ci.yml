@@ -30,6 +30,7 @@ jobs:
       - uses: actions/checkout@v7
       - run: docker build -f docker/worker/Dockerfile -t optiprofiler-evolve-worker:ci .
       - run: docker build -f docker/evaluator/Dockerfile -t optiprofiler-evolve-evaluator:ci .
+      - run: docker build -f docker/gateway/Dockerfile -t optiprofiler-evolve-gateway:ci .
       - run: >-
           docker run --rm --entrypoint sh optiprofiler-evolve-worker:ci -lc
           'codex --version && claude --version && ddgr --version && python -c "import numpy, scipy"'
@@ -39,3 +40,8 @@ jobs:
       - run: >-
           docker run --rm --entrypoint python optiprofiler-evolve-evaluator:ci -c
           'import optiprofiler, optiprofiler_evolve, yaml'
+      - run: docker run --rm optiprofiler-evolve-gateway:ci --help
+      - run: >-
+          OPE_RUN_DOCKER_TESTS=1
+          OPE_GATEWAY_IMAGE=optiprofiler-evolve-gateway:ci
+          python -m unittest tests.test_docker_integration -v

@@ -41,12 +41,14 @@ current threat model; see [Security](docs/security.md).
 
 ## Quick start
 
-Install the package and build the two local images:
+Install the package with Docker Engine 28 or newer, then build the three local
+images:
 
 ```bash
 python -m pip install -e '.[dev]'
 docker build -f docker/worker/Dockerfile -t optiprofiler-evolve-worker:latest .
 docker build -f docker/evaluator/Dockerfile -t optiprofiler-evolve-evaluator:latest .
+docker build -f docker/gateway/Dockerfile -t optiprofiler-evolve-gateway:latest .
 ```
 
 Set the model and provider credential used by the example, then run it:
@@ -111,7 +113,9 @@ invocation/outcome manifests, and normalized integrity decisions are retained
 for every agent invocation, including rejected, failed, timed-out, cancelled,
 and interrupted work. `controller/trace_index.jsonl` joins those traces to the
 run and workflow; private and aggregate public coverage files distinguish trace
-quality from worker outcome. Full research runs also preserve
+quality from worker and provider-gateway outcome. Gateway-routed invocations
+also retain metadata-only request audit and Docker lifecycle/cleanup evidence.
+Full research runs also preserve
 direction cards, per-island source diffs and strategy cards, executable ablation
 matrices, island bundles, recombination conflicts/results, and a challenger
 report under `research/`.

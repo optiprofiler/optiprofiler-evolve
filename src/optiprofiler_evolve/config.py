@@ -541,9 +541,14 @@ class SandboxConfig:
 
     backend: str = "docker"
     worker_image: str = "optiprofiler-evolve-worker:latest"
+    gateway_image: str = "optiprofiler-evolve-gateway:latest"
     cpus: float = 2.0
     memory: str = "4g"
     pids_limit: int = 512
+    gateway_cpus: float = 0.5
+    gateway_memory: str = "256m"
+    gateway_pids_limit: int = 64
+    gateway_start_timeout_seconds: int = 30
     max_candidate_files: int = 2000
     max_candidate_bytes: int = 200_000_000
     allow_direct_network: bool = False
@@ -553,6 +558,17 @@ class SandboxConfig:
             raise ValueError("sandbox.backend must be 'docker' or 'unsafe_local'.")
         if self.cpus <= 0 or self.pids_limit < 16 or not self.memory:
             raise ValueError("sandbox cpus/memory must be set and pids_limit must be at least 16.")
+        if (
+            not self.gateway_image
+            or self.gateway_cpus <= 0
+            or not self.gateway_memory
+            or self.gateway_pids_limit < 16
+            or self.gateway_start_timeout_seconds < 1
+        ):
+            raise ValueError(
+                "sandbox gateway image/resources/start timeout must be set, and "
+                "gateway_pids_limit must be at least 16."
+            )
         if self.max_candidate_files < 1 or self.max_candidate_bytes < 1:
             raise ValueError("sandbox candidate file and byte limits must be positive.")
 

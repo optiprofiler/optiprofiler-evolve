@@ -45,6 +45,14 @@ chunks.jsonl
 invocation.json
 outcome.json
 workspace.json
+docker_lifecycle.jsonl          # Docker backend only
+docker_cleanup.json             # Docker backend only
+provider_gateway/               # gateway-routed Docker workers only
+  ready.json
+  requests.jsonl
+  outcome.json
+  manifest.json
+  container.log
 ```
 
 The trace and input directories use mode `0700`; files use `0600`. Output is
@@ -74,6 +82,15 @@ chunk index. Missing outcome manifests can be marked `interrupted`
 idempotently by the controller's crash scanner; recovery never invents missing
 bytes.
 
+The gateway audit is metadata-only and append-synchronized per request. Its
+controller manifest records request count, audit state, exit code, and a hash of
+the pinned upstream rather than its hostname. It also records an in-flight
+request count when a bounded shutdown interrupts an upstream request. Worker
+and gateway terminal manifests are flushed before containers or networks are
+removed. Docker
+lifecycle and cleanup files record resource outcomes without commands,
+credentials, provider hosts, or request content.
+
 ## Run index and coverage
 
 The controller appends one terminal row per invocation to
@@ -81,7 +98,9 @@ The controller appends one terminal row per invocation to
 private provenance and integrity metadata: trace/run/config identity, relative
 trace path, adapter/harness/model identity, workflow join fields, input/output
 tree hashes, terminal outcome, capture quality, and stream byte counts and
-hashes. It does not duplicate prompts or provider output.
+hashes. Gateway-routed rows add a private `provider_gateway` object containing
+outcome, request count, audit-failure state, exit code, and upstream hash. It
+does not duplicate prompts or provider output.
 
 The index is idempotent by trace ID and safe under concurrent islands. After a
 controller interruption, recovery marks unfinished invocations explicitly and
@@ -96,12 +115,26 @@ the persisted run provenance; this does not add another public package API.
 - capture quality: `complete`, `degraded`, or `interrupted`;
 - worker outcome: `completed`, `failed`, `timed_out`, `cancelled`, or
   `interrupted`.
+- provider gateway outcome: aggregate `total`, `completed`, `failed`, and
+  `interrupted` counts.
 
 A worker can fail while its trace is complete. Conversely, a successful legacy
 adapter can have a degraded trace if it returned only a transcript. The
 shareable `public_trace_coverage.json` and `trace_coverage` event contain only
 aggregate counts. They omit trace IDs, roles, models, paths, prompts, findings,
 and provider content.
+If a crash leaves gateway ready/audit evidence without a terminal manifest,
+reconciliation marks that gateway `interrupted` without inventing an exit code
+or missing bytes.
+
+Every run automatically removes only its own labeled Docker objects. Cross-run
+orphan cleanup is explicit and age-gated. Preview the selection first, then add
+`--apply` only after inspection:
+
+```bash
+python -m optiprofiler_evolve.docker_gc --older-than 86400
+python -m optiprofiler_evolve.docker_gc --older-than 86400 --apply
+```
 
 Stable join fields include the workflow module, role/job or attempt identity,
 candidate and parent identity when applicable, iteration, and island. Trusted

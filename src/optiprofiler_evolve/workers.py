@@ -41,6 +41,9 @@ class CliWorkerAdapter:
             capture_error=result.capture_error,
             cancelled=result.cancelled,
             termination_reason=result.termination_reason,
+            provider_gateway_outcome=result.provider_gateway_outcome,
+            provider_gateway_request_count=result.provider_gateway_request_count,
+            provider_gateway_manifest=result.provider_gateway_manifest,
         )
 
     def provenance(self, workers: Sequence[WorkerConfig]) -> Mapping[str, object]:

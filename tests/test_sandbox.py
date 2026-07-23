@@ -6,54 +6,68 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from optiprofiler_evolve.broker import BrokerConnection
 from optiprofiler_evolve.config import (
-    ProviderGatewayConfig,
     SandboxConfig,
     ToolConfig,
     WorkerConfig,
     WorkersConfig,
 )
-from optiprofiler_evolve.sandbox import _docker_command, run_agent
+from optiprofiler_evolve.docker_runtime import (
+    GatewayRuntimeOutcome,
+    build_worker_container_command,
+)
+from optiprofiler_evolve.sandbox import run_agent
 from optiprofiler_evolve.traces import CapturedProcess
 
 
 class SandboxCommandTests(unittest.TestCase):
-    def test_configured_gateway_never_falls_back_to_direct_worker_credentials(self) -> None:
-        worker = WorkerConfig(
-            harness="codex",
-            model="test",
-            env={"OPENAI_API_KEY": "must-not-enter-worker"},
-            provider_gateway=ProviderGatewayConfig(
-                upstream_base_url="https://api.openai.com/v1",
-                credential_env="OPENAI_API_KEY",
-            ),
-        )
-        workers = WorkersConfig(pool=(worker,))
-        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
-            RuntimeError,
-            "Refusing direct fallback",
-        ):
+    def test_docker_start_failure_flushes_trace_before_cleanup(self) -> None:
+        worker = WorkerConfig(harness="codex", model="test")
+        workers = WorkersConfig(pool=(worker,), timeout_seconds=5)
+        runtime = MagicMock()
+        runtime.gateway_enabled = False
+        runtime.start.side_effect = RuntimeError("gateway launch failed")
+        runtime.finish_gateway.return_value = None
+        with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            run_agent(
-                worker=worker,
-                workers=workers,
-                sandbox=SandboxConfig(),
-                workspace=root / "workspace",
-                tools_dir=root / "tools",
-                broker=BrokerConnection(
-                    "/opt/broker",
-                    "/opt/artifacts",
-                    "token",
-                    root / "broker",
-                    root / "artifacts",
+            (root / "workspace").mkdir()
+
+            def assert_trace_flushed() -> tuple[()]:
+                outcome = json.loads((root / "trace" / "outcome.json").read_text())
+                self.assertEqual(outcome["state"], "failed")
+                self.assertIn("gateway launch failed", outcome["capture_error"])
+                return ()
+
+            runtime.cleanup.side_effect = assert_trace_flushed
+            with (
+                patch(
+                    "optiprofiler_evolve.sandbox.DockerInvocationRuntime",
+                    return_value=runtime,
                 ),
-                prompt="probe",
-                transcript=root / "transcript.jsonl",
-                trace_dir=root / "trace",
-            )
+                self.assertRaisesRegex(RuntimeError, "gateway launch failed"),
+            ):
+                run_agent(
+                    worker=worker,
+                    workers=workers,
+                    sandbox=SandboxConfig(),
+                    workspace=root / "workspace",
+                    tools_dir=root / "tools",
+                    broker=BrokerConnection(
+                        "/opt/broker",
+                        "/opt/artifacts",
+                        "token",
+                        root / "broker",
+                        root / "artifacts",
+                    ),
+                    prompt="probe",
+                    transcript=root / "transcript.jsonl",
+                    trace_dir=root / "trace",
+                )
+
+            runtime.cleanup.assert_called_once_with()
 
     def test_launch_failure_still_writes_terminal_trace_outcome(self) -> None:
         worker = WorkerConfig(harness="codex", model="test")
@@ -86,6 +100,110 @@ class SandboxCommandTests(unittest.TestCase):
             outcome = json.loads((root / "trace" / "outcome.json").read_text())
             self.assertEqual(outcome["state"], "launch_failed")
             self.assertIn("FileNotFoundError", outcome["capture_error"])
+
+    def test_gateway_failure_fails_invocation_after_preserving_worker_output(self) -> None:
+        worker = WorkerConfig(harness="codex", model="test")
+        workers = WorkersConfig(pool=(worker,), timeout_seconds=5)
+        runtime = MagicMock()
+        runtime.gateway_enabled = True
+        runtime.cleanup.return_value = ()
+        runtime.start.return_value = (worker, {})
+        runtime.worker_command.return_value = [
+            sys.executable,
+            "-c",
+            "print('worker-completed')",
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "workspace").mkdir()
+            manifest = root / "trace" / "provider_gateway" / "manifest.json"
+            runtime.finish_gateway.return_value = GatewayRuntimeOutcome(
+                outcome="audit_failed",
+                request_count=1,
+                audit_failure=True,
+                exit_code=1,
+                upstream_hash="a" * 64,
+                manifest=manifest,
+            )
+            with patch(
+                "optiprofiler_evolve.sandbox.DockerInvocationRuntime",
+                return_value=runtime,
+            ):
+                result = run_agent(
+                    worker=worker,
+                    workers=workers,
+                    sandbox=SandboxConfig(),
+                    workspace=root / "workspace",
+                    tools_dir=root / "tools",
+                    broker=BrokerConnection(
+                        "/opt/broker",
+                        "/opt/artifacts",
+                        "token",
+                        root / "broker",
+                        root / "artifacts",
+                    ),
+                    prompt="probe",
+                    transcript=root / "transcript.jsonl",
+                    trace_dir=root / "trace",
+                )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.provider_gateway_outcome, "audit_failed")
+            self.assertIn("worker-completed", result.transcript.read_text())
+            outcome = json.loads((root / "trace" / "outcome.json").read_text())
+            self.assertEqual(outcome["termination_reason"], "provider_gateway_failure")
+            self.assertIn("provider gateway failed", outcome["transport_error"])
+            calls = [item[0] for item in runtime.method_calls]
+            self.assertLess(
+                calls.index("ensure_worker_terminal"),
+                calls.index("finish_gateway"),
+            )
+
+    def test_gateway_lifecycle_exception_overrides_completed_worker_trace(self) -> None:
+        worker = WorkerConfig(harness="codex", model="test")
+        workers = WorkersConfig(pool=(worker,), timeout_seconds=5)
+        runtime = MagicMock()
+        runtime.gateway_enabled = True
+        runtime.cleanup.return_value = ()
+        runtime.start.return_value = (worker, {})
+        runtime.worker_command.return_value = [
+            sys.executable,
+            "-c",
+            "print('worker-completed')",
+        ]
+        runtime.finish_gateway.side_effect = RuntimeError("gateway outcome unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "workspace").mkdir()
+            with (
+                patch(
+                    "optiprofiler_evolve.sandbox.DockerInvocationRuntime",
+                    return_value=runtime,
+                ),
+                self.assertRaisesRegex(RuntimeError, "gateway outcome unavailable"),
+            ):
+                run_agent(
+                    worker=worker,
+                    workers=workers,
+                    sandbox=SandboxConfig(),
+                    workspace=root / "workspace",
+                    tools_dir=root / "tools",
+                    broker=BrokerConnection(
+                        "/opt/broker",
+                        "/opt/artifacts",
+                        "token",
+                        root / "broker",
+                        root / "artifacts",
+                    ),
+                    prompt="probe",
+                    transcript=root / "transcript.jsonl",
+                    trace_dir=root / "trace",
+                )
+
+            outcome = json.loads((root / "trace" / "outcome.json").read_text())
+            self.assertEqual(outcome["state"], "failed")
+            self.assertEqual(outcome["termination_reason"], "provider_gateway_failure")
+            self.assertIn("gateway lifecycle failed", outcome["transport_error"])
 
     def test_local_agent_returns_native_trace_and_readable_transcript(self) -> None:
         worker = WorkerConfig(harness="codex", model="test")
@@ -136,10 +254,12 @@ class SandboxCommandTests(unittest.TestCase):
             self.assertIn("diagnostic", transcript)
 
     def test_docker_boundary_is_hardened_and_secret_values_are_not_in_argv(self) -> None:
-        worker = WorkerConfig(harness="codex", model="test", env={"OPENAI_API_KEY": "super-secret"})
-        workers = WorkersConfig(pool=(worker,), tools=ToolConfig(network=False, web_search=False))
-        command = _docker_command(
-            workers=workers,
+        worker = WorkerConfig(
+            harness="codex",
+            model="test",
+            env={"OPENAI_API_KEY": "super-secret"},
+        )
+        command = build_worker_container_command(
             sandbox=SandboxConfig(),
             workspace=Path("/workspace-host"),
             tools_dir=Path("/tools-host"),
@@ -154,6 +274,7 @@ class SandboxCommandTests(unittest.TestCase):
             network="private-network",
             container_name="ope-worker-test",
             selected_values=worker.env,
+            labels={"optiprofiler.evolve.managed": "1"},
         )
         joined = " ".join(command)
         self.assertIn("--interactive", command)
@@ -171,7 +292,7 @@ class SandboxCommandTests(unittest.TestCase):
 
         def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
             calls.append(command)
-            return subprocess.CompletedProcess(command, 0, stdout="ok")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
         def fake_capture(**kwargs: object) -> CapturedProcess:
             command = kwargs["command"]
@@ -182,7 +303,7 @@ class SandboxCommandTests(unittest.TestCase):
 
         with (
             tempfile.TemporaryDirectory() as directory,
-            patch("optiprofiler_evolve.sandbox.subprocess.run", side_effect=fake_run),
+            patch("optiprofiler_evolve.docker_runtime._docker_run", side_effect=fake_run),
             patch("optiprofiler_evolve.sandbox.run_captured_process", side_effect=fake_capture),
             patch("optiprofiler_evolve.sandbox.render_transcript"),
         ):

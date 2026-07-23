@@ -94,6 +94,10 @@ _PUBLIC_DATA_KEYS: Mapping[str, frozenset[str]] = {
             "outcome_timed_out",
             "outcome_cancelled",
             "outcome_interrupted",
+            "gateway_total",
+            "gateway_completed",
+            "gateway_failed",
+            "gateway_interrupted",
         }
     ),
     "directions_ready": frozenset({"mode", "card_count", "status"}),

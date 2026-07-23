@@ -133,9 +133,10 @@ Items 1-4 are implemented, locally tested, and independently reviewed. They
 include complete explorer/role/reviewer trace retention, a run-level trace
 index and coverage accounting, the mandatory pre-validation integrity gate,
 explicit island retention and parent sampling, and a scalar-compatible Pareto
-interface. Item 5 is active: the pure provider transport is implemented and
-must pass independent review before Docker sidecar/network integration begins.
-The Actions-style view remains a later projection over the same event ledger.
+interface. Both slices of item 5 are implemented and locally tested; final
+independent approval of the sidecar/network slice remains the gate before item
+6 begins. The Actions-style view remains a projection over the same event
+ledger, not another scheduler or state store.
 
 Each item is independently tested and reviewed before work starts on the next
 one. Changes remain inside this repository; OptiProfiler agent-output work is a

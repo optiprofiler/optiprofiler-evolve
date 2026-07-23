@@ -65,9 +65,9 @@ coherent algorithmic improvement, not merely a blind hyperparameter sweep. You m
 delete, or reorganize files inside the editable scope. Leave the best working version in
 /workspace when you finish; do not return a patch as your only output.
 
-When web research is enabled, prefer the harness WebSearch/WebFetch tools. Some compatible
-model endpoints do not expose those built-in tools; in that case use
-`ddgr --json --num 5 "your query"` from the shell instead of repeated ad hoc curl attempts.
+When web research is enabled, use the harness WebSearch/WebFetch tools when the selected
+model endpoint supports them. Do not assume that the shell has general network egress; if
+native search is unavailable, continue from the local solver and evaluation evidence.
 
 Contract
 - Runtime: {runtime}

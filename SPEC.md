@@ -44,6 +44,9 @@ but MATLAB evaluation must fail clearly until its adapter is implemented.
 - Only declared editable paths may enter candidate lineage.
 - Worker Docker containers receive no source package, problem library, hidden
   manifest, host home, SSH agent, or Docker socket.
+- Gateway-routed workers receive only a dummy provider credential and an
+  internal sidecar address. Only that short-lived sidecar joins a separate
+  egress network and receives the real credential.
 - Evaluation runs in a separate no-network container with candidate and
   reference mounted read-only.
 - Broker exchange and published public artifacts live under controller-owned
@@ -62,8 +65,9 @@ LLM-returned diff protocol.
 ## Artifact contract
 
 A run preserves the redacted config, full trusted data manifest, worker-visible
-manifest, solver contract, candidate lineage, transcripts, evaluation feedback,
-checkpoints, validation selection, hidden holdout report, and final solver tree.
+manifest, solver contract, candidate lineage, raw worker traces, provider
+gateway and Docker lifecycle evidence, evaluation feedback, checkpoints,
+validation selection, hidden holdout report, and final solver tree.
 
 Optional research phases add only versioned file-backed artifacts. A strategy
 may be labelled `Observed` only after its concrete patch or variant tree passes

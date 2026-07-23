@@ -80,6 +80,9 @@ The supported extension slots are `Phase`, `AttemptStep`,
   manifest, population state, validation/hidden data, or network access.
 - Workers cannot mount OptiProfiler/problem-library source, the immutable
   reference, hidden data, Docker socket, host home, or sibling repositories.
+- Gateway-routed Docker workers receive neither the real provider credential
+  nor the provider origin. They stay on an invocation-only internal network;
+  only the short-lived sidecar may join its separate egress network.
 - The engine's final edit-scope, tree, interface, and candidate-safety gate is
   mandatory. An ablation may remove an evidence-producing audit step, not this
   gate.
@@ -97,6 +100,8 @@ Every run records:
 - candidate snapshots, lineage, checkpoints, evaluation artifacts, and worker
   transcripts;
 - normalized integrity decisions and complete traces for every reviewer attempt;
+- provider-gateway ready/audit/outcome evidence and Docker lifecycle/cleanup
+  evidence for every gateway-routed invocation;
 - a private run-level trace index, capture-quality/outcome coverage, and stable
   joins from each invocation to its workflow, candidate lineage, config, and
   run provenance;

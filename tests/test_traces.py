@@ -22,6 +22,7 @@ from optiprofiler_evolve.trace_ledger import TraceLedger, reconcile_trace_run
 from optiprofiler_evolve.traces import (
     finalize_adapter_trace,
     prepare_trace,
+    record_derived_trace_error,
     recover_incomplete_traces,
     render_transcript,
     run_captured_process,
@@ -29,6 +30,39 @@ from optiprofiler_evolve.traces import (
 
 
 class TraceCaptureTests(unittest.TestCase):
+    def test_multiple_derived_errors_are_retained_without_degrading_raw_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = prepare_trace(
+                root=root / "trace",
+                prompt="probe",
+                command=[sys.executable, "-c", "print('ok')"],
+                worker=WorkerConfig(harness="codex", model="test"),
+                workers=WorkersConfig(
+                    pool=(WorkerConfig(harness="codex", model="test"),)
+                ),
+                sandbox=SandboxConfig(backend="unsafe_local"),
+            )
+            run_captured_process(
+                command=[sys.executable, "-c", "print('ok')"],
+                prompt="",
+                paths=paths,
+                timeout_seconds=5,
+                environment=os.environ,
+                cwd=root,
+            )
+
+            record_derived_trace_error(paths, "transcript render failed")
+            record_derived_trace_error(paths, "docker cleanup failed")
+            record_derived_trace_error(paths, "docker cleanup failed")
+
+            outcome = json.loads(paths.outcome.read_text(encoding="utf-8"))
+            self.assertEqual(
+                outcome["derived_error"],
+                "transcript render failed; docker cleanup failed",
+            )
+            self.assertTrue(outcome["complete"])
+
     def test_provider_route_and_credential_name_stay_out_of_worker_trace_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -363,6 +397,69 @@ class TraceLedgerTests(unittest.TestCase):
             self.assertNotIn("test-model", serialized_public)
             self.assertNotIn("trace_id", serialized_public)
             self.assertNotIn("relative_path", serialized_public)
+
+    def test_gateway_terminal_state_joins_private_index_and_public_counts_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            workspace = run_dir / "workspace"
+            workspace.mkdir(parents=True)
+            (workspace / "solver.py").write_text("def solver():\n    pass\n")
+            worker = WorkerConfig(harness="codex", model="test-model")
+            ledger = TraceLedger(
+                run_dir,
+                run_id="run-gateway",
+                config_hash="b" * 64,
+                adapter_name="cli",
+            )
+            paths = ledger.prepare(
+                root=run_dir / "traces" / "gateway-job",
+                prompt="private",
+                command=["codex"],
+                worker=worker,
+                workers=WorkersConfig(pool=(worker,)),
+                sandbox=SandboxConfig(backend="unsafe_local"),
+                workspace=workspace,
+            )
+            transcript = run_dir / "transcript.txt"
+            transcript.write_text("ok\n", encoding="utf-8")
+            finalize_adapter_trace(
+                paths,
+                transcript=transcript,
+                native_trace=None,
+                stderr_trace=None,
+                returncode=0,
+                timed_out=False,
+                cancelled=False,
+                capture_error=None,
+            )
+            gateway = paths.root / "provider_gateway"
+            gateway.mkdir()
+            (gateway / "ready.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "provider_gateway_ready/1",
+                        "upstream_hash": "f" * 64,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (gateway / "requests.jsonl").write_text("{}\n", encoding="utf-8")
+
+            entry = ledger.record(paths, workspace=workspace)
+            coverage = ledger.recover_and_summarize()
+            public = json.loads(ledger.public_coverage_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(entry["provider_gateway"]["outcome"], "interrupted")
+            self.assertEqual(entry["provider_gateway"]["request_count"], 1)
+            self.assertIsNone(
+                entry["provider_gateway"]["inflight_request_count"]
+            )
+            self.assertEqual(entry["provider_gateway"]["upstream_hash"], "f" * 64)
+            self.assertEqual(coverage["provider_gateway"]["interrupted"], 1)
+            self.assertEqual(public["gateway_total"], 1)
+            self.assertEqual(public["gateway_interrupted"], 1)
+            self.assertNotIn("upstream_hash", json.dumps(public))
+            self.assertNotIn("inflight_request_count", json.dumps(public))
 
     def test_recovery_indexes_interrupted_trace_once(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

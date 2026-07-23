@@ -532,6 +532,8 @@ def finalize_trace(
         "duration_seconds": duration_seconds,
         "capture_error": capture_error,
         "derived_error": None,
+        "controller_error": None,
+        "transport_error": None,
         "truncated": truncated,
         "complete": capture_error is None and not truncated,
         "streams": {
@@ -549,8 +551,44 @@ def record_derived_trace_error(paths: TracePaths, error: str) -> None:
     if not paths.outcome.is_file():
         return
     payload = _read_json_object(paths.outcome)
-    payload["derived_error"] = error
+    _append_error(payload, "derived_error", error)
     _write_private_json_atomic(paths.outcome, payload)
+
+
+def record_transport_failure(paths: TracePaths, error: str) -> None:
+    """Attach a provider-transport failure without changing raw stream evidence."""
+
+    if not paths.outcome.is_file():
+        return
+    payload = _read_json_object(paths.outcome)
+    _append_error(payload, "transport_error", error)
+    if payload.get("state") == "completed":
+        payload["state"] = "failed"
+        payload["returncode"] = 1
+        payload["termination_reason"] = "provider_gateway_failure"
+    _write_private_json_atomic(paths.outcome, payload)
+
+
+def record_controller_failure(paths: TracePaths, error: str) -> None:
+    """Attach a controller-lifecycle failure while preserving raw stream evidence."""
+
+    if not paths.outcome.is_file():
+        return
+    payload = _read_json_object(paths.outcome)
+    _append_error(payload, "controller_error", error)
+    if payload.get("state") == "completed":
+        payload["state"] = "failed"
+        payload["returncode"] = 1
+        payload["termination_reason"] = "controller_lifecycle_failure"
+    _write_private_json_atomic(paths.outcome, payload)
+
+
+def _append_error(payload: dict[str, Any], key: str, error: str) -> None:
+    previous = payload.get(key)
+    if not isinstance(previous, str) or not previous:
+        payload[key] = error
+    elif previous != error and not previous.endswith(f"; {error}"):
+        payload[key] = f"{previous}; {error}"
 
 
 def recover_incomplete_traces(run_dir: Path) -> tuple[Path, ...]:

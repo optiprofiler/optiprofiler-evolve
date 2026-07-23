@@ -3,21 +3,22 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import threading
-import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Mapping
 
 from .broker import BrokerConnection
 from .config import SandboxConfig, WorkerConfig, WorkersConfig
+from .docker_runtime import DockerInvocationRuntime, GatewayRuntimeOutcome
 from .harness import build_harness_command
 from .traces import (
     finalize_adapter_trace,
     prepare_trace,
-    record_sanitized_command,
+    record_controller_failure,
     record_derived_trace_error,
+    record_sanitized_command,
+    record_transport_failure,
     render_transcript,
     run_captured_process,
     trace_paths,
@@ -36,6 +37,9 @@ class AgentRunResult:
     capture_error: str | None = None
     cancelled: bool = False
     termination_reason: str | None = None
+    provider_gateway_outcome: str | None = None
+    provider_gateway_request_count: int | None = None
+    provider_gateway_manifest: Path | None = None
 
 
 def run_agent(
@@ -54,73 +58,68 @@ def run_agent(
 ) -> AgentRunResult:
     """Run one coding worker and preserve its complete stdout/stderr transcript."""
 
-    if sandbox.backend == "docker" and worker.provider_gateway is not None:
-        raise RuntimeError(
-            "Provider gateway routing is configured but its Docker sidecar lifecycle "
-            "has not been attached to this worker launch. Refusing direct fallback."
-        )
     transcript.parent.mkdir(parents=True, exist_ok=True)
     selected_values = _selected_worker_values(worker)
-    worker_network: str | None = None
-    container_name: str | None = None
-    if sandbox.backend == "docker":
-        inner_workspace = Path("/workspace")
-        harness = build_harness_command(worker, workers, workers.tools, inner_workspace)
-        container_name = f"ope-worker-{uuid.uuid4().hex[:12]}"
-        worker_network = f"ope-{uuid.uuid4().hex[:12]}"
-        network_command = ["docker", "network", "create"]
-        if not workers.tools.network:
-            network_command.append("--internal")
-        network_command.append(worker_network)
-        subprocess.run(
-            network_command,
-            text=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            check=True,
-        )
-        command = _docker_command(
-            workers=workers,
-            sandbox=sandbox,
-            workspace=workspace,
-            tools_dir=tools_dir,
-            broker=broker,
-            harness=harness,
-            network=worker_network,
-            container_name=container_name,
-            selected_values=selected_values,
-        )
-        environment = dict(os.environ)
-        environment.update(selected_values)
-        environment.update(
-            {
-                "OPTIPROFILER_EVOLVE_BROKER_DIR": broker.directory,
-                "OPTIPROFILER_EVOLVE_BROKER_TOKEN": broker.token,
-                "OPTIPROFILER_EVOLVE_WORKSPACE": "/workspace",
-            }
-        )
-        cwd = None
-    else:
-        harness = build_harness_command(worker, workers, workers.tools, workspace)
-        command = harness
-        environment = _worker_environment(selected_values, broker, tools_dir, workspace)
-        cwd = workspace
-
     if trace_dir.exists():
         paths = trace_paths(trace_dir)
-        record_sanitized_command(paths, command, selected_values)
     else:
         paths = prepare_trace(
             root=trace_dir,
             prompt=prompt,
-            command=command,
+            command=["<worker-adapter>", "cli"],
             worker=worker,
             workers=workers,
             sandbox=sandbox,
             context=trace_context,
             secret_values=selected_values,
         )
+    runtime: DockerInvocationRuntime | None = None
+    gateway: GatewayRuntimeOutcome | None = None
+    worker_started = False
+    worker_finished = False
     try:
+        if sandbox.backend == "docker":
+            runtime = DockerInvocationRuntime(
+                worker=worker,
+                workers=workers,
+                sandbox=sandbox,
+                selected_values=selected_values,
+                trace_dir=trace_dir,
+            )
+            effective_worker, effective_values = runtime.start()
+            harness = build_harness_command(
+                effective_worker,
+                workers,
+                workers.tools,
+                Path("/workspace"),
+            )
+            command = runtime.worker_command(
+                workspace=workspace,
+                tools_dir=tools_dir,
+                broker=broker,
+                harness=harness,
+                selected_values=effective_values,
+            )
+            environment = dict(os.environ)
+            environment.update(effective_values)
+            environment.update(
+                {
+                    "OPTIPROFILER_EVOLVE_BROKER_DIR": broker.directory,
+                    "OPTIPROFILER_EVOLVE_BROKER_TOKEN": broker.token,
+                    "OPTIPROFILER_EVOLVE_WORKSPACE": "/workspace",
+                }
+            )
+            cwd = None
+            command_secret_values = effective_values
+        else:
+            command = build_harness_command(worker, workers, workers.tools, workspace)
+            environment = _worker_environment(selected_values, broker, tools_dir, workspace)
+            cwd = workspace
+            command_secret_values = selected_values
+        record_sanitized_command(paths, command, command_secret_values)
+        if runtime is not None:
+            runtime.record_worker_started()
+            worker_started = True
         completed = run_captured_process(
             command=command,
             prompt=prompt,
@@ -130,6 +129,33 @@ def run_agent(
             cwd=cwd,
             cancellation_event=cancellation_event,
         )
+        if runtime is not None:
+            runtime.record_worker_finished(
+                returncode=completed.returncode,
+                timed_out=completed.timed_out,
+                cancelled=completed.cancelled,
+                termination_reason=completed.termination_reason,
+            )
+            worker_finished = True
+            runtime.ensure_worker_terminal()
+            gateway = runtime.finish_gateway()
+            if gateway is not None and not gateway.healthy:
+                message = (
+                    "provider gateway failed: "
+                    f"outcome={gateway.outcome}, exit_code={gateway.exit_code}, "
+                    f"audit_failure={gateway.audit_failure}"
+                )
+                record_transport_failure(paths, message)
+                completed = replace(
+                    completed,
+                    returncode=completed.returncode or 1,
+                    capture_error=_merge_errors(completed.capture_error, message),
+                    termination_reason=(
+                        completed.termination_reason
+                        if completed.timed_out or completed.cancelled
+                        else "provider_gateway_failure"
+                    ),
+                )
         try:
             render_transcript(paths, transcript)
         except (OSError, ValueError) as exc:
@@ -151,8 +177,28 @@ def run_agent(
             capture_error=completed.capture_error,
             cancelled=completed.cancelled,
             termination_reason=completed.termination_reason,
+            provider_gateway_outcome=gateway.outcome if gateway is not None else None,
+            provider_gateway_request_count=(
+                gateway.request_count if gateway is not None else None
+            ),
+            provider_gateway_manifest=(gateway.manifest if gateway is not None else None),
         )
     except Exception as exc:
+        if runtime is not None and worker_started and not worker_finished:
+            try:
+                runtime.record_worker_finished(
+                    returncode=1,
+                    timed_out=False,
+                    cancelled=cancellation_event.is_set() if cancellation_event else False,
+                    termination_reason="worker_launch_or_capture_failure",
+                )
+            except OSError:
+                pass
+        if runtime is not None and gateway is None:
+            try:
+                gateway = runtime.finish_gateway()
+            except Exception:
+                pass
         transcript.parent.mkdir(parents=True, exist_ok=True)
         if not transcript.exists():
             transcript.write_text(
@@ -169,89 +215,29 @@ def run_agent(
             cancelled=cancellation_event.is_set() if cancellation_event else False,
             capture_error=f"execution: {type(exc).__name__}: {exc}",
         )
+        failure = f"{type(exc).__name__}: {exc}"
+        if runtime is not None and runtime.gateway_enabled:
+            record_transport_failure(paths, f"provider gateway lifecycle failed: {failure}")
+        else:
+            record_controller_failure(paths, f"worker controller failed: {failure}")
         raise
     finally:
-        if container_name is not None:
-            subprocess.run(
-                ["docker", "rm", "-f", container_name],
-                text=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-        if worker_network is not None:
-            subprocess.run(
-                ["docker", "network", "rm", worker_network],
-                text=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-
-
-def _docker_command(
-    *,
-    workers: WorkersConfig,
-    sandbox: SandboxConfig,
-    workspace: Path,
-    tools_dir: Path,
-    broker: BrokerConnection,
-    harness: list[str],
-    network: str,
-    container_name: str,
-    selected_values: Mapping[str, str],
-) -> list[str]:
-    command = [
-        "docker",
-        "run",
-        "--rm",
-        "--interactive",
-        "--name",
-        container_name,
-        "--init",
-        "--network",
-        network,
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--read-only",
-        "--pids-limit",
-        str(sandbox.pids_limit),
-        "--cpus",
-        str(sandbox.cpus),
-        "--memory",
-        sandbox.memory,
-        "--user",
-        f"{os.getuid()}:{os.getgid()}",
-        "--tmpfs",
-        "/tmp:rw,nosuid,size=2g",
-        "--workdir",
-        "/workspace",
-        "--mount",
-        f"type=bind,src={workspace.resolve()},dst=/workspace",
-        "--mount",
-        f"type=bind,src={tools_dir.resolve()},dst=/opt/optiprofiler-evolve/tools,readonly",
-        "--mount",
-        f"type=bind,src={broker.host_directory},dst={broker.directory}",
-        "--mount",
-        f"type=bind,src={broker.host_artifacts_directory},dst={broker.artifacts_directory},readonly",
-        "--env",
-        "HOME=/tmp/home",
-        "--env",
-        "PATH=/opt/optiprofiler-evolve/tools:/tmp/home/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        "--env",
-        "OPTIPROFILER_EVOLVE_BROKER_DIR",
-        "--env",
-        "OPTIPROFILER_EVOLVE_BROKER_TOKEN",
-        "--env",
-        "OPTIPROFILER_EVOLVE_WORKSPACE",
-    ]
-    for key in selected_values:
-        command.extend(["--env", key])
-    command.append(sandbox.worker_image)
-    command.extend(harness)
-    return command
+        if runtime is not None:
+            try:
+                cleanup_errors = runtime.cleanup()
+                if cleanup_errors:
+                    record_derived_trace_error(
+                        paths,
+                        "docker cleanup: " + "; ".join(cleanup_errors),
+                    )
+            except Exception as exc:
+                try:
+                    record_derived_trace_error(
+                        paths,
+                        f"docker cleanup: {type(exc).__name__}: {exc}",
+                    )
+                except Exception:
+                    pass
 
 
 def _worker_environment(
@@ -278,6 +264,10 @@ def _selected_worker_values(worker: WorkerConfig) -> Mapping[str, str]:
             raise ValueError(f"Required worker environment variable {key!r} is not set.")
         values[key] = os.environ[key]
     return values
+
+
+def _merge_errors(left: str | None, right: str) -> str:
+    return f"{left}; {right}" if left else right
 
 
 __all__: list[str] = []

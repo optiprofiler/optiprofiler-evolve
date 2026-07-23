@@ -3,8 +3,12 @@ from __future__ import annotations
 import concurrent.futures
 import http.client
 import json
+import os
+import signal
 import socket
 import stat
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -13,6 +17,7 @@ from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import optiprofiler_evolve.provider_gateway as provider_gateway_module
 from optiprofiler_evolve.config import ProviderGatewayConfig, WorkerConfig
 from optiprofiler_evolve.provider_gateway import GatewayRoute, ProviderGatewayServer
 from optiprofiler_evolve.provider_transport import prepare_provider_transport
@@ -205,6 +210,99 @@ class ProviderTransportTests(unittest.TestCase):
 
 
 class ProviderGatewayTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "posix", "SIGTERM lifecycle requires POSIX")
+    def test_process_marks_an_inflight_request_interrupted_on_sigterm(self) -> None:
+        request_started = threading.Event()
+        release_upstream = threading.Event()
+
+        def block(handler: BaseHTTPRequestHandler, _body: bytes) -> None:
+            request_started.set()
+            release_upstream.wait(timeout=10)
+            handler.close_connection = True
+            try:
+                _FakeUpstream._default_response(handler, b"")
+            except OSError:
+                pass
+
+        with _FakeUpstream(block) as upstream, tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = int(probe.getsockname()[1])
+            environment = dict(os.environ)
+            environment["TEST_PROVIDER_KEY"] = "real-provider-secret"
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(Path(provider_gateway_module.__file__).resolve()),
+                    "--listen",
+                    f"127.0.0.1:{port}",
+                    "--protocol",
+                    "anthropic",
+                    "--upstream-base-url",
+                    upstream.base_url,
+                    "--credential-env",
+                    "TEST_PROVIDER_KEY",
+                    "--auth-mode",
+                    "x-api-key",
+                    "--audit-log",
+                    str(root / "requests.jsonl"),
+                    "--ready-file",
+                    str(root / "ready.json"),
+                    "--outcome-file",
+                    str(root / "outcome.json"),
+                    "--allow-private-upstream-for-tests",
+                ],
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            requester: threading.Thread | None = None
+            try:
+                deadline = time.monotonic() + 5
+                while not (root / "ready.json").is_file():
+                    if process.poll() is not None:
+                        stdout, stderr = process.communicate()
+                        self.fail(f"gateway exited before ready: {stdout}\n{stderr}")
+                    if time.monotonic() >= deadline:
+                        self.fail("gateway process did not become ready")
+                    time.sleep(0.01)
+
+                def request() -> None:
+                    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                    try:
+                        connection.request(
+                            "POST",
+                            "/v1/messages",
+                            body=b"{}",
+                            headers={"Content-Length": "2"},
+                        )
+                        connection.getresponse().read()
+                    except (OSError, http.client.HTTPException):
+                        pass
+                    finally:
+                        connection.close()
+
+                requester = threading.Thread(target=request, daemon=True)
+                requester.start()
+                self.assertTrue(request_started.wait(timeout=5))
+                process.send_signal(signal.SIGTERM)
+                self.assertEqual(process.wait(timeout=5), 1)
+            finally:
+                release_upstream.set()
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+                process.communicate(timeout=1)
+                if requester is not None:
+                    requester.join(timeout=5)
+
+            outcome = json.loads((root / "outcome.json").read_text(encoding="utf-8"))
+            self.assertEqual(outcome["outcome"], "interrupted")
+            self.assertEqual(outcome["exit_code"], 1)
+            self.assertGreaterEqual(outcome["inflight_request_count"], 1)
+
     def test_pins_route_rewrites_auth_and_strips_forwarding_headers(self) -> None:
         with _FakeUpstream() as upstream, tempfile.TemporaryDirectory() as directory:
             audit = Path(directory) / "gateway.jsonl"

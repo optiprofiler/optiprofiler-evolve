@@ -9,7 +9,7 @@ small to support a performance claim.
 Requirements:
 
 - Python 3.11 or newer;
-- Docker with permission to run local containers;
+- Docker Engine 28 or newer, with permission to run local containers;
 - access to either Claude Code or Codex through a supported model provider.
 
 Create an environment and install the package in editable mode:
@@ -26,15 +26,17 @@ Build the isolated coding-worker and evaluator images:
 ```bash
 docker build -f docker/worker/Dockerfile -t optiprofiler-evolve-worker:latest .
 docker build -f docker/evaluator/Dockerfile -t optiprofiler-evolve-evaluator:latest .
+docker build -f docker/gateway/Dockerfile -t optiprofiler-evolve-gateway:latest .
 ```
 
-Confirm that both images are usable before spending model tokens:
+Confirm that all three images are usable before spending model tokens:
 
 ```bash
 docker run --rm --entrypoint sh optiprofiler-evolve-worker:latest -lc \
   'python --version && codex --version && claude --version'
 docker run --rm --entrypoint python optiprofiler-evolve-evaluator:latest -c \
   'import optiprofiler, optiprofiler_evolve'
+docker run --rm optiprofiler-evolve-gateway:latest --help >/dev/null
 ```
 
 Keep the repository, solver input, and `run_dir` under a host directory shared
@@ -154,12 +156,12 @@ champion has been fixed and is never used as worker feedback.
 
 Web search requires both `workers.tools.web_search: true` and
 `workers.tools.network: true`. Claude workers receive `WebSearch` and
-`WebFetch`; Codex workers are launched with `--search`. Compatible model
-endpoints do not always expose every built-in harness tool, so the research
-worker image also provides `ddgr` as a provider-independent shell fallback.
-The selected CLI and provider must still support tool calling. To disable all
-outbound access, set both fields to `false`; disabling only the search tool does
-not disable the container network or remove shell networking tools.
+`WebFetch`; Codex workers are launched with `--search`. The selected CLI and
+pinned provider must support that tool. In gateway mode the worker network is
+always internal: native search can run through the provider tool loop, while
+shell clients such as `ddgr`, `curl`, and package installers have no general
+egress. Set `web_search: false` for a no-search ablation; model transport still
+uses the gateway.
 
 With the default Docker backend, every attempt gets a separate writable copy of
 its parent solver, container, broker token, and temporary Docker network. A

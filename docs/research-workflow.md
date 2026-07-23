@@ -40,7 +40,7 @@ islands. Unguided islands remain independent controls.
 | `timeout_seconds` | worker default | Role-specific wall time. |
 | `token_budget` | worker default | Role-specific advisory token budget. |
 | `max_budget_usd` | worker default | Role-specific Claude budget. |
-| `tools` | network/web on | Role-specific `ToolConfig` overrides. |
+| `tools` | network/web on | Role-specific tool policy. Native search may use the provider loop; the role shell remains internal. |
 | `prompt_version` | `direction-scout/1` | Recorded prompt contract. |
 
 If a scout fails or returns invalid JSON, guided islands fall back to unguided
@@ -84,7 +84,7 @@ strategies that cannot be materialized are listed under
 | `timeout_seconds` | worker default | Analyst wall time. |
 | `token_budget` | worker default | Analyst advisory token budget. |
 | `max_budget_usd` | worker default | Analyst Claude budget. |
-| `tools` | network on, web off | Analyst `ToolConfig` overrides. Remote CLI harnesses need network transport to their model API. |
+| `tools` | network on, web off | Analyst tool policy. Model transport uses the gateway; the role shell has no general egress. |
 | `prompt_version` | `strategy-analysis/1` | Recorded prompt contract. |
 
 Invalid or failed analysts produce zero verified strategies for that island and

@@ -169,8 +169,8 @@ trace under `research/traces/integrity-reviewer/`.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `workers.tools.preset` | `minimal`, `research`, or `custom` | `research` | Named tool policy recorded for the experiment. |
-| `workers.tools.web_search` | boolean | `true` | Expose harness web-search tools when supported. Requires network. |
-| `workers.tools.network` | boolean | `true` | Permit worker-container outbound networking. |
+| `workers.tools.web_search` | boolean | `true` | Expose harness-native web-search tools when supported. Requires `network: true`; gateway mode carries provider-side search without granting shell egress. |
+| `workers.tools.network` | boolean | `true` | Permit network-backed harness tools. Gateway-routed workers remain internal; direct worker egress exists only in the double-opt-in unsafe path. |
 | `workers.tools.shell` | boolean | `true` | Include `Bash` in Claude Code's tool list. The built-in Codex adapter cannot enforce `false` and rejects that combination. |
 | `workers.tools.python` | boolean | `true` | Declare Python available to workers. Strict removal requires a different image. |
 | `workers.tools.git` | boolean | `true` | Declare Git available to workers. Strict removal requires a different image. |
@@ -191,12 +191,20 @@ agent.
 |---|---|---|---|
 | `sandbox.backend` | `docker` or `unsafe_local` | `docker` | Coding-worker execution boundary. `unsafe_local` is only for trusted tests. |
 | `sandbox.worker_image` | string | `optiprofiler-evolve-worker:latest` | Docker image containing supported coding CLIs and declared tools. |
+| `sandbox.gateway_image` | string | `optiprofiler-evolve-gateway:latest` | Minimal stdlib-only provider gateway image. It receives no solver, broker, evaluator, or host-home mount. |
 | `sandbox.cpus` | positive number | `2.0` | CPU limit for one worker container. |
 | `sandbox.memory` | Docker memory string | `4g` | Worker-container memory limit. |
 | `sandbox.pids_limit` | integer at least `16` | `512` | Worker-container process limit. |
+| `sandbox.gateway_cpus` | positive number | `0.5` | CPU limit for one provider gateway sidecar. |
+| `sandbox.gateway_memory` | Docker memory string | `256m` | Memory limit for one provider gateway sidecar. |
+| `sandbox.gateway_pids_limit` | integer at least `16` | `64` | Process limit for one provider gateway sidecar. |
+| `sandbox.gateway_start_timeout_seconds` | positive integer | `30` | Maximum wait for the ready manifest and health check before worker launch fails. |
 | `sandbox.max_candidate_files` | positive integer | `2000` | Maximum files accepted from one worker workspace. |
 | `sandbox.max_candidate_bytes` | positive integer | `200000000` | Maximum total bytes accepted from one worker workspace. |
 | `sandbox.allow_direct_network` | boolean | `false` | Second unsafe opt-in for a Docker worker to bypass the provider gateway and use direct egress. |
+
+Gateway mode requires Docker Engine 28 or newer for deterministic gateway
+priority across the sidecar's internal and egress networks.
 
 The worker receives only a private solver copy, public manifests, and bounded
 evaluation tools. It does not receive the immutable reference, hidden manifest,
@@ -248,7 +256,7 @@ the phase constructor before a run directory is created:
 | `direction_scout` | `timeout_seconds` | worker default | Role wall time. |
 | `direction_scout` | `token_budget` | worker default | Advisory role token budget. |
 | `direction_scout` | `max_budget_usd` | worker default | Claude role cost cap. |
-| `direction_scout` | `tools` | network/web on | Role-specific `ToolConfig` overrides. |
+| `direction_scout` | `tools` | network/web on | Role-specific `ToolConfig` overrides. Native search may use the provider tool loop; the role shell remains internal. |
 | `direction_scout` | `prompt_version` | `direction-scout/1` | Recorded prompt contract. |
 | `strategy_analysis` | `max_strategies` | `6` | Cards normalized per island. |
 | `strategy_analysis` | `max_ablations` | `6` | Executable toggles tested per island. |
@@ -258,7 +266,7 @@ the phase constructor before a run directory is created:
 | `strategy_analysis` | `timeout_seconds` | worker default | Role wall time. |
 | `strategy_analysis` | `token_budget` | worker default | Advisory role token budget. |
 | `strategy_analysis` | `max_budget_usd` | worker default | Claude role cost cap. |
-| `strategy_analysis` | `tools` | network on, web off | Role-specific `ToolConfig` overrides. Remote CLI harnesses need network transport to their model API. |
+| `strategy_analysis` | `tools` | network on, web off | Role-specific `ToolConfig` overrides. Model transport uses the gateway; the role shell has no general egress. |
 | `strategy_analysis` | `prompt_version` | `strategy-analysis/1` | Recorded prompt contract. |
 | `recombine` | `max_strategies` | `8` | Portable strategies considered. |
 | `recombine` | `max_combination_size` | `2` | Patches in one combination. |

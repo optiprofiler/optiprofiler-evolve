@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import SandboxConfig, WorkerConfig, WorkersConfig
+from .docker_runtime import recover_gateway_trace
 from .traces import (
     TracePaths,
     prepare_trace,
@@ -75,6 +76,7 @@ class TraceLedger:
         """Record terminal workspace evidence and append one idempotent index row."""
 
         record_workspace_evidence(paths, workspace)
+        recover_gateway_trace(paths.root)
         entry = _trace_index_entry(self.run_dir, paths)
         self._append_entry(entry)
         return entry
@@ -84,6 +86,7 @@ class TraceLedger:
 
         recover_incomplete_traces(self.run_dir)
         for root in trace_roots(self.run_dir):
+            recover_gateway_trace(root)
             paths = trace_paths(root)
             if paths.outcome.is_file():
                 self._append_entry(_trace_index_entry(self.run_dir, paths))
@@ -100,6 +103,10 @@ class TraceLedger:
             **{
                 f"outcome_{key}": value
                 for key, value in coverage["outcomes"].items()
+            },
+            **{
+                f"gateway_{key}": value
+                for key, value in coverage["provider_gateway"].items()
             },
         }
         _write_json_atomic(self.public_coverage_path, public)
@@ -205,7 +212,8 @@ def _trace_index_entry(run_dir: Path, paths: TracePaths) -> dict[str, object]:
     streams = outcome.get("streams", {})
     if not isinstance(streams, Mapping):
         streams = {}
-    return {
+    gateway = _gateway_index_payload(paths.root)
+    entry = {
         "schema": "trace_index_entry/1",
         "trace_id": invocation.get("trace_id"),
         "run_id": invocation.get("run_id"),
@@ -234,6 +242,9 @@ def _trace_index_entry(run_dir: Path, paths: TracePaths) -> dict[str, object]:
             if name in {"stdout", "stderr", "chunks"} and isinstance(value, Mapping)
         },
     }
+    if gateway is not None:
+        entry["provider_gateway"] = gateway
+    return entry
 
 
 def _read_trace_index(path: Path) -> list[dict[str, Any]]:
@@ -294,6 +305,7 @@ def _trace_coverage(
     }
     degraded_ids: list[str] = []
     interrupted_ids: list[str] = []
+    gateways = {key: 0 for key in ("total", "completed", "failed", "interrupted")}
     for entry in entries:
         quality = str(entry.get("capture_quality", "degraded"))
         result = str(entry.get("outcome", "failed"))
@@ -306,14 +318,42 @@ def _trace_coverage(
             degraded_ids.append(trace_id)
         elif quality == "interrupted":
             interrupted_ids.append(trace_id)
+        gateway = entry.get("provider_gateway")
+        if isinstance(gateway, Mapping):
+            gateways["total"] += 1
+            gateway_outcome = str(gateway.get("outcome", "failed"))
+            if gateway_outcome == "completed":
+                gateways["completed"] += 1
+            elif gateway_outcome == "interrupted":
+                gateways["interrupted"] += 1
+            else:
+                gateways["failed"] += 1
     return {
         "schema": "trace_coverage/1",
         "run_id": run_id,
         "total": len(entries),
         "capture_quality": capture,
         "outcomes": outcomes,
+        "provider_gateway": gateways,
         "degraded_trace_ids": degraded_ids,
         "interrupted_trace_ids": interrupted_ids,
+    }
+
+
+def _gateway_index_payload(trace_root: Path) -> dict[str, object] | None:
+    path = trace_root / "provider_gateway" / "manifest.json"
+    if not path.is_file():
+        return None
+    payload = _read_json_object(path)
+    if payload.get("schema") != "provider_gateway_manifest/1":
+        raise ValueError(f"Invalid provider gateway manifest: {path}")
+    return {
+        "outcome": payload.get("outcome"),
+        "request_count": payload.get("request_count"),
+        "inflight_request_count": payload.get("inflight_request_count"),
+        "audit_failure": payload.get("audit_failure"),
+        "exit_code": payload.get("exit_code"),
+        "upstream_hash": payload.get("upstream_hash"),
     }
 
 
