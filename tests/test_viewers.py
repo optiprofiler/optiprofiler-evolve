@@ -16,6 +16,20 @@ from optiprofiler_evolve.viewers import (
 )
 
 
+def _write_public_events(path: Path, rows: list[tuple[str, str, str, dict, dict]]) -> None:
+    """Write a public event ledger with caller-controlled timestamps."""
+
+    lines = []
+    for seq, (ts, kind, status, scope, data) in enumerate(rows, start=1):
+        lines.append(
+            json.dumps(
+                {"seq": seq, "ts": ts, "kind": kind, "scope": scope, "status": status, "data": data},
+                sort_keys=True,
+            )
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 class PublicViewerTests(unittest.TestCase):
     def test_status_escapes_public_values_and_uses_no_network(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -163,6 +177,170 @@ class PublicViewerTests(unittest.TestCase):
             self.assertNotIn("FINAL_REPORT.md", bundle)
             self.assertNotIn("controller/", bundle)
             self.assertNotIn("traces/", bundle)
+
+    def test_actions_style_layout_durations_and_dark_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            events = root / "public_events.jsonl"
+            attempt_scope = {
+                "phase": "explore",
+                "iteration": 1,
+                "island": 0,
+                "attempt_id": "cand-1",
+            }
+            step_scope = {**attempt_scope, "step": "mutate", "step_idx": 0}
+            _write_public_events(
+                events,
+                [
+                    ("2026-07-23T10:00:00+00:00", "run_started", "running", {}, {}),
+                    (
+                        "2026-07-23T10:00:01+00:00",
+                        "phase_started",
+                        "running",
+                        {"phase": "explore"},
+                        {},
+                    ),
+                    (
+                        "2026-07-23T10:00:05+00:00",
+                        "iteration_started",
+                        "running",
+                        {"iteration": 1},
+                        {},
+                    ),
+                    (
+                        "2026-07-23T10:00:05+00:00",
+                        "attempt_started",
+                        "running",
+                        attempt_scope,
+                        {"parent_id": "seed-0"},
+                    ),
+                    ("2026-07-23T10:00:06+00:00", "step_started", "running", step_scope, {}),
+                    (
+                        "2026-07-23T10:01:41+00:00",
+                        "step_finished",
+                        "succeeded",
+                        step_scope,
+                        {"verdict": "pass"},
+                    ),
+                    (
+                        "2026-07-23T10:02:00+00:00",
+                        "integrity_review_finished",
+                        "succeeded",
+                        attempt_scope,
+                        {"gate": "approved"},
+                    ),
+                    (
+                        "2026-07-23T10:02:03+00:00",
+                        "attempt_finished",
+                        "succeeded",
+                        attempt_scope,
+                        {"candidate_id": "cand-1", "public_score": 0.75, "accepted": True},
+                    ),
+                    (
+                        "2026-07-23T10:02:04+00:00",
+                        "iteration_finished",
+                        "succeeded",
+                        {"iteration": 1},
+                        {"stop": False, "attempt_count": 1},
+                    ),
+                    (
+                        "2026-07-23T10:03:00+00:00",
+                        "phase_finished",
+                        "succeeded",
+                        {"phase": "explore"},
+                        {},
+                    ),
+                    (
+                        "2026-07-23T10:03:05+00:00",
+                        "run_finished",
+                        "succeeded",
+                        {},
+                        {"best_candidate_id": "cand-1"},
+                    ),
+                ],
+            )
+
+            render_status(events, root / "status.html")
+            render_final_report(events, root / "report.html")
+            status = (root / "status.html").read_text(encoding="utf-8")
+            report = (root / "report.html").read_text(encoding="utf-8")
+
+            # Durations derived from event timestamps: run, phase, attempt, step.
+            self.assertIn("Duration 3m 5s", status)
+            self.assertIn("Succeeded · 2m 59s", status)
+            self.assertIn("1m 58s", status)
+            self.assertIn("Pass · 1m 35s", status)
+            # Actions-style structure: bounded job nodes with CSS connectors,
+            # matrix chips grouped per iteration, grouped attempt details.
+            self.assertIn('class="job-graph"', status)
+            self.assertIn('class="job-node"', status)
+            self.assertIn(".job-node + .job-node::before", status)
+            self.assertIn('class="matrix-chip"', status)
+            self.assertIn("Iteration 1", status)
+            self.assertIn('<details class="iter-group" open>', status)
+            self.assertIn('<details class="attempt">', status)
+            self.assertIn('class="st succeeded"', status)
+            # Human-readable acceptance, never raw Python booleans.
+            self.assertIn(">Yes<", status)
+            self.assertNotIn(">True<", status)
+            self.assertIn(">Approved<", status)
+            # Pure-CSS dark mode present in both pages; light stays default.
+            self.assertIn("prefers-color-scheme: dark", status)
+            self.assertIn("color-scheme: light dark", status)
+            self.assertIn("prefers-color-scheme: dark", report)
+            # The final report shares the same visual system.
+            self.assertIn('class="run-head"', report)
+            self.assertIn('class="job-node"', report)
+            self.assertIn("Duration 3m 5s", report)
+            # Terminal run: no refresh; still no scripts or network use anywhere.
+            for page in (status, report):
+                self.assertNotIn('http-equiv="refresh"', page)
+                self.assertNotIn("<script", page.lower())
+                self.assertNotIn("fetch(", page)
+                self.assertNotIn("http://", page)
+                self.assertNotIn("https://", page)
+                self.assertNotIn("src=", page.lower())
+
+    def test_running_attempts_use_last_event_as_duration_anchor(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            events = root / "public_events.jsonl"
+            attempt_scope = {
+                "phase": "explore",
+                "iteration": 1,
+                "island": 0,
+                "attempt_id": "cand-run",
+            }
+            _write_public_events(
+                events,
+                [
+                    ("2026-07-23T10:00:00+00:00", "run_started", "running", {}, {}),
+                    (
+                        "2026-07-23T10:00:10+00:00",
+                        "attempt_started",
+                        "running",
+                        attempt_scope,
+                        {"parent_id": "seed-0"},
+                    ),
+                    (
+                        "2026-07-23T10:02:10+00:00",
+                        "worker_started",
+                        "running",
+                        attempt_scope,
+                        {},
+                    ),
+                ],
+            )
+
+            render_status(events, root / "status.html")
+            status = (root / "status.html").read_text(encoding="utf-8")
+
+            # Running lifecycles measure up to the latest public event (2m 10s
+            # for the run, 2m 0s for the attempt) and keep refreshing.
+            self.assertIn("Duration 2m 10s", status)
+            self.assertIn("2m 0s", status)
+            self.assertIn('http-equiv="refresh"', status)
+            self.assertIn('class="st running"', status)
 
     def test_terminal_status_stops_refreshing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

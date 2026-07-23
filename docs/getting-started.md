@@ -99,9 +99,11 @@ The script prints the run directory, final solver directory, public score, and
 controller-only final score. A timestamped run directory is created under
 `runs/` unless `run_dir` is supplied explicitly.
 
-Open `<run_dir>/status.html` to inspect the current workflow, island matrix,
-attempt pipelines, research-role jobs, and aggregate trace coverage. The page
-is a static projection and needs no local server. The full run directory also
+Open `<run_dir>/status.html` to inspect the current workflow job graph, island
+matrix cards, attempt pipelines grouped by iteration, research-role jobs, and
+aggregate trace coverage, each with event-derived durations. The page is a
+static projection, follows your system light/dark theme, and needs no local
+server. The full run directory also
 contains private validation, hidden, reviewer, provider, and trace evidence;
 share only `<run_dir>/public/`.
 
