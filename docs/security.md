@@ -71,6 +71,18 @@ egress network. Enabling native web search permits the selected harness to ask
 the pinned provider for that tool; it does not give worker shell commands a
 general network route.
 
+## Sharing boundary
+
+The run directory root `status.html` and everything under `owner/` form the
+PRIVATE owner console: they embed validation and hidden results, reviewer
+findings, worker transcripts, provider details, and links into raw traces.
+They are rendered from the raw event ledger for the run owner only and are
+never copied into `public/`. The only shareable artifact is the `public/`
+bundle, which the controller rebuilds from a fixed source-to-target filename
+allowlist fed exclusively by the sanitized public event projection. Owner
+evidence packaging (`scripts/pack_owner_evidence.py`) is explicit-only and
+refuses symlinks and paths outside the run directory.
+
 ## Current limitation
 
 The Python candidate function executes in the same interpreter as

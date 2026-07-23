@@ -12,13 +12,16 @@ from typing import Any
 from .events import rebuild_run_state, write_run_state
 
 
+# Exact (run_dir source name, public/ bundle name) allowlist. The only rename
+# maps the sanitized page onto its stable published name: run_dir/status.html
+# itself is the PRIVATE owner console and must never enter the bundle.
 PUBLIC_BUNDLE_FILES = (
-    "public_events.jsonl",
-    "public_run_state.json",
-    "status.html",
-    "report.html",
-    "public_trace_coverage.json",
-    "PUBLIC_REPORT.md",
+    ("public_events.jsonl", "public_events.jsonl"),
+    ("public_run_state.json", "public_run_state.json"),
+    ("public_status.html", "status.html"),
+    ("report.html", "report.html"),
+    ("public_trace_coverage.json", "public_trace_coverage.json"),
+    ("PUBLIC_REPORT.md", "PUBLIC_REPORT.md"),
 )
 
 # Shared workflow-console stylesheet: no scripts, no external assets, and a
@@ -328,9 +331,9 @@ def materialize_public_bundle(run_dir: Path) -> tuple[Path, ...]:
     destination = run_dir / "public"
     destination.mkdir(parents=True, exist_ok=True)
     available = {
-        name
-        for name in PUBLIC_BUNDLE_FILES
-        if (run_dir / name).is_file() and not (run_dir / name).is_symlink()
+        bundle_name: source_name
+        for source_name, bundle_name in PUBLIC_BUNDLE_FILES
+        if (run_dir / source_name).is_file() and not (run_dir / source_name).is_symlink()
     }
     for child in tuple(destination.iterdir()):
         if child.name in available and child.is_file() and not child.is_symlink():
@@ -342,12 +345,12 @@ def materialize_public_bundle(run_dir: Path) -> tuple[Path, ...]:
         else:
             child.unlink(missing_ok=True)
     copied = []
-    for name in PUBLIC_BUNDLE_FILES:
-        if name not in available:
+    for source_name, bundle_name in PUBLIC_BUNDLE_FILES:
+        if bundle_name not in available:
             continue
-        source = run_dir / name
-        target = destination / name
-        temporary = destination / f".{name}.tmp"
+        source = run_dir / source_name
+        target = destination / bundle_name
+        temporary = destination / f".{bundle_name}.tmp"
         with source.open("rb") as source_handle, temporary.open("wb") as target_handle:
             shutil.copyfileobj(source_handle, target_handle)
         temporary.replace(target)

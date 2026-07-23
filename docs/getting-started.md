@@ -99,11 +99,15 @@ The script prints the run directory, final solver directory, public score, and
 controller-only final score. A timestamped run directory is created under
 `runs/` unless `run_dir` is supplied explicitly.
 
-Open `<run_dir>/status.html` to inspect the current workflow job graph, island
-matrix cards, attempt pipelines grouped by iteration, research-role jobs, and
-aggregate trace coverage, each with event-derived durations. The page is a
-static projection, follows your system light/dark theme, and needs no local
-server. The full run directory also
+Open `<run_dir>/status.html` — the PRIVATE owner console — to inspect the
+workflow job graph, island matrix cards, and attempt list with event-derived
+durations, and click any attempt, integrity-review invocation, or
+research-role job for its full evidence page: transcript and tool calls,
+bounded stdout/stderr previews with raw-file links, source diff versus the
+parent, benchmark artifacts, reviewer findings, gateway outcome, and
+owner-only validation/hidden results. The pages are static, follow your system
+light/dark theme, and need no local server. The sanitized shareable page is
+`<run_dir>/public/status.html`; never share the owner console. The full run directory also
 contains private validation, hidden, reviewer, provider, and trace evidence;
 share only `<run_dir>/public/`.
 

@@ -89,6 +89,37 @@ example from [the examples index](examples/README.md). Use
 `examples/experiment-research.yaml` only after the small exploration-only run
 works; it is intentionally much more expensive.
 
+## Run from a solver repository with GitHub Actions
+
+An algorithm repository should keep its solver source separate from the
+experiment launcher:
+
+```text
+my-dfo-solver/
+  solver/                       # the complete editable solver source
+    solver.py                   # declares solver(...)
+  evolve/
+    experiment.yaml
+    run.py
+  .github/workflows/
+    evolve.yml
+```
+
+The workflow checks out the algorithm repository, fetches a pinned
+`optiprofiler-evolve` source revision into the runner's temporary directory,
+builds the isolated runtime images from that revision, and calls the repository's
+`evolve/run.py`. It never vendors this package into the solver candidate.
+
+Copy the complete
+[external solver repository example](examples/external-repository/README.md),
+set the `OPTIPROFILER_EVOLVE_MODEL` repository variable and provider secret,
+then launch **OptiProfiler Evolve** with `workflow_dispatch` from the Actions
+tab. Keep the workflow manually triggered on trusted branches; do not expose a
+self-hosted runner or provider credentials to untrusted pull requests.
+
+The current template publishes the sanitized Job Summary and `public/` artifact
+only. Private trace browsing is not implemented in the Actions template yet.
+
 ## Fitness and data
 
 Candidate and the configured fixed reference solver are always passed together to the same
@@ -120,13 +151,17 @@ direction cards, per-island source diffs and strategy cards, executable ablation
 matrices, island bundles, recombination conflicts/results, and a challenger
 report under `research/`.
 
-Open `status.html` for a server-free Actions-style view: a connected phase job
-graph, iteration-by-island matrix cards, expandable candidate pipelines, research
-roles, aggregate trace coverage, and per-phase/attempt/step durations, with
-automatic light and dark themes. The complete run directory is private. Only `public/` is a
-controller-generated shareable bundle; it contains the sanitized event ledger,
-versioned run state, HTML views, aggregate coverage, and `PUBLIC_REPORT.md`.
-Never upload the whole run directory.
+Open `status.html` for the PRIVATE owner console: a server-free Actions-style
+view with a connected phase job graph, iteration-by-island matrix cards, and
+per-phase/attempt/step durations, where every attempt, integrity-review
+invocation, and research-role job links to a detail page with full private
+evidence — transcripts and tool calls, bounded stdout/stderr previews, source
+diffs, benchmark artifacts, reviewer findings, gateway outcomes, and
+owner-only validation/hidden results. The complete run directory is private.
+Only `public/` is a controller-generated shareable bundle; it contains the
+sanitized event ledger, versioned run state, the sanitized `status.html` and
+`report.html`, aggregate coverage, and `PUBLIC_REPORT.md`. Never upload or
+share the whole run directory or the root `status.html`.
 
 ## Documentation map
 

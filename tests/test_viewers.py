@@ -124,7 +124,7 @@ class PublicViewerTests(unittest.TestCase):
             writer.close()
 
             project_public_events(private_events, public_events)
-            state = render_status(public_events, root / "status.html")
+            state = render_status(public_events, root / "public_status.html")
             render_public_report(state, root / "PUBLIC_REPORT.md")
             render_final_report(public_events, root / "report.html")
             (root / "public_trace_coverage.json").write_text(
@@ -153,7 +153,7 @@ class PublicViewerTests(unittest.TestCase):
 
             copied = materialize_public_bundle(root)
 
-            expected = set(PUBLIC_BUNDLE_FILES)
+            expected = {bundle_name for _source, bundle_name in PUBLIC_BUNDLE_FILES}
             actual = {path.name for path in (root / "public").iterdir()}
             self.assertEqual(actual, expected)
             self.assertEqual({path.name for path in copied}, expected)

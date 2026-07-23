@@ -78,6 +78,7 @@ from .solver import (
 )
 from .trace_ledger import TraceLedger
 from .traces import finalize_adapter_trace
+from .owner_views import render_owner_views
 from .viewers import (
     materialize_public_bundle,
     render_final_report,
@@ -1436,11 +1437,16 @@ class EvolutionEngine:
         try:
             public_events = self.run_dir / "public_events.jsonl"
             project_public_events(self.run_dir / "events.jsonl", public_events)
-            state = render_status(public_events, self.run_dir / "status.html")
+            state = render_status(public_events, self.run_dir / "public_status.html")
             render_public_report(state, self.run_dir / "PUBLIC_REPORT.md")
             if include_report:
                 render_final_report(public_events, self.run_dir / "report.html")
             materialize_public_bundle(self.run_dir)
+            render_owner_views(
+                self.run_dir / "events.jsonl",
+                self.run_dir,
+                final=include_report,
+            )
         except Exception as exc:
             self._emit(
                 "public_view_refresh_failed",

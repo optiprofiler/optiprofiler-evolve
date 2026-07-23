@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Turn the run-directory root `status.html` into the PRIVATE owner console:
+  every attempt, integrity-review invocation, and research-role job links to a
+  static per-invocation evidence page (transcript and tool calls, bounded
+  stdout/stderr previews, source diff, benchmark artifacts, reviewer findings,
+  gateway outcome, owner-only validation/hidden results). The sanitized public
+  page is now rendered to `public_status.html` and published unchanged as
+  `public/status.html` through an explicit source-to-target bundle allowlist.
+- Add a derived owner evidence manifest plus `scripts/pack_owner_evidence.py`
+  for explicit per-attempt/per-job packaging with symlink and path-traversal
+  protection. Nothing owner-side is ever uploaded by the Actions templates.
+- Add the external algorithm-repository GitHub Actions example
+  (`examples/external-repository/`) with a pinned package fetch outside the
+  solver tree.
+
 - Keep the controller event ledger private and derive all shareable status data
   through a centralized default-deny event projection.
 - Add a versioned public run-state projection, an Actions-style server-free
