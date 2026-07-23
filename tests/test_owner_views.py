@@ -347,6 +347,39 @@ class OwnerViewTests(unittest.TestCase):
             self.assertIn('http-equiv="refresh"', attempt_text)
             self.assertIn("unavailable (not evaluated)", attempt_text)
 
+    def test_owner_index_shows_effective_pareto_population_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = _build_run_dir(Path(directory))
+            (run_dir / "provenance.json").write_text(
+                json.dumps(
+                    {
+                        "components": {
+                            "retention": {
+                                "name": "metric_pareto",
+                                "options": {
+                                    "objectives": ["fitness"],
+                                    "epsilon": 0.0,
+                                },
+                            },
+                            "parent_sampler": {
+                                "name": "top_biased_validation_weighted",
+                                "options": {"greedy_ratio": 0.7},
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            render_owner_views(run_dir / "events.jsonl", run_dir, final=True)
+            owner = (run_dir / "status.html").read_text(encoding="utf-8")
+
+            self.assertIn("Population policy", owner)
+            self.assertIn("metric_pareto", owner)
+            self.assertIn("fitness", owner)
+            self.assertIn("Scalar fallback (one objective)", owner)
+            self.assertIn("top_biased_validation_weighted", owner)
+
     def test_public_bundle_never_contains_owner_material(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = _build_run_dir(Path(directory))

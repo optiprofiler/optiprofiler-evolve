@@ -74,6 +74,7 @@ _OWNER_STYLE = """
     .owner-tag { display: inline-block; margin-left: 6px; padding: 1px 7px;
       border: 1px solid var(--warn-border); border-radius: 10px;
       color: var(--warn-text); font-size: 11px; font-weight: 600; }
+    .population-summary { grid-template-columns: repeat(4, minmax(120px, 1fr)); }
     .attempt-link { display: flex; align-items: center; flex-wrap: wrap; gap: 12px;
       min-height: 44px; padding: 10px 14px; border-top: 1px solid var(--line);
       color: var(--text); }
@@ -112,6 +113,7 @@ _OWNER_STYLE = """
     .step-detail .body { padding: 0 14px 12px; }
     @media (max-width: 820px) {
       .kv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .population-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .attempt-link code { min-width: 0; flex: 1 1 140px; }
     }
 """
@@ -150,7 +152,10 @@ def render_owner_views(events_path: Path, run_dir: Path, *, final: bool = False)
             continue
         _atomic_write(page, _render_role_page(role, details, run_dir, now))
 
-    _atomic_write(run_dir / "status.html", _render_owner_index(state, details, now))
+    _atomic_write(
+        run_dir / "status.html",
+        _render_owner_index(state, details, run_dir, now),
+    )
     if final:
         write_owner_manifest(state, run_dir)
 
@@ -213,7 +218,10 @@ def _collect_private_details(events: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _render_owner_index(
-    state: Mapping[str, Any], details: Mapping[str, Any], now: datetime | None
+    state: Mapping[str, Any],
+    details: Mapping[str, Any],
+    run_dir: Path,
+    now: datetime | None,
 ) -> str:
     run = _mapping(state.get("run"))
     run_status = _safe_status(run.get("status"))
@@ -228,6 +236,7 @@ def _render_owner_index(
         for value in _sequence(state.get("attempts"))
     }
     matrix = _render_matrix(state.get("matrix"), attempts_by_id, now)
+    population_policy = _render_population_policy(run_dir)
     attempts = _render_owner_attempt_groups(state.get("attempts"), details, now)
     roles = _render_owner_roles(state.get("roles"), now)
     coverage = _render_coverage(state.get("trace_coverage"))
@@ -244,11 +253,12 @@ def _render_owner_index(
   <header class="topbar"><strong>OptiProfiler Evolve</strong><span>Owner console</span></header>
   {_BANNER}
   <div class="layout">
-    <aside><h2>Run details</h2><nav><a href="#summary">Summary</a><a href="#workflow">Workflow</a><a href="#matrix">Island matrix</a><a href="#attempts">Attempts</a><a href="#roles">Agent jobs</a><a href="#coverage">Trace coverage</a></nav></aside>
+    <aside><h2>Run details</h2><nav><a href="#summary">Summary</a><a href="#workflow">Workflow</a><a href="#matrix">Island matrix</a><a href="#population-policy">Population policy</a><a href="#attempts">Attempts</a><a href="#roles">Agent jobs</a><a href="#coverage">Trace coverage</a></nav></aside>
     <main>
       <section id="summary">{head}</section>
       <section id="workflow"><h2>Workflow</h2>{phases}{iterations}</section>
       <section id="matrix"><h2>Island matrix</h2>{matrix}</section>
+      <section id="population-policy"><h2>Population policy</h2>{population_policy}</section>
       <section id="attempts"><h2>Attempts</h2>{attempts}</section>
       <section id="roles"><h2>Trusted agent jobs</h2>{roles}</section>
       <section id="coverage"><h2>Agent trace coverage</h2>{coverage}</section>
@@ -259,6 +269,50 @@ def _render_owner_index(
 </html>
 """
     return document
+
+
+def _render_population_policy(run_dir: Path) -> str:
+    provenance = _mapping(read_json(run_dir / "provenance.json"))
+    components = _mapping(provenance.get("components"))
+    retention = _mapping(components.get("retention"))
+    sampler = _mapping(components.get("parent_sampler"))
+    retention_name = str(retention.get("name") or "")
+    sampler_name = str(sampler.get("name") or "")
+    if not retention_name and not sampler_name:
+        return '<p class="empty">Population policy provenance unavailable.</p>'
+
+    retention_options = _mapping(retention.get("options"))
+    objectives = tuple(str(item) for item in _sequence(retention_options.get("objectives")))
+    if retention_name == "metric_pareto":
+        effective_mode = (
+            "Multi-objective nondominated fronts"
+            if len(objectives) >= 2
+            else "Scalar fallback (one objective)"
+        )
+    else:
+        effective_mode = "Scalar archive ordering"
+    objective_text = ", ".join(objectives) if objectives else "default"
+    epsilon = retention_options.get("epsilon")
+    epsilon_text = str(epsilon) if epsilon is not None else "default"
+    sampler_options = _mapping(sampler.get("options"))
+    sampler_detail = ", ".join(
+        f"{key}={value}" for key, value in sorted(sampler_options.items())
+    )
+    sampler_text = (
+        f"{sampler_name} ({sampler_detail})" if sampler_detail else sampler_name or "unavailable"
+    )
+    return (
+        '<div class="run-summary population-summary">'
+        f'<div class="metric"><span>Retention</span><strong><code>{_h(retention_name or "unavailable")}'
+        "</code></strong></div>"
+        f'<div class="metric"><span>Objectives</span><strong><code>{_h(objective_text)}'
+        f"</code></strong><span>epsilon={_h(epsilon_text)}</span></div>"
+        f'<div class="metric"><span>Effective mode</span><strong>{_h(effective_mode)}'
+        "</strong></div>"
+        f'<div class="metric"><span>Parent sampler</span><strong><code>{_h(sampler_text)}'
+        "</code></strong></div>"
+        "</div>"
+    )
 
 
 def _owner_run_head(
