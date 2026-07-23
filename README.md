@@ -120,6 +120,13 @@ direction cards, per-island source diffs and strategy cards, executable ablation
 matrices, island bundles, recombination conflicts/results, and a challenger
 report under `research/`.
 
+Open `status.html` for a server-free Actions-style view of phases, the
+iteration-by-island matrix, candidate pipelines, research roles, and aggregate
+trace coverage. The complete run directory is private. Only `public/` is a
+controller-generated shareable bundle; it contains the sanitized event ledger,
+versioned run state, HTML views, aggregate coverage, and `PUBLIC_REPORT.md`.
+Never upload the whole run directory.
+
 ## Documentation map
 
 - [Agent guide](AGENTS.md): compact repository navigation, invariants, and
@@ -135,6 +142,8 @@ report under `research/`.
   compatibility, credential mapping, agent-mode probes, and search behavior.
 - [Agent trace retention](docs/traces.md): private raw evidence, readable
   transcripts, lifecycle events, and public projections.
+- [GitHub Actions](docs/github-actions.md): launch one experiment job and upload
+  only its sanitized public bundle.
 - [Island archives and selection](docs/selection.md): default retention and
   sampling, metric bundles, and explicit Pareto variants.
 - [JSON Schema](config.schema.json): editor completion and structural validation.

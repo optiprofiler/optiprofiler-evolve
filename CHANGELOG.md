@@ -4,6 +4,9 @@
 
 - Keep the controller event ledger private and derive all shareable status data
   through a centralized default-deny event projection.
+- Add a versioned public run-state projection, an Actions-style server-free
+  workflow/island view, a sanitized Markdown summary, and an exact allowlisted
+  `public/` bundle for the single-job GitHub Actions template.
 - Remove problem-library identity, reference raw scores, and scoring-formula
   details from worker manifests and evaluation responses.
 - Preserve built-in CLI worker and research-role stdout/stderr incrementally in

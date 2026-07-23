@@ -139,6 +139,10 @@ components.
   projection. They never become competing state stores.
 - The built-in local status page is static and server-free. GitHub Actions is an
   optional launcher/exporter, not the runtime scheduler.
+- The complete run directory is private. GitHub Actions and other exporters may
+  upload only the controller-generated `public/` directory, whose exact
+  fixed-name allowlist is tested. They never upload `run_dir`, `FINAL_REPORT.md`,
+  controller state, raw traces, candidates, or workspaces.
 
 ## 8. Ablations
 

@@ -1,0 +1,60 @@
+# GitHub Actions
+
+The v1 integration is a template, not a second scheduler. One GitHub Actions
+job calls the repository's experiment script. Inside that process,
+`evolve(...)` still owns phases, islands, attempts, reviewer gates, selection,
+checkpoints, and cancellation.
+
+Start with [`examples/github-actions/evolve.yml`](../examples/github-actions/evolve.yml)
+and its paired [`run.py`](../examples/github-actions/run.py):
+
+1. Copy the workflow to `.github/workflows/evolve.yml` in the experiment
+   repository.
+2. Adapt `examples/github-actions/run.py` to the solver, interface, editable
+   paths, config, and fixed run directory.
+3. Store the model ID as a repository variable and the provider credential as
+   an Actions secret. Map the credential only on the experiment step.
+4. Keep the workflow manually triggered until the evaluation budget and model
+   cost are understood.
+5. Inspect the Job Summary and download the public artifact after the job.
+
+The template has one job by design. Splitting phases or islands into GitHub jobs
+would create a second orchestration model with different resume, cancellation,
+and state semantics.
+
+## Public artifact boundary
+
+The `always()` steps read
+`<run_dir>/public/PUBLIC_REPORT.md` and upload `<run_dir>/public/`. The
+controller rebuilds that directory from this exact filename allowlist:
+
+```text
+public_events.jsonl
+public_run_state.json
+status.html
+report.html                    # once available
+public_trace_coverage.json     # once available
+PUBLIC_REPORT.md
+```
+
+Do not change the upload path to `<run_dir>`. The full directory contains
+controller-only validation and hidden results, reviewer findings, provider
+evidence, raw traces, candidates, workspaces, and the private scientific
+`FINAL_REPORT.md`.
+
+The status page and Job Summary deliberately report workflow state, public
+candidate fitness, and aggregate trace coverage only. A run owner may inspect
+the private artifacts on the trusted runner or move them to separately governed
+private storage.
+
+## Current template scope
+
+The checked-in template uses the Claude Code example on a GitHub-hosted Linux
+runner and builds all three Docker images. Adapt the provider mapping for Codex
+or a compatible endpoint as described in [Model providers](providers.md).
+Long or costly studies should use a controlled self-hosted runner and explicit
+job timeout, concurrency, model budget, and artifact-retention settings.
+
+The template pins each third-party action to a full release commit. Reusable
+workflows or a composite action can be considered after the package has a
+stable published release; they are intentionally absent from the alpha.

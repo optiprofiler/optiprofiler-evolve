@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from optiprofiler_evolve.config import ComponentConfig, load_config
 from optiprofiler_evolve.engine import EvolutionEngine
@@ -19,6 +20,7 @@ from optiprofiler_evolve.protocols import (
 from optiprofiler_evolve.registry import build
 from optiprofiler_evolve.sandbox import AgentRunResult
 from optiprofiler_evolve.solver import InterfaceSpec
+from optiprofiler_evolve.viewers import materialize_public_bundle, render_status
 
 from test_config import minimal_config
 
@@ -109,6 +111,61 @@ class SeedCaptureStep:
 
 
 class ExtensibilityTests(unittest.TestCase):
+    def test_public_view_failure_is_nonfatal_and_keeps_last_good_bundle(self) -> None:
+        functions = {
+            "render_status": render_status,
+            "materialize_public_bundle": materialize_public_bundle,
+        }
+        for name, function in functions.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "source"
+                source.mkdir()
+                (source / "solver.py").write_text(
+                    "def solver(fun, x0):\n    return x0\n",
+                    encoding="utf-8",
+                )
+                calls = 0
+
+                def fail_after_first(*args: object, **kwargs: object) -> object:
+                    nonlocal calls
+                    calls += 1
+                    if calls > 1:
+                        raise OSError(f"simulated {name} failure")
+                    return function(*args, **kwargs)
+
+                with patch(
+                    f"optiprofiler_evolve.engine.{name}",
+                    side_effect=fail_after_first,
+                ):
+                    result = EvolutionEngine(
+                        initial=source,
+                        interface=InterfaceSpec.parse("solver.py:solver"),
+                        runtime="python",
+                        editable=(".",),
+                        config=load_config(minimal_config()),
+                        run_dir=root / "run",
+                        agent_runner=agent_runner,
+                        evaluator_factory=evaluator_factory,
+                    ).run()
+
+                self.assertTrue(result.best_solver.is_dir())
+                private_events = (root / "run" / "events.jsonl").read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn('"kind": "run_finished"', private_events)
+                self.assertIn('"kind": "public_view_refresh_failed"', private_events)
+                public_bundle = root / "run" / "public"
+                self.assertTrue((public_bundle / "status.html").is_file())
+                self.assertIn(
+                    'http-equiv="refresh"',
+                    (public_bundle / "status.html").read_text(encoding="utf-8"),
+                )
+                self.assertNotIn(
+                    "public_view_refresh_failed",
+                    (root / "run" / "public_events.jsonl").read_text(encoding="utf-8"),
+                )
+
     def test_frozen_config_helpers_create_isolated_ablation_variants(self) -> None:
         base = load_config(minimal_config())
         without = base.without_step("static_audit")
@@ -279,11 +336,18 @@ class ExtensibilityTests(unittest.TestCase):
             self.assertFalse(provenance["components"]["evaluator"]["declared_deterministic"])
             status = (root / "run" / "status.html").read_text(encoding="utf-8")
             self.assertNotIn("fetch(", status)
-            self.assertIn('http-equiv="refresh"', status)
-            self.assertIn("mutate:succeeded", status)
+            self.assertNotIn('http-equiv="refresh"', status)
+            self.assertIn("Attempt pipelines", status)
+            self.assertIn("mutate", status)
+            self.assertIn("succeeded", status)
             report = (root / "run" / "report.html").read_text(encoding="utf-8")
             self.assertIn("public_events.jsonl", report)
             self.assertNotIn('href="events.jsonl"', report)
+            self.assertNotIn("FINAL_REPORT.md", report)
+            public_bundle = root / "run" / "public"
+            self.assertTrue((public_bundle / "status.html").is_file())
+            self.assertTrue((public_bundle / "PUBLIC_REPORT.md").is_file())
+            self.assertFalse((public_bundle / "FINAL_REPORT.md").exists())
             public_events = (root / "run" / "public_events.jsonl").read_text(
                 encoding="utf-8"
             )

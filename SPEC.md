@@ -69,6 +69,12 @@ manifest, solver contract, candidate lineage, raw worker traces, provider
 gateway and Docker lifecycle evidence, evaluation feedback, checkpoints,
 validation selection, hidden holdout report, and final solver tree.
 
+The complete run directory is controller-private. A centralized default-deny
+event projection derives `public_run_state/1`, the server-free status view, and
+an exact `public/` artifact bundle. Only that fixed-name bundle may be shared by
+the built-in GitHub Actions template. It excludes validation and hidden values,
+reviewer findings, candidates, workspaces, provider details, and raw traces.
+
 Optional research phases add only versioned file-backed artifacts. A strategy
 may be labelled `Observed` only after its concrete patch or variant tree passes
 the mandatory solver gate and a real public ablation. Natural-language analysis

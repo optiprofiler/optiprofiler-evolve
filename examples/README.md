@@ -15,6 +15,7 @@ at least one review call.
 | Codex Responses-compatible provider | `run_codex_compatible.py` | `experiment-codex-compatible.yaml` | `OPTIPROFILER_EVOLVE_CODEX_MODEL`, `OPTIPROFILER_EVOLVE_OPENAI_BASE_URL`, `OPTIPROFILER_EVOLVE_API_KEY` |
 | Multi-file solver repository | `run_repository.py` | `experiment.yaml` | Same as Claude quick start |
 | Full research harness | `run.py` | `experiment-research.yaml` | Same as Claude quick start; edit `run.py` to point at this config |
+| Single-job GitHub Actions launch | `github-actions/run.py` | `experiment.yaml` | Repository variable and Actions provider secret; see `github-actions/evolve.yml` |
 
 Build the worker and evaluator images once before running an example. See
 [Getting started](../docs/getting-started.md) for the commands.

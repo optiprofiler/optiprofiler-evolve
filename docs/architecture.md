@@ -23,7 +23,8 @@ evolve(...)
   -> hidden
        evaluate that fixed champion once on the holdout
   -> report
-       materialize final_solver, result.json, events.jsonl, and status.html
+       materialize final_solver and private scientific results
+       project public events into status.html, PUBLIC_REPORT.md, and public/
 ```
 
 The optional research harness keeps these core actions and inserts:
@@ -79,6 +80,13 @@ Each terminal invocation is joined to run/config/component provenance in
 `controller/trace_coverage.json` reports capture quality, worker outcomes, and
 provider-gateway outcomes; `public_trace_coverage.json` contains aggregate
 counts only.
+
+`events.jsonl` remains the only authoritative workflow ledger.
+`public_events.jsonl`, `public_run_state.json`, `status.html`,
+`PUBLIC_REPORT.md`, and the exact `public/` bundle are derived views. The local
+page renders the canonical run > phase > iteration > island > attempt > step
+vocabulary. The GitHub Actions template launches one engine job and displays
+the same public projection; it does not compile the workflow into GitHub jobs.
 
 The `budget` field is reserved for a future scheduler. The alpha engine raises
 on a nonempty budget proposal so an apparently successful experiment cannot

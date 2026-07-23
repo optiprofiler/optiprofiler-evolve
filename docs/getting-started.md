@@ -99,6 +99,12 @@ The script prints the run directory, final solver directory, public score, and
 controller-only final score. A timestamped run directory is created under
 `runs/` unless `run_dir` is supplied explicitly.
 
+Open `<run_dir>/status.html` to inspect the current workflow, island matrix,
+attempt pipelines, research-role jobs, and aggregate trace coverage. The page
+is a static projection and needs no local server. The full run directory also
+contains private validation, hidden, reviewer, provider, and trace evidence;
+share only `<run_dir>/public/`.
+
 ## 3. Adapt a solver
 
 Point `initial` at either one Python file or a repository directory. The
@@ -147,6 +153,11 @@ recombination add extra public and controller-only validation evaluations. A
 mandatory integrity-review agent also runs once for every candidate that
 survives public checks, with one retry on malformed or unavailable output by
 default.
+
+To launch this same flow from GitHub Actions, start from the
+[single-job template](github-actions.md). GitHub Actions does not schedule
+phases or islands; it starts `evolve(...)`, publishes the sanitized Job Summary,
+and uploads only the public bundle.
 
 Validation and hidden splits are not exposed through worker tools. Validation
 selects candidates inside the controller. Hidden is evaluated once after one

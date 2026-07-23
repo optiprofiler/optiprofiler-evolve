@@ -10,6 +10,13 @@ controller boundary remains the only supported way to invoke an agent.
 The trace is evidence for later trajectory analysis. It is not a second source
 of workflow truth and it is never part of a public run bundle.
 
+The controller refreshes `public/` from a fixed filename allowlist. That
+directory may contain only `public_events.jsonl`, `public_run_state.json`,
+`status.html`, `report.html`, `public_trace_coverage.json`, and
+`PUBLIC_REPORT.md` when those files exist. It never copies directories or uses
+a source glob. The complete run directory, `FINAL_REPORT.md`, `controller/`,
+`traces/`, research artifacts, candidates, and workspaces remain private.
+
 ## Evidence layers
 
 | Layer | Contents | Intended consumer |

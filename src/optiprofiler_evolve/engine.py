@@ -13,6 +13,7 @@ import shutil
 import signal
 import subprocess
 import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -77,7 +78,12 @@ from .solver import (
 )
 from .trace_ledger import TraceLedger
 from .traces import finalize_adapter_trace
-from .viewers import render_final_report, render_status
+from .viewers import (
+    materialize_public_bundle,
+    render_final_report,
+    render_public_report,
+    render_status,
+)
 
 
 AgentRunner = Callable[..., AgentRunResult]
@@ -214,6 +220,7 @@ class EvolutionEngine:
         self.research_finalists: dict[str, CandidateRecord] = {}
         self.validation_query_count = 0
         self.validation_selection_count = 0
+        self._last_status_refresh = 0.0
         self._cancellation_event = threading.Event()
         service_impl = _EngineControllerServices(self)
         self.controller_services = ControllerServices(
@@ -553,11 +560,7 @@ class EvolutionEngine:
                     pass
             try:
                 if self.events is not None:
-                    self._refresh_status()
-                    render_final_report(
-                        self.run_dir / "public_events.jsonl",
-                        self.run_dir / "report.html",
-                    )
+                    self._refresh_status(include_report=True)
             finally:
                 if self.events is not None:
                     self.events.close()
@@ -575,6 +578,7 @@ class EvolutionEngine:
                 )
             scope = {"phase": phase.name}
             self._emit("phase_started", "running", scope=scope)
+            self._refresh_status()
             try:
                 context = PhaseContext(
                     run_dir=self.run_dir,
@@ -706,6 +710,7 @@ class EvolutionEngine:
             self._raise_if_cancelled()
             iteration_scope = {"phase": "explore", "iteration": iteration}
             self._emit("iteration_started", "running", scope=iteration_scope)
+            self._refresh_status()
             jobs: list[tuple[int, int, CandidateRecord, WorkerConfig]] = []
             for island, population in enumerate(self.populations):
                 for attempt_index in range(self.config.evolution.attempts_per_island):
@@ -769,6 +774,7 @@ class EvolutionEngine:
                                 exc,
                             )
                         )
+                    self._refresh_status_if_due()
 
             self._raise_if_cancelled()
             # Explicit iteration barrier: only the engine accepts and records.
@@ -1423,13 +1429,30 @@ class EvolutionEngine:
 
         return emit
 
-    def _refresh_status(self) -> None:
+    def _refresh_status(self, *, include_report: bool = False) -> None:
         if self.events is None:
             return
         self.events.flush()
-        public_events = self.run_dir / "public_events.jsonl"
-        project_public_events(self.run_dir / "events.jsonl", public_events)
-        render_status(public_events, self.run_dir / "status.html")
+        try:
+            public_events = self.run_dir / "public_events.jsonl"
+            project_public_events(self.run_dir / "events.jsonl", public_events)
+            state = render_status(public_events, self.run_dir / "status.html")
+            render_public_report(state, self.run_dir / "PUBLIC_REPORT.md")
+            if include_report:
+                render_final_report(public_events, self.run_dir / "report.html")
+            materialize_public_bundle(self.run_dir)
+        except Exception as exc:
+            self._emit(
+                "public_view_refresh_failed",
+                "failed",
+                data={"error": f"{type(exc).__name__}: {exc}"},
+            )
+        finally:
+            self._last_status_refresh = time.monotonic()
+
+    def _refresh_status_if_due(self, interval_seconds: float = 1.0) -> None:
+        if time.monotonic() - self._last_status_refresh >= interval_seconds:
+            self._refresh_status()
 
 
 class _EngineControllerServices:
