@@ -677,6 +677,93 @@ class ResearchHarnessTests(unittest.TestCase):
             self.assertEqual(recombination["status"], "skipped")
             self.assertTrue(recombination["reason"])
 
+
+    def test_capped_ablation_reason_states_evaluated_supported_untested(self) -> None:
+        def capped_runner(**kwargs: object) -> AgentRunResult:
+            workspace = kwargs["workspace"]
+            prompt = str(kwargs["prompt"])
+            transcript = kwargs["transcript"]
+            assert isinstance(workspace, Path)
+            assert isinstance(transcript, Path)
+            if "ROLE: direction-scout" in prompt:
+                (workspace / "direction_cards.json").write_text(json.dumps({"cards": []}))
+            elif "ROLE: strategy-analyst" in prompt:
+                cards = []
+                for index in (1, 2, 3):
+                    variant = workspace / "variants" / f"p{index}"
+                    shutil.copytree(workspace / "finalist", variant)
+                    solver = variant / "solver.py"
+                    solver.write_text(
+                        solver.read_text(encoding="utf-8").replace(
+                            f"# inert{index}\n", ""
+                        ),
+                        encoding="utf-8",
+                    )
+                    cards.append(
+                        {
+                            "strategy_id": f"s{index}",
+                            "claim": f"inert marker {index} is useful",
+                            "code_bindings": [{"file": "solver.py", "lines": [1, 5]}],
+                            "toggle": {
+                                "kind": "variant_tree",
+                                "ref": f"variants/p{index}",
+                            },
+                        }
+                    )
+                (workspace / "strategy_cards.json").write_text(
+                    json.dumps({"cards": cards}), encoding="utf-8"
+                )
+            else:
+                solver = workspace / "solver.py"
+                solver.write_text(
+                    solver.read_text(encoding="utf-8")
+                    + "\n# improved\n# inert1\n# inert2\n# inert3\n",
+                    encoding="utf-8",
+                )
+            transcript.parent.mkdir(parents=True, exist_ok=True)
+            transcript.write_text("scripted", encoding="utf-8")
+            return AgentRunResult(0, transcript)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            raw = research_config()
+            for phase in raw["workflow"]["phases"]:
+                if phase["name"] == "strategy_analysis":
+                    phase["options"].update({"max_strategies": 4, "max_ablations": 1})
+            EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=(".",),
+                config=load_config(raw),
+                run_dir=root / "run",
+                agent_runner=capped_runner,
+                evaluator_factory=research_evaluator_factory,
+            ).run()
+
+            bundles = json.loads(
+                (root / "run" / "research" / "analysis" / "island_bundles.json").read_text()
+            )["bundles"]
+            expected = (
+                "3 strategies proposed; 1 evaluated by leave-one-out ablation, "
+                "0 supported, 2 untested (max_ablations=1)"
+            )
+            self.assertTrue(bundles)
+            for item in bundles:
+                analysis = item["analysis"]
+                self.assertEqual(analysis["status"], "unverified")
+                self.assertEqual(analysis["reason"], expected)
+                matrix = json.loads(
+                    Path(analysis["trace"]["ablation_matrix"]).read_text()
+                )
+                self.assertEqual(matrix["status"], "populated")
+                self.assertEqual(matrix["reason"], expected)
+                self.assertEqual(len(matrix["entries"]), 1)
+                self.assertEqual(matrix["entries"][0]["conclusion"], "placebo")
+
     def test_recombination_records_conflict_instead_of_force_merging(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

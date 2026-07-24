@@ -327,15 +327,27 @@ class StrategyAnalysisPhase:
                 analysis_reason = None
             else:
                 analysis_status = "unverified"
+                evaluated_cards = [card for card in cards if "ablation" in card]
+                untested = len(cards) - len(evaluated_cards)
                 failures = [
-                    str(card.get("ablation", {}).get("error") or "")
-                    for card in cards
-                    if card.get("ablation", {}).get("status") != "succeeded"
+                    str(card["ablation"].get("error") or "")
+                    for card in evaluated_cards
+                    if card["ablation"].get("status") != "succeeded"
                 ]
                 analysis_reason = (
-                    f"{len(cards)} strategies proposed but none survived "
-                    "leave-one-out ablation"
-                    + (f"; first failure: {failures[0]}" if failures and failures[0] else "")
+                    f"{len(cards)} strategies proposed; "
+                    f"{len(evaluated_cards)} evaluated by leave-one-out ablation, "
+                    f"{supported_count} supported"
+                    + (
+                        f", {untested} untested (max_ablations={self.max_ablations})"
+                        if untested
+                        else ""
+                    )
+                    + (
+                        f"; first ablation failure: {failures[0]}"
+                        if failures and failures[0]
+                        else ""
+                    )
                 )
 
             cards_path = write_json(
@@ -367,7 +379,7 @@ class StrategyAnalysisPhase:
                     "single_measurement": self.n_repeats == 1,
                     "entries": matrix,
                     "status": "populated" if matrix else analysis_status,
-                    "reason": None if matrix else analysis_reason,
+                    "reason": analysis_reason,
                 },
             )
             bundle = self._select_bundle(
