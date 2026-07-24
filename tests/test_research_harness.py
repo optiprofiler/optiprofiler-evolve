@@ -384,6 +384,13 @@ class ResearchHarnessTests(unittest.TestCase):
             self.assertTrue(
                 all("placebo" in item["unprunable_strategy_ids"][0] for item in bundles)
             )
+            for item in bundles:
+                analysis = item["analysis"]
+                self.assertEqual(analysis["status"], "verified")
+                self.assertIsNone(analysis["reason"])
+                matrix = json.loads(Path(analysis["trace"]["ablation_matrix"]).read_text())
+                self.assertEqual(matrix["status"], "populated")
+                self.assertTrue(matrix["entries"])
             self.assertTrue(all(item["dropped_strategy_ids"] == [] for item in bundles))
             recombination = json.loads(
                 (root / "run" / "research" / "recombination.json").read_text(encoding="utf-8")
@@ -586,6 +593,89 @@ class ResearchHarnessTests(unittest.TestCase):
                 (root / "run" / "research" / "analysis" / "island_bundles.json").read_text()
             )["bundles"]
             self.assertTrue(all(item["materialization"] == "original_finalist" for item in bundles))
+            for item in bundles:
+                analysis = item["analysis"]
+                self.assertEqual(analysis["status"], "analyst_failed")
+                self.assertIn("reason", analysis)
+                self.assertTrue(analysis["reason"])
+                self.assertFalse(analysis["declared_by_analyst"])
+                trace = analysis["trace"]
+                self.assertTrue(trace["analyst_job_id"].startswith("analysis-island-"))
+                self.assertTrue(Path(trace["strategy_cards"]).is_file())
+                self.assertTrue(Path(trace["ablation_matrix"]).is_file())
+                matrix = json.loads(Path(trace["ablation_matrix"]).read_text())
+                self.assertEqual(matrix["entries"], [])
+                self.assertEqual(matrix["status"], "analyst_failed")
+                self.assertTrue(matrix["reason"])
+
+
+    def test_declared_not_decomposable_is_structured_never_silent(self) -> None:
+        def declaring_roles(**kwargs: object) -> AgentRunResult:
+            workspace = kwargs["workspace"]
+            prompt = str(kwargs["prompt"])
+            transcript = kwargs["transcript"]
+            assert isinstance(workspace, Path)
+            assert isinstance(transcript, Path)
+            if "ROLE:" not in prompt:
+                solver = workspace / "solver.py"
+                solver.write_text(solver.read_text() + "\n# improved\n")
+            elif "ROLE: strategy-analyst" in prompt:
+                (workspace / "strategy_cards.json").write_text(
+                    json.dumps(
+                        {
+                            "cards": [],
+                            "not_decomposable": {
+                                "reason": "single inseparable step-size rewrite"
+                            },
+                        }
+                    )
+                )
+            elif "ROLE: direction-scout" in prompt:
+                (workspace / "direction_cards.json").write_text(
+                    json.dumps({"cards": []})
+                )
+            transcript.parent.mkdir(parents=True, exist_ok=True)
+            transcript.write_text("scripted", encoding="utf-8")
+            return AgentRunResult(0, transcript)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            result = EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=(".",),
+                config=load_config(research_config()),
+                run_dir=root / "run",
+                agent_runner=declaring_roles,
+                evaluator_factory=research_evaluator_factory,
+            ).run()
+            self.assertEqual(result.public_score, 0.7)
+
+            bundles = json.loads(
+                (root / "run" / "research" / "analysis" / "island_bundles.json").read_text()
+            )["bundles"]
+            self.assertTrue(bundles)
+            for item in bundles:
+                analysis = item["analysis"]
+                self.assertEqual(analysis["status"], "not_decomposable")
+                self.assertIn("single inseparable step-size rewrite", analysis["reason"])
+                self.assertTrue(analysis["declared_by_analyst"])
+                self.assertTrue(Path(analysis["trace"]["analyst_transcript"]).is_file())
+                matrix = json.loads(
+                    Path(analysis["trace"]["ablation_matrix"]).read_text()
+                )
+                self.assertEqual(matrix["entries"], [])
+                self.assertEqual(matrix["status"], "not_decomposable")
+                self.assertIn("inseparable", matrix["reason"])
+            recombination = json.loads(
+                (root / "run" / "research" / "recombination.json").read_text()
+            )
+            self.assertEqual(recombination["status"], "skipped")
+            self.assertTrue(recombination["reason"])
 
     def test_recombination_records_conflict_instead_of_force_merging(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

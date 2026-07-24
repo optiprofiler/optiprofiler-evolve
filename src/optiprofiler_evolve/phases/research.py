@@ -254,6 +254,7 @@ class StrategyAnalysisPhase:
 
             cards: list[dict[str, Any]] = []
             analyst_error: str | None = None
+            declaration: str | None = None
             analyst_metadata: dict[str, Any] = {
                 "worker_index": self.worker_index,
                 "tools": _tool_payload(self.tools),
@@ -285,8 +286,12 @@ class StrategyAnalysisPhase:
                         },
                     )
                 )
+                analyst_payload = read_json_object(result.outputs["strategy_cards.json"])
+                declared = analyst_payload.get("not_decomposable")
+                if isinstance(declared, Mapping) and declared.get("reason"):
+                    declaration = str(declared["reason"])[:500]
                 cards = normalize_strategy_cards(
-                    read_json_object(result.outputs["strategy_cards.json"]),
+                    analyst_payload,
                     island=island,
                     finalist=finalist.candidate_id,
                     limit=self.max_strategies,
@@ -303,6 +308,35 @@ class StrategyAnalysisPhase:
                 matrix.append(entry)
                 card["evidence_level"] = "Observed" if entry["status"] == "succeeded" else "Unverified"
                 card["ablation"] = entry
+
+            supported_count = sum(
+                card.get("ablation", {}).get("conclusion") == "supported"
+                for card in cards
+            )
+            if analyst_error is not None:
+                analysis_status = "analyst_failed"
+                analysis_reason = analyst_error
+            elif not cards:
+                analysis_status = "not_decomposable"
+                analysis_reason = declaration or (
+                    "analyst returned zero strategy cards without an explicit "
+                    "not_decomposable declaration"
+                )
+            elif supported_count:
+                analysis_status = "verified"
+                analysis_reason = None
+            else:
+                analysis_status = "unverified"
+                failures = [
+                    str(card.get("ablation", {}).get("error") or "")
+                    for card in cards
+                    if card.get("ablation", {}).get("status") != "succeeded"
+                ]
+                analysis_reason = (
+                    f"{len(cards)} strategies proposed but none survived "
+                    "leave-one-out ablation"
+                    + (f"; first failure: {failures[0]}" if failures and failures[0] else "")
+                )
 
             cards_path = write_json(
                 island_dir / "strategy_cards.json",
@@ -332,18 +366,30 @@ class StrategyAnalysisPhase:
                     "comparison": "fresh_repeated_evaluations_on_both_sides",
                     "single_measurement": self.n_repeats == 1,
                     "entries": matrix,
+                    "status": "populated" if matrix else analysis_status,
+                    "reason": None if matrix else analysis_reason,
                 },
             )
-            bundles.append(
-                self._select_bundle(
-                    context,
-                    island,
-                    finalist,
-                    cards,
-                    matrix_path,
-                    island_dir,
-                )
+            bundle = self._select_bundle(
+                context,
+                island,
+                finalist,
+                cards,
+                matrix_path,
+                island_dir,
             )
+            bundle["analysis"] = {
+                "status": analysis_status,
+                "reason": analysis_reason,
+                "declared_by_analyst": declaration is not None,
+                "trace": {
+                    "analyst_job_id": f"analysis-island-{island}",
+                    "analyst_transcript": analyst_metadata.get("transcript"),
+                    "strategy_cards": str(cards_path),
+                    "ablation_matrix": str(matrix_path),
+                },
+            }
+            bundles.append(bundle)
             context.emit(
                 "island_analysis_finished",
                 "succeeded" if analyst_error is None else "failed",
@@ -968,6 +1014,11 @@ source.diff, exploration_trace.jsonl, evidence_manifest.json, and the actual plo
 public_evidence/. Extract at most
 {max_strategies} concrete algorithm strategies. Natural-language claims are hypotheses,
 not evidence. You cannot call evaluation tools and must not seek validation or hidden data.
+
+If the finalist's change is a single inseparable edit, or there is no real
+algorithmic change to decompose, do not invent strategies: write
+strategy_cards.json as {{"cards": [], "not_decomposable": {{"reason": "..."}}}}
+with a concrete reason grounded in source.diff.
 
 For every strategy, create an executable leave-one-out variant by either:
 1. copying finalist/ to variants/<strategy_id>/ and removing only that strategy; or
