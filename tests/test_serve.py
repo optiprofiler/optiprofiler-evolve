@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import http.client
+import os
+import socket
 import tempfile
 import threading
 import unittest
@@ -102,6 +104,34 @@ class ServeDashboardTests(unittest.TestCase):
                 run_dir, public=True, host="0.0.0.0"
             )
             self.assertIn("sanitized public bundle", public_warnings[0])
+
+
+    def test_server_survives_hostile_traffic_and_atomic_replaces(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = _run_dir(Path(directory))
+            server, _url, _warnings = self._serving(run_dir)
+            port = server.server_address[1]
+
+            # Garbage bytes, bad paths, and traversal must not kill the server.
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as conn:
+                conn.sendall(b"\x00\x01 garbage\r\n\r\n")
+            self.assertEqual(_get(port, "/missing.html")[0], 404)
+            self.assertNotEqual(_get(port, "/../sibling-secret.txt")[0], 200)
+
+            # Atomic rerenders while serving: the run refreshes status.html
+            # continuously during a live run.
+            page = run_dir / "status.html"
+            for index in range(30):
+                temporary = page.with_suffix(".html.tmp")
+                temporary.write_text(f"<!doctype html>OWNER v{index}", encoding="utf-8")
+                os.replace(temporary, page)
+                status, payload = _get(port, "/status.html")
+                self.assertEqual(status, 200)
+                self.assertIn(b"OWNER", payload)
+
+            status, payload = _get(port, "/status.html")
+            self.assertEqual(status, 200)
+            self.assertIn(b"OWNER v29", payload)
 
     def test_missing_dashboards_raise_clear_errors(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

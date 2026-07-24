@@ -366,6 +366,12 @@
           "maxLength": 2000,
           "default": null
         },
+        "provider_failure_retries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3,
+          "default": 0
+        },
         "adapter": {
           "type": "string",
           "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",

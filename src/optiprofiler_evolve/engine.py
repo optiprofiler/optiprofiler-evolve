@@ -217,6 +217,7 @@ class EvolutionEngine:
         self._refresh_stop = threading.Event()
         self._refresh_thread: threading.Thread | None = None
         self._refresh_poll_seconds = 2.0
+        self._refresh_due_seconds = 4.0
         self.direction_assignments: dict[int, dict[str, object]] = {}
         self.variant_handles: dict[str, VariantHandle] = {}
         self.variant_bases: dict[str, Path] = {}
@@ -1469,7 +1470,7 @@ class EvolutionEngine:
         # truth; this thread merely re-renders projections of it.
         while not self._refresh_stop.wait(self._refresh_poll_seconds):
             try:
-                self._refresh_status_if_due(interval_seconds=4.0)
+                self._refresh_status_if_due(interval_seconds=self._refresh_due_seconds)
             except Exception:
                 continue
 
@@ -2042,10 +2043,46 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
 
     def run_worker(self) -> WorkerOutcome:
         engine = self._engine
+        retries = engine.config.workers.provider_failure_retries
+        pool = engine.config.workers.pool
+        worker = self._worker
+        invocation = 0
+        while True:
+            suffix = "" if invocation == 0 else f"-p{invocation:02d}"
+            outcome = self._invoke_worker(worker, suffix)
+            failure = _provider_failure_class(outcome)
+            if failure is None or invocation >= retries:
+                self.worker_outcome = outcome
+                return outcome
+            invocation += 1
+            try:
+                index = pool.index(worker)
+            except ValueError:
+                index = invocation - 1
+            worker = pool[(index + 1) % len(pool)]
+            engine._emit(
+                "worker_retry",
+                "running",
+                scope=self._scope(),
+                data={
+                    "retry": invocation,
+                    "failure_class": failure,
+                    "worker": f"{worker.harness}:{worker.model}",
+                },
+            )
+            # The failed invocation may have left partial edits behind; the
+            # retry restarts from the parent tree while the failed
+            # transcript and trace evidence stay on disk under their own
+            # suffix.
+            shutil.rmtree(self._workspace)
+            copy_solver_tree(self._parent.path, self._workspace)
+
+    def _invoke_worker(self, worker: WorkerConfig, suffix: str) -> WorkerOutcome:
+        engine = self._engine
         if engine.evaluator is None or engine.data is None:
             raise RuntimeError("Worker capability requires prepared evaluator and data.")
         tools_dir = engine.run_dir / "controller" / "worker_tools" / self._attempt_id
-        transcript = engine.run_dir / "transcripts" / f"{self._attempt_id}.jsonl"
+        transcript = engine.run_dir / "transcripts" / f"{self._attempt_id}{suffix}.jsonl"
         broker = EvaluationBroker(
             workspace=self._workspace,
             control_dir=engine.run_dir / "controller" / "brokers" / self._attempt_id,
@@ -2077,11 +2114,11 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
                 "worker_started",
                 "running",
                 scope=self._scope(),
-                data={"worker": f"{self._worker.harness}:{self._worker.model}"},
+                data={"worker": f"{worker.harness}:{worker.model}"},
             )
             outcome = engine._run_worker_adapter(
                 WorkerRequest(
-                    worker=self._worker,
+                    worker=worker,
                     workers=engine.config.workers,
                     sandbox=engine.config.sandbox,
                     workspace=self._workspace,
@@ -2089,7 +2126,7 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
                     broker=connection,
                     prompt=prompt,
                     transcript=transcript,
-                    trace_dir=engine.run_dir / "traces" / self._attempt_id,
+                    trace_dir=engine.run_dir / "traces" / f"{self._attempt_id}{suffix}",
                     trace_context={
                         "schema": "trace_input/1",
                         "join": {
@@ -2117,7 +2154,6 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
             outcome = WorkerOutcome(1, transcript)
         finally:
             broker.stop()
-        self.worker_outcome = outcome
         engine._emit(
             "worker_finished",
             (
@@ -2212,6 +2248,22 @@ def _direction_assignments(artifact: object) -> dict[int, dict[str, object]]:
 
 def _guidance_id(direction: Mapping[str, object] | None) -> str | None:
     return str(direction["card_id"]) if direction and direction.get("card_id") else None
+
+
+def _provider_failure_class(outcome: WorkerOutcome | None) -> str | None:
+    """Classify failures that a config-enabled provider retry may recover."""
+
+    if outcome is None or outcome.cancelled or outcome.timed_out:
+        return None
+    if outcome.returncode == 0:
+        return None
+    reason = (outcome.termination_reason or "").lower()
+    if any(token in reason for token in ("rate_limit", "overloaded", "529")):
+        return "rate_limit"
+    gateway = outcome.provider_gateway_outcome
+    if gateway is not None and gateway != "completed":
+        return "provider_transport"
+    return None
 
 
 def _worker_failure(outcome: WorkerOutcome | None) -> str | None:

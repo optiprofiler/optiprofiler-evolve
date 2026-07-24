@@ -445,6 +445,7 @@ class WorkersConfig:
     token_budget: int | None = None
     max_budget_usd: float | None = None
     prompt_note: str | None = None
+    provider_failure_retries: int = 0
     tools: ToolConfig = dataclasses.field(default_factory=ToolConfig)
     adapter: str = "cli"
     allow_direct_provider: bool = False
@@ -458,6 +459,8 @@ class WorkersConfig:
             raise ValueError("workers.token_budget must be positive when set.")
         if self.max_budget_usd is not None and self.max_budget_usd <= 0:
             raise ValueError("workers.max_budget_usd must be positive when set.")
+        if not 0 <= self.provider_failure_retries <= 3:
+            raise ValueError("workers.provider_failure_retries must be between 0 and 3.")
         if self.prompt_note is not None:
             if not isinstance(self.prompt_note, str) or not self.prompt_note.strip():
                 raise ValueError("workers.prompt_note must be a non-empty string when set.")

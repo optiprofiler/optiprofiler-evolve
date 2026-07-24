@@ -120,6 +120,137 @@ def reviewer_config(*, strict: bool = False) -> dict:
 
 class EngineTests(unittest.TestCase):
 
+    def test_provider_failure_retry_rotates_and_resets_workspace(self) -> None:
+        calls: list[str] = []
+
+        def flaky_runner(**kwargs) -> AgentRunResult:
+            workspace = kwargs["workspace"]
+            transcript = kwargs["transcript"]
+            transcript.parent.mkdir(parents=True, exist_ok=True)
+            calls.append(transcript.name)
+            solver = workspace / "solver.py"
+            if len(calls) == 1:
+                solver.write_text(solver.read_text() + "\n# half-finished garbage\n")
+                transcript.write_text("429 upstream\n")
+                return AgentRunResult(
+                    1, transcript, termination_reason="error_rate_limit"
+                )
+            self_text = solver.read_text()
+            assert "garbage" not in self_text  # retry starts from the parent tree
+            solver.write_text(self_text + "\n# improved\n")
+            transcript.write_text("clean retry\n")
+            return AgentRunResult(0, transcript)
+
+        with tempfile.TemporaryDirectory() as directory:
+            FakeEvaluator.calls = []
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            raw = minimal_config()
+            raw["evolution"].update({"islands": 1, "attempts_per_island": 1})
+            raw["workers"]["provider_failure_retries"] = 1
+            engine = EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=(".",),
+                config=load_config(raw),
+                run_dir=root / "run",
+                agent_runner=flaky_runner,
+                evaluator_factory=fake_evaluator_factory,
+            )
+            result = engine.run()
+
+            self.assertEqual(result.public_score, 0.7)
+            champion = (result.best_solver / "solver.py").read_text()
+            self.assertIn("improved", champion)
+            self.assertNotIn("garbage", champion)
+            self.assertEqual(
+                calls, ["it001-i00-a00.jsonl", "it001-i00-a00-p01.jsonl"]
+            )
+            # Both invocations keep their evidence on disk.
+            transcripts = result.run_dir / "transcripts"
+            self.assertIn("429", (transcripts / "it001-i00-a00.jsonl").read_text())
+            self.assertIn(
+                "clean retry", (transcripts / "it001-i00-a00-p01.jsonl").read_text()
+            )
+            events = [
+                json.loads(line)
+                for line in (result.run_dir / "events.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            retries = [event for event in events if event["kind"] == "worker_retry"]
+            self.assertEqual(len(retries), 1)
+            self.assertEqual(retries[0]["data"]["failure_class"], "rate_limit")
+            worker_finished = [
+                event
+                for event in events
+                if event["kind"] == "worker_finished"
+                and event["scope"].get("attempt_id") == "it001-i00-a00"
+            ]
+            self.assertEqual(
+                [event["status"] for event in worker_finished], ["failed", "succeeded"]
+            )
+
+    def test_live_run_updates_phase_page_between_attempts(self) -> None:
+        captured: dict[str, str] = {}
+        state = {"calls": 0}
+
+        def observing_runner(**kwargs) -> AgentRunResult:
+            workspace = kwargs["workspace"]
+            transcript = kwargs["transcript"]
+            transcript.parent.mkdir(parents=True, exist_ok=True)
+            transcript.write_text("worker\n")
+            solver = workspace / "solver.py"
+            solver.write_text(solver.read_text() + "\n# improved\n")
+            state["calls"] += 1
+            if state["calls"] == 2:
+                time.sleep(0.5)
+                page = kwargs["run_page"]
+                captured["text"] = (
+                    page.read_text(encoding="utf-8") if page.is_file() else ""
+                )
+            return AgentRunResult(0, transcript)
+
+        with tempfile.TemporaryDirectory() as directory:
+            FakeEvaluator.calls = []
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            raw = minimal_config()
+            raw["evolution"].update({"islands": 1, "attempts_per_island": 2})
+            raw["workers"]["max_parallel"] = 1
+            page = root / "run" / "owner" / "phases" / "explore.html"
+
+            def runner(**kwargs) -> AgentRunResult:
+                kwargs["run_page"] = page
+                return observing_runner(**kwargs)
+
+            engine = EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=(".",),
+                config=load_config(raw),
+                run_dir=root / "run",
+                agent_runner=runner,
+                evaluator_factory=fake_evaluator_factory,
+            )
+            engine._refresh_poll_seconds = 0.05
+            engine._refresh_due_seconds = 0.05
+            engine.run()
+
+            text = captured["text"]
+            # While attempt 2's worker was still running, the on-disk explore
+            # page already carried attempt 1 from later ledger events, and the
+            # live page instructs the browser to keep reloading.
+            self.assertIn("it001-i00-a00", text)
+            self.assertIn('http-equiv="refresh"', text)
+
+
     def test_background_refresher_rerenders_between_engine_steps(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -45,7 +45,7 @@ def _write_events(path: Path, rows: list[tuple[str, str, str, dict, dict]]) -> N
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _attempt_rows(run_dir: Path, *, terminal: bool = True) -> list:
+def _attempt_rows(run_dir: Path, *, terminal: bool = True, accepted: bool = True) -> list:
     scope = {"phase": "explore", "iteration": 1, "island": 0, "attempt_id": ATTEMPT}
     review_scope = {**scope}
     rows = [
@@ -98,14 +98,14 @@ def _attempt_rows(run_dir: Path, *, terminal: bool = True) -> list:
             _ts(2, 21),
             "role_agent_started",
             "running",
-            {"role": "integrity-reviewer", "job_id": REVIEW_JOB, "phase": "explore"},
+            {"role": "integrity-reviewer", "job_id": REVIEW_JOB, "phase": "integrity-reviewer"},
             {},
         ),
         (
             _ts(3, 1),
             "role_agent_finished",
             "succeeded",
-            {"role": "integrity-reviewer", "job_id": REVIEW_JOB, "phase": "explore"},
+            {"role": "integrity-reviewer", "job_id": REVIEW_JOB, "phase": "integrity-reviewer"},
             {
                 "returncode": 0,
                 "timed_out": False,
@@ -131,7 +131,7 @@ def _attempt_rows(run_dir: Path, *, terminal: bool = True) -> list:
             "integrity_review_finished",
             "succeeded",
             review_scope,
-            {"gate": "approved"},
+            {"gate": "approved" if accepted else "quarantined"},
         ),
     ]
     if terminal:
@@ -148,9 +148,9 @@ def _attempt_rows(run_dir: Path, *, terminal: bool = True) -> list:
                         "guidance": "card-7",
                         "public_score": 0.75,
                         "validation_score": float(VALIDATION_CANARY),
-                        "review_verdict": "approve",
-                        "valid": True,
-                        "accepted": True,
+                        "review_verdict": "approve" if accepted else "quarantine",
+                        "valid": accepted,
+                        "accepted": accepted,
                         "error": None,
                         "changed_files": ["solver.py"],
                         "worker_returncode": 0,
@@ -185,10 +185,13 @@ def _attempt_rows(run_dir: Path, *, terminal: bool = True) -> list:
     return rows
 
 
-def _build_run_dir(root: Path, *, terminal: bool = True) -> Path:
+def _build_run_dir(root: Path, *, terminal: bool = True, accepted: bool = True) -> Path:
     run_dir = root / "run"
     run_dir.mkdir()
-    _write_events(run_dir / "events.jsonl", _attempt_rows(run_dir, terminal=terminal))
+    _write_events(
+        run_dir / "events.jsonl",
+        _attempt_rows(run_dir, terminal=terminal, accepted=accepted),
+    )
 
     transcript = run_dir / "transcripts" / f"{ATTEMPT}.jsonl"
     transcript.parent.mkdir(parents=True)
@@ -647,6 +650,35 @@ class OwnerViewTests(unittest.TestCase):
             self.assertIn('href="final_solver/"', index)
             self.assertIn(f'href="candidates/{ATTEMPT}/"', index)
             self.assertIn(f'href="owner/attempts/{ATTEMPT}.html"', index)
+
+
+    def test_reviewer_jobs_associate_with_explore_and_zero_accept_is_marked(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = _build_run_dir(Path(directory), accepted=False)
+            render_owner_views(run_dir / "events.jsonl", run_dir, final=True)
+
+            index = (run_dir / "status.html").read_text(encoding="utf-8")
+            phase_page = (run_dir / "owner" / "phases" / "explore.html").read_text(
+                encoding="utf-8"
+            )
+            review_page = (
+                run_dir / "owner" / "roles" / f"{REVIEW_JOB}.html"
+            ).read_text(encoding="utf-8")
+
+            # Explore says completed-with-zero-accepted instead of a bare
+            # Succeeded, on the canvas node and on the phase page header.
+            self.assertIn("completed with zero accepted candidates", index)
+            self.assertIn("Zero accepted candidates", phase_page)
+
+            # Reviewer invocations associate with explore through their
+            # attempt ids even though their ledger phase is the role name,
+            # which itself is not falsified.
+            self.assertIn(f'href="../roles/{REVIEW_JOB}.html"', phase_page)
+            self.assertIn("role_agent_finished", phase_page)
+            self.assertIn("Phase integrity-reviewer", review_page)
+            self.assertNotIn("No trusted agent jobs recorded", phase_page)
 
     def test_public_bundle_never_contains_owner_material(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

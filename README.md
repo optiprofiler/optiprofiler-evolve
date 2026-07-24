@@ -176,7 +176,10 @@ its `public/` subtree), and print the exact URL to open; `--port` selects a
 port (the default `0` picks a free one and prints it). Pass `--host 0.0.0.0`
 explicitly to allow external access — do that only with `--public`, because
 the owner console is private evidence. `evolve(...)` remains the only
-evolution API; this is a viewing helper.
+evolution API; this is a viewing helper. The server runs until stopped and
+does not exit when the evolve run finishes; if it disappears, the launching
+terminal closed it — start it survivably with
+`nohup python -m optiprofiler_evolve.serve runs/my_solver >/tmp/ope-serve.log 2>&1 &`.
 
 ## Documentation map
 

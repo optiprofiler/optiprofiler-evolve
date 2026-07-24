@@ -9,6 +9,7 @@ sanitized pages remain the responsibility of :mod:`.viewers`.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
@@ -477,14 +478,40 @@ def _role_failure_class(private: Mapping[str, Any]) -> str | None:
     return None
 
 
+_REVIEW_JOB_SUFFIX = re.compile(r"-r\d+$")
+
+
+def _phase_role_values(state: Mapping[str, Any], phase_name: str) -> list[Any]:
+    """Agent jobs belonging to a phase, including reviewer invocations.
+
+    Reviewer jobs are emitted with their role name as the scope phase, so they
+    are associated here through the attempt id their job id derives from.
+    """
+
+    attempt_ids = {
+        str(_mapping(item).get("attempt_id"))
+        for item in _sequence(state.get("attempts"))
+        if str(_mapping(item).get("phase") or "") == phase_name
+    }
+    values = []
+    for value in _sequence(state.get("roles")):
+        role = _mapping(value)
+        if str(role.get("phase") or "") == phase_name:
+            values.append(value)
+            continue
+        base = _REVIEW_JOB_SUFFIX.sub("", str(role.get("job_id")))
+        if base in attempt_ids:
+            values.append(value)
+    return values
+
+
 def _phase_fallback_note(state: Mapping[str, Any], phase_name: str) -> str | None:
     """Fallback marker for a succeeded phase whose agent jobs failed."""
 
     failed = [
         value
-        for value in _sequence(state.get("roles"))
-        if str(_mapping(value).get("phase") or "") == phase_name
-        and _safe_status(_mapping(value).get("status")) == "failed"
+        for value in _phase_role_values(state, phase_name)
+        if _safe_status(_mapping(value).get("status")) == "failed"
     ]
     if not failed:
         return None
@@ -535,6 +562,16 @@ def _render_owner_phase_graph(state: Mapping[str, Any], now: datetime | None) ->
         )
         if fallback:
             extra += f'<span class="sub missing">{_h(fallback)}</span>'
+        if (
+            name == "explore"
+            and status == "succeeded"
+            and summary["attempts"]
+            and not summary["accepted"]
+        ):
+            extra += (
+                '<span class="sub missing">completed with zero accepted candidates'
+                "</span>"
+            )
         if name == "explore" and summary["attempts"]:
             extra += (
                 '<span class="sub">'
@@ -597,6 +634,10 @@ def _render_phase_page(
     fallback = _phase_fallback_note(state, name) if status == "succeeded" else None
     if fallback:
         parts.append(f"Fallback completion ({fallback})")
+    if name == "explore" and status == "succeeded":
+        summary = _matrix_summary(state)
+        if summary["attempts"] and not summary["accepted"]:
+            parts.append("Zero accepted candidates (admission or review failures)")
     subhead = " · ".join(_h(part) for part in parts)
 
     note = _PHASE_NOTES.get(name, "Configured workflow phase.")
@@ -639,11 +680,7 @@ def _render_phase_page(
             f'<section class="owner-section"><h2>Attempts</h2>{attempts}</section>'
         )
 
-    phase_roles = [
-        value
-        for value in _sequence(state.get("roles"))
-        if str(_mapping(value).get("phase") or "") == name
-    ]
+    phase_roles = _phase_role_values(state, name)
     roles_html = _render_owner_roles(
         phase_roles, now, prefix="../roles", details=details
     )
@@ -663,9 +700,12 @@ def _render_phase_page(
     sections.append(
         f'<section class="owner-section"><h2>Evidence</h2>{artifacts_html}</section>'
     )
+    job_ids = frozenset(
+        str(_mapping(value).get("job_id")) for value in phase_roles
+    )
     sections.append(
         '<section class="owner-section"><h2>Key events</h2>'
-        f"{_render_phase_events(events, name)}</section>"
+        f"{_render_phase_events(events, name, job_ids)}</section>"
     )
 
     document = f"""<!doctype html>
@@ -692,11 +732,17 @@ def _render_phase_page(
     return document
 
 
-def _render_phase_events(events: list[dict[str, Any]], phase_name: str) -> str:
+def _render_phase_events(
+    events: list[dict[str, Any]],
+    phase_name: str,
+    job_ids: frozenset[str] = frozenset(),
+) -> str:
     rows = []
     for event in events:
         scope = _mapping(event.get("scope"))
-        if str(scope.get("phase") or "") != phase_name or "attempt_id" in scope:
+        in_phase = str(scope.get("phase") or "") == phase_name
+        in_jobs = str(scope.get("job_id") or "") in job_ids
+        if (not in_phase and not in_jobs) or "attempt_id" in scope:
             continue
         context_bits = [
             f"{key} {scope[key]}"
@@ -1039,8 +1085,14 @@ def _attempt_worker_section(
     private: Mapping[str, Any], run_dir: Path, page_dir: Path, attempt_id: str
 ) -> str:
     worker = _mapping(private.get("worker"))
-    transcript = run_dir / "transcripts" / f"{attempt_id}.jsonl"
-    trace_dir = run_dir / "traces" / attempt_id
+    transcript = (
+        resolve_recorded_path(str(worker.get("transcript") or ""), run_dir)
+        or run_dir / "transcripts" / f"{attempt_id}.jsonl"
+    )
+    trace_dir = (
+        resolve_recorded_path(str(worker.get("trace_chunks") or ""), run_dir)
+        or run_dir / "traces" / attempt_id / "chunks.jsonl"
+    ).parent
     facts = [
         ("Return code", worker.get("returncode", private.get("worker_returncode", "-"))),
         ("Timed out", worker.get("timed_out", private.get("worker_timed_out", "-"))),

@@ -107,6 +107,9 @@ def main(argv: list[str] | None = None) -> int:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    except Exception as exc:  # pragma: no cover - defensive: never die silently
+        print(f"error: server stopped unexpectedly: {exc}", file=sys.stderr)
+        return 1
     finally:
         server.server_close()
     return 0
