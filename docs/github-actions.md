@@ -31,6 +31,23 @@ with the solver. Merely copying `examples/github-actions/evolve.yml` into an
 algorithm repository is insufficient because `pip install -e .` and the Docker
 build contexts in that file deliberately refer to this package repository.
 
+## Deterministic CI versus credentialed E2E
+
+The repository CI is fully deterministic and free of provider credentials: it
+never calls a paid model and defines no provider secrets. The `python` job runs
+the complete unit suite — including the strategy-analysis contract tests that
+script an analyst for the verified-ablation path, the declared
+`not_decomposable` path, and the analyst-failure path — with stub agent
+runners. The `docker` job builds the three runtime images, probes worker
+container isolation and the gateway transport against a fake in-network
+upstream, and scores a seed candidate inside the real evaluator container on a
+single problem with opaque naming (`OPE_RUN_DOCKER_TESTS=1`).
+
+Real end-to-end evolution runs — actual coding models through the provider
+gateway — are owner-run only, with credentials supplied outside version
+control. CI must never grow a step that requires a provider secret; anything
+needing one belongs in an owner-launched run, not in this workflow.
+
 ## Public artifact boundary
 
 The `always()` steps read

@@ -41,7 +41,9 @@ jobs:
           docker run --rm --entrypoint python optiprofiler-evolve-evaluator:ci -c
           'import optiprofiler, optiprofiler_evolve, yaml'
       - run: docker run --rm optiprofiler-evolve-gateway:ci --help
+      - run: python -m pip install -e .
       - run: >-
           OPE_RUN_DOCKER_TESTS=1
           OPE_GATEWAY_IMAGE=optiprofiler-evolve-gateway:ci
+          OPE_EVALUATOR_IMAGE=optiprofiler-evolve-evaluator:ci
           python -m unittest tests.test_docker_integration -v

@@ -15,6 +15,10 @@ GATEWAY_IMAGE = os.environ.get(
     "OPE_GATEWAY_IMAGE",
     "optiprofiler-evolve-gateway:latest",
 )
+EVALUATOR_IMAGE = os.environ.get(
+    "OPE_EVALUATOR_IMAGE",
+    "optiprofiler-evolve-evaluator:latest",
+)
 
 
 @unittest.skipUnless(RUN_DOCKER, "set OPE_RUN_DOCKER_TESTS=1 for Docker integration")
@@ -259,3 +263,81 @@ time.sleep(30)
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(RUN_DOCKER, "set OPE_RUN_DOCKER_TESTS=1 for Docker integration")
+class DockerEvaluatorIntegrationTests(unittest.TestCase):
+    """Deterministic in-container scoring smoke: no model, no secrets."""
+
+    def test_evaluator_scores_a_seed_candidate_in_container(self) -> None:
+        from optiprofiler_evolve.config import EvaluationConfig
+        from optiprofiler_evolve.data import DataPlan
+        from optiprofiler_evolve.evaluation import DockerOptiProfilerEvaluator
+        from optiprofiler_evolve.solver import InterfaceSpec
+
+        solver_source = (
+            "import numpy as np\n\n\n"
+            "def solver(fun, x0):\n"
+            "    x = np.asarray(x0, dtype=float).copy()\n"
+            "    value = fun(x)\n"
+            "    step = np.maximum(1.0, np.abs(x))\n"
+            "    for _ in range(60):\n"
+            "        improved = False\n"
+            "        for index in range(x.size):\n"
+            "            for sign in (-1.0, 1.0):\n"
+            "                trial = x.copy()\n"
+            "                trial[index] += sign * step[index]\n"
+            "                trial_value = fun(trial)\n"
+            "                if trial_value < value:\n"
+            "                    x, value = trial, trial_value\n"
+            "                    improved = True\n"
+            "        if not improved:\n"
+            "            step *= 0.5\n"
+            "    return x\n"
+        )
+        with tempfile.TemporaryDirectory(prefix=".docker-eval-", dir=Path.cwd()) as directory:
+            root = Path(directory)
+            for name in ("candidate", "reference"):
+                (root / name).mkdir()
+                (root / name / "solver.py").write_text(solver_source, encoding="utf-8")
+            data = DataPlan(
+                library="s2mpj",
+                selection={},
+                universe=("ROSENBR",),
+                public=("ROSENBR",),
+                validation=(),
+                hidden=(),
+                smoke=("ROSENBR",),
+                split_seed=0,
+                manifest_hash="ci-smoke",
+                aliases={"ROSENBR": "P_OPAQUE_CI"},
+            )
+            evaluator = DockerOptiProfilerEvaluator(
+                reference=root / "reference",
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                data=data,
+                config=EvaluationConfig(
+                    backend="docker",
+                    docker_image=EVALUATOR_IMAGE,
+                    timeout_seconds=600,
+                    cpus=1,
+                    memory="2g",
+                    pids_limit=256,
+                    benchmark={"max_eval_factor": 5, "n_jobs": 1, "score_only": True},
+                ),
+            )
+            output_dir = root / "controller" / "evaluations" / "seed" / "smoke"
+            result = evaluator.evaluate(root / "candidate", "smoke", output_dir)
+
+            self.assertTrue(result.success, result.error)
+            self.assertEqual(result.problem_count, 1)
+            self.assertAlmostEqual(result.score, 0.5, places=6)
+            self.assertTrue((output_dir / "result.json").is_file())
+            log = (output_dir / "evaluator.log").read_text(encoding="utf-8")
+            self.assertNotIn("ROSENBR", log)
+            self.assertNotIn(
+                "ROSENBR", (output_dir / "result.json").read_text(encoding="utf-8")
+            )
+            # The request staging never lingers next to the output tree.
+            leftovers = list(output_dir.parent.glob(".ope-evaluator-request-*"))
+            self.assertEqual(leftovers, [])
