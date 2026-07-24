@@ -476,6 +476,75 @@ class OwnerViewTests(unittest.TestCase):
             self.assertNotIn("data-wf", public)
             self.assertNotIn("owner/", public)
 
+
+    def test_phase_timeline_started_rows_are_static_and_terminal_pages_never_spin(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = _build_run_dir(Path(directory))
+            extra = [
+                json.dumps(
+                    {
+                        "seq": 102,
+                        "ts": "2026-07-23T10:07:10+00:00",
+                        "kind": "island_analysis_finished",
+                        "scope": {"phase": "explore"},
+                        "status": "failed",
+                        "data": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "seq": 103,
+                        "ts": "2026-07-23T10:07:11+00:00",
+                        "kind": "directions_ready",
+                        "scope": {"phase": "explore"},
+                        "status": "skipped",
+                        "data": {},
+                    }
+                ),
+            ]
+            with (run_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write("\n".join(extra) + "\n")
+
+            render_owner_views(run_dir / "events.jsonl", run_dir, final=True)
+            page = (run_dir / "owner" / "phases" / "explore.html").read_text(
+                encoding="utf-8"
+            )
+
+            # Historical *_started rows are static Started markers, and a
+            # terminal run's phase page contains no live spinner anywhere.
+            self.assertGreaterEqual(page.count(">Started</span>"), 2)
+            self.assertIn('class="st-line started"', page)
+            self.assertNotIn('class="st running"', page)
+            self.assertNotIn('class="st-line running"', page)
+            # Terminal statuses on finished rows do not regress.
+            self.assertIn('class="st-line failed"', page)
+            self.assertIn('class="st-line skipped"', page)
+
+    def test_live_runs_keep_spinners_outside_the_event_timeline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = _build_run_dir(Path(directory), terminal=False)
+            render_owner_views(run_dir / "events.jsonl", run_dir)
+
+            index = (run_dir / "status.html").read_text(encoding="utf-8")
+            self.assertIn('class="st running"', index)
+
+            page = (run_dir / "owner" / "phases" / "explore.html").read_text(
+                encoding="utf-8"
+            )
+            timeline = page[page.index("Key events") :]
+            self.assertIn(">Started</span>", timeline)
+            self.assertNotIn('class="st running"', timeline)
+
+            # The sanitized public page has no raw event timeline at all.
+            public_events = run_dir / "public_events.jsonl"
+            project_public_events(run_dir / "events.jsonl", public_events)
+            render_status(public_events, run_dir / "public_status.html")
+            public = (run_dir / "public_status.html").read_text(encoding="utf-8")
+            self.assertNotIn("Key events", public)
+            self.assertNotIn("st-line started", public)
+
     def test_public_bundle_never_contains_owner_material(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = _build_run_dir(Path(directory))

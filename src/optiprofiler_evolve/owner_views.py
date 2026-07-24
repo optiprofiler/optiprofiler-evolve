@@ -59,6 +59,12 @@ _TRACE_FILES = (
     "workspace.json",
 )
 
+# Static marker for historical *_started ledger rows; never animated.
+_STARTED_BADGE = (
+    '<span class="st-line started">'
+    '<span class="st started" role="img" aria-label="Started"></span>Started</span>'
+)
+
 _BANNER = (
     '<div class="private-banner"><strong>PRIVATE</strong><span>Owner evidence view: '
     "validation and hidden results, reviewer findings, provider details, and raw "
@@ -128,6 +134,9 @@ _OWNER_STYLE = """
     .job-graph a.job-node { color: var(--text); }
     .job-graph a.job-node:hover { border-color: var(--blue); text-decoration: none; }
     .phase-events td { font-size: 12px; }
+    .st.started { background: transparent; border: 2px solid var(--edge);
+      animation: none; }
+    .st-line.started { color: var(--muted); }
     @media (max-width: 820px) {
       .kv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .population-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -651,12 +660,21 @@ def _render_phase_events(events: list[dict[str, Any]], phase_name: str) -> str:
             if key in scope
         ]
         moment = _parse_ts(event.get("ts"))
+        # A *_started row records that something began at that moment; its
+        # ledger status ("running") is historical, not the current state, so
+        # it renders as a static Started marker. Live spinners belong to the
+        # lifecycle views (workflow nodes, attempt and job pages), which show
+        # the aggregated current status.
+        if str(event.get("kind", "")).endswith("_started"):
+            status_html = _STARTED_BADGE
+        else:
+            status_html = _status_line(_safe_status(event.get("status")))
         rows.append(
             "<tr>"
             f"<td>{_h(event.get('seq'))}</td>"
             f"<td>{_h(moment.strftime('%H:%M:%S') if moment else '-')}</td>"
             f"<td><code>{_h(event.get('kind'))}</code></td>"
-            f"<td>{_status_line(_safe_status(event.get('status')))}</td>"
+            f"<td>{status_html}</td>"
             f"<td>{_h(', '.join(context_bits) or '-')}</td>"
             "</tr>"
         )
