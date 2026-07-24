@@ -138,6 +138,9 @@ _OWNER_STYLE = """
     .st.started { background: transparent; border: 2px solid var(--edge);
       animation: none; }
     .st-line.started { color: var(--muted); }
+    .st.quarantined { background: var(--amber); animation: none; }
+    .st.quarantined::after { content: "!"; }
+    .st-line.quarantined { color: var(--amber); }
     @media (max-width: 820px) {
       .kv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .population-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -459,6 +462,37 @@ _PHASE_NOTES = {
 }
 
 
+def _attempt_public_score(
+    attempt: Mapping[str, Any], private: Mapping[str, Any]
+) -> float | None:
+    """The public score, or None when the ledger shows no evaluation evidence.
+
+    New ledgers write null for unevaluated attempts, but historical ones carry
+    a 0.0 placeholder. Authoritative evidence is a step that recorded a
+    public_score metric (or a validated record, which implies evaluation);
+    a 0.0 without either is the legacy placeholder, not a real score.
+    """
+
+    score = attempt.get("public_score", private.get("public_score"))
+    if not isinstance(score, (int, float)):
+        return None
+    evaluated = any(
+        "public_score" in _mapping(_mapping(step).get("metrics"))
+        for step in _mapping(private.get("steps")).values()
+    )
+    if score == 0.0 and not evaluated and private.get("valid") is not True:
+        return None
+    return float(score)
+
+
+def _attempt_display_status(status: str, private: Mapping[str, Any]) -> str:
+    """Presentation status: quarantined is failure by review, shown as such."""
+
+    if status == "failed" and _mapping(private).get("gate") == "quarantined":
+        return "quarantined"
+    return status
+
+
 def _role_failure_class(private: Mapping[str, Any]) -> str | None:
     """Concise reason a trusted agent job failed, from its finished event."""
 
@@ -641,8 +675,27 @@ def _render_phase_page(
     subhead = " · ".join(_h(part) for part in parts)
 
     note = _PHASE_NOTES.get(name, "Configured workflow phase.")
-    component = phase_component(read_json(run_dir / "provenance.json"), name)
+    provenance = read_json(run_dir / "provenance.json")
+    component = phase_component(provenance, name)
     options = _mapping(component.get("options"))
+    if not options and name == "explore":
+        resolved = _mapping(_mapping(provenance).get("config"))
+        evolution = _mapping(resolved.get("evolution"))
+        workers_config = _mapping(resolved.get("workers"))
+        effective = {
+            key: evolution.get(key)
+            for key in (
+                "islands",
+                "iterations",
+                "attempts_per_island",
+                "population_per_island",
+                "migration_interval",
+            )
+            if evolution.get(key) is not None
+        }
+        if workers_config.get("max_parallel") is not None:
+            effective["workers.max_parallel"] = workers_config.get("max_parallel")
+        options = effective
     if options:
         option_rows = "".join(
             f"<tr><td><code>{_h(key)}</code></td><td><code>{_h(compact_text(value))}"
@@ -654,7 +707,9 @@ def _render_phase_page(
             f"</tr></thead><tbody>{option_rows}</tbody></table></div>"
         )
     elif component:
-        config_html = "<p>No options configured; the phase runs with its defaults.</p>"
+        config_html = (
+            "<p>No options configured; the phase runs with its defaults.</p>"
+        )
     else:
         config_html = '<p class="missing">Phase provenance unavailable.</p>'
 
@@ -874,9 +929,10 @@ def _render_owner_attempt_groups(
         for member in members:
             attempt_id = str(member.get("attempt_id"))
             status = _safe_status(member.get("status"))
-            score = member.get("public_score")
-            score_text = f"{score:.4f}" if isinstance(score, (int, float)) else "-"
             private = _mapping(private_attempts.get(attempt_id))
+            display = _attempt_display_status(status, private)
+            score = _attempt_public_score(member, private)
+            score_text = f"{score:.4f}" if isinstance(score, (int, float)) else "-"
             validation = private.get("validation_score")
             validation_text = (
                 f"{validation:.4f}"
@@ -892,7 +948,7 @@ def _render_owner_attempt_groups(
                 )
             rows.append(
                 f'<a class="attempt-link" href="{_href(prefix, attempt_id)}">'
-                f"{_status_icon(status)}<code>{_h(attempt_id)}</code>"
+                f"{_status_icon(display)}<code>{_h(attempt_id)}</code>"
                 f'<span class="grow">Island {_h(island if island is not None else "-")} '
                 f"{failure_note}</span>"
                 f'<span class="score">Public {_h(score_text)}</span>'
@@ -1006,7 +1062,8 @@ def _attempt_header(
 ) -> str:
     attempt_id = str(attempt.get("attempt_id"))
     status = _safe_status(attempt.get("status"))
-    parts = [_label(status)]
+    display = _attempt_display_status(status, private)
+    parts = [_label(display)]
     duration = _duration_text(attempt, now)
     if duration:
         parts.append(f"Duration {duration}")
@@ -1027,7 +1084,7 @@ def _attempt_header(
     accepted = private.get("accepted")
     accepted_text = "Yes" if accepted is True else "No" if accepted is False else "-"
     return (
-        f'<div class="run-head">{_status_icon(status)}'
+        f'<div class="run-head">{_status_icon(display)}'
         f'<div><h1><code>{_h(attempt_id)}</code>'
         '<span class="owner-tag">Private</span></h1>'
         f'<p class="subhead">{subhead}</p></div></div>'
@@ -1054,8 +1111,12 @@ def _attempt_scores(
     page_dir: Path,
     attempt_id: str,
 ) -> str:
-    public = attempt.get("public_score", private.get("public_score"))
-    public_text = f"{public:.6f}" if isinstance(public, (int, float)) else "unavailable"
+    public = _attempt_public_score(attempt, private)
+    public_text = (
+        f"{public:.6f}"
+        if isinstance(public, (int, float))
+        else "unavailable (not evaluated)"
+    )
     validation_dir = run_dir / "controller" / "evaluations" / attempt_id / "validation"
     validation = private.get("validation_score")
     if validation_dir.is_dir() and isinstance(validation, (int, float)):

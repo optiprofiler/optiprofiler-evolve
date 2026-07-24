@@ -680,6 +680,112 @@ class OwnerViewTests(unittest.TestCase):
             self.assertIn("Phase integrity-reviewer", review_page)
             self.assertNotIn("No trusted agent jobs recorded", phase_page)
 
+
+    def test_legacy_ledger_scores_quarantine_badge_and_effective_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            run_dir.mkdir()
+            scope = {"phase": "explore", "iteration": 1, "island": 1, "attempt_id": "leg-1"}
+            step = {**scope, "step": "mutate", "step_idx": 0}
+            rows = [
+                ("2026-07-24T09:00:00+00:00", "run_started", "running", {}, {}),
+                ("2026-07-24T09:00:01+00:00", "phase_started", "running", {"phase": "explore"}, {}),
+                ("2026-07-24T09:00:02+00:00", "attempt_started", "running", scope,
+                 {"parent_id": "seed", "worker": "claude:m"}),
+                ("2026-07-24T09:00:03+00:00", "step_started", "running", step, {}),
+                # Historical ledgers: mutate metrics only, no public_score.
+                ("2026-07-24T09:01:03+00:00", "step_finished", "succeeded", step,
+                 {"verdict": "pass", "metrics": {"worker_returncode": 0}, "artifacts": [], "error": None}),
+                ("2026-07-24T09:01:10+00:00", "integrity_review_finished", "succeeded", scope,
+                 {"gate": "quarantined"}),
+                # Historical placeholder: 0.0 even though never publicly evaluated.
+                ("2026-07-24T09:01:20+00:00", "attempt_finished", "failed", scope,
+                 {"candidate_id": "leg-1", "parent_id": "seed", "public_score": 0.0,
+                  "valid": False, "accepted": False, "error": "quarantined"}),
+                ("2026-07-24T09:01:30+00:00", "phase_finished", "succeeded", {"phase": "explore"}, {}),
+                ("2026-07-24T09:01:31+00:00", "run_finished", "succeeded", {}, {"best_candidate_id": "seed"}),
+            ]
+            _write_events(run_dir / "events.jsonl", rows)
+            (run_dir / "provenance.json").write_text(
+                json.dumps(
+                    {
+                        "components": {"phases": [{"name": "explore", "options": {}}]},
+                        "config": {
+                            "evolution": {
+                                "islands": 2,
+                                "iterations": 1,
+                                "attempts_per_island": 1,
+                                "population_per_island": 4,
+                                "migration_interval": 2,
+                            },
+                            "workers": {"max_parallel": 2},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            render_owner_views(run_dir / "events.jsonl", run_dir, final=True)
+            index = (run_dir / "status.html").read_text(encoding="utf-8")
+            attempt_page = (run_dir / "owner" / "attempts" / "leg-1.html").read_text(
+                encoding="utf-8"
+            )
+            phase_page = (run_dir / "owner" / "phases" / "explore.html").read_text(
+                encoding="utf-8"
+            )
+
+            # (A) The legacy 0.0 placeholder never renders as a real score.
+            self.assertIn("Public -", index)
+            self.assertNotIn("0.0000", index)
+            self.assertIn("unavailable (not evaluated)", attempt_page)
+            self.assertNotIn("0.000000", attempt_page)
+
+            # (C) Quarantine-by-review is distinct from a generic failure.
+            self.assertIn('class="st quarantined"', index)
+            self.assertIn('aria-label="Quarantined"', index)
+            self.assertIn(">Quarantined<", attempt_page.replace("</h1>", "<"))
+            self.assertIn('class="st quarantined"', attempt_page)
+
+            # (B) Explore shows its effective settings, not "No options".
+            self.assertNotIn("No options configured", phase_page)
+            self.assertIn("islands", phase_page)
+            self.assertIn("attempts_per_island", phase_page)
+            self.assertIn("workers.max_parallel", phase_page)
+
+    def test_new_style_ledger_keeps_real_scores_and_zero_with_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = _build_run_dir(Path(directory))
+            # A genuine 0.0 with step evidence must keep rendering as 0.0.
+            zero_scope = {
+                "phase": "explore", "iteration": 1, "island": 0, "attempt_id": "zero-1"
+            }
+            zero_step = {**zero_scope, "step": "public_evaluate", "step_idx": 3}
+            extra = [
+                ("2026-07-23T10:08:50+00:00", "attempt_started", "running", zero_scope,
+                 {"parent_id": "seed", "worker": "claude:m"}),
+                ("2026-07-23T10:08:55+00:00", "step_finished", "succeeded", zero_step,
+                 {"verdict": "pass", "metrics": {"public_score": 0.0}, "artifacts": [], "error": None}),
+                ("2026-07-23T10:09:00+00:00", "attempt_finished", "failed", zero_scope,
+                 {"candidate_id": "zero-1", "parent_id": "seed", "public_score": 0.0,
+                  "valid": False, "accepted": False, "error": "quarantined"}),
+            ]
+            with (run_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
+                for seq, (ts, kind, status, scope, data) in enumerate(extra, start=200):
+                    handle.write(
+                        json.dumps(
+                            {"seq": seq, "ts": ts, "kind": kind, "scope": scope,
+                             "status": status, "data": data},
+                            sort_keys=True,
+                        )
+                        + "\n"
+                    )
+
+            render_owner_views(run_dir / "events.jsonl", run_dir, final=True)
+            index = (run_dir / "status.html").read_text(encoding="utf-8")
+
+            self.assertIn("Public 0.7500", index)  # evaluated real score intact
+            self.assertIn("Public 0.0000", index)  # genuine zero with evidence intact
+
     def test_public_bundle_never_contains_owner_material(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = _build_run_dir(Path(directory))
