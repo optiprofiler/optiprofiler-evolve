@@ -339,7 +339,7 @@ def _render_owner_index(
     refresh = (
         '<meta http-equiv="refresh" content="5">' if run_status in {"pending", "running"} else ""
     )
-    head = _owner_run_head(run, run_status, state, now)
+    head = _owner_run_head(run, run_status, state, now, run_dir)
     phases = _render_owner_phase_graph(state, now)
     iterations = _render_iterations(state.get("iterations"), now)
     attempts_by_id = {
@@ -349,7 +349,7 @@ def _render_owner_index(
     matrix = _render_matrix(state.get("matrix"), attempts_by_id, now)
     population_policy = _render_population_policy(run_dir)
     attempts = _render_owner_attempt_groups(state.get("attempts"), details, now)
-    roles = _render_owner_roles(state.get("roles"), now)
+    roles = _render_owner_roles(state.get("roles"), now, details=details)
     coverage = _render_coverage(state.get("trace_coverage"))
     document = f"""<!doctype html>
 <html lang="en">
@@ -458,6 +458,40 @@ _PHASE_NOTES = {
 }
 
 
+def _role_failure_class(private: Mapping[str, Any]) -> str | None:
+    """Concise reason a trusted agent job failed, from its finished event."""
+
+    missing = _sequence(private.get("missing_outputs"))
+    if missing:
+        return "missing outputs: " + ", ".join(str(name) for name in missing)
+    if private.get("timed_out"):
+        return "timeout"
+    if private.get("cancelled"):
+        return "cancelled"
+    reason = private.get("termination_reason")
+    if reason:
+        return str(reason)
+    returncode = private.get("returncode")
+    if isinstance(returncode, int) and returncode != 0:
+        return f"exit {returncode}"
+    return None
+
+
+def _phase_fallback_note(state: Mapping[str, Any], phase_name: str) -> str | None:
+    """Fallback marker for a succeeded phase whose agent jobs failed."""
+
+    failed = [
+        value
+        for value in _sequence(state.get("roles"))
+        if str(_mapping(value).get("phase") or "") == phase_name
+        and _safe_status(_mapping(value).get("status")) == "failed"
+    ]
+    if not failed:
+        return None
+    jobs = "job" if len(failed) == 1 else "jobs"
+    return f"fallback: {len(failed)} agent {jobs} failed"
+
+
 def _matrix_summary(state: Mapping[str, Any]) -> dict[str, int]:
     islands: set[object] = set()
     iterations: set[object] = set()
@@ -496,8 +530,13 @@ def _render_owner_phase_graph(state: Mapping[str, Any], now: datetime | None) ->
         if duration:
             sub += f" · {duration}"
         extra = ""
+        fallback = (
+            _phase_fallback_note(state, name) if status == "succeeded" else None
+        )
+        if fallback:
+            extra += f'<span class="sub missing">{_h(fallback)}</span>'
         if name == "explore" and summary["attempts"]:
-            extra = (
+            extra += (
                 '<span class="sub">'
                 f"{summary['islands']} islands · {summary['iterations']} iterations · "
                 f"{summary['attempts']} attempts · {summary['accepted']} accepted · "
@@ -555,6 +594,9 @@ def _render_phase_page(
     if duration:
         parts.append(f"Duration {duration}")
     parts.append(position)
+    fallback = _phase_fallback_note(state, name) if status == "succeeded" else None
+    if fallback:
+        parts.append(f"Fallback completion ({fallback})")
     subhead = " · ".join(_h(part) for part in parts)
 
     note = _PHASE_NOTES.get(name, "Configured workflow phase.")
@@ -602,7 +644,9 @@ def _render_phase_page(
         for value in _sequence(state.get("roles"))
         if str(_mapping(value).get("phase") or "") == name
     ]
-    roles_html = _render_owner_roles(phase_roles, now, prefix="../roles")
+    roles_html = _render_owner_roles(
+        phase_roles, now, prefix="../roles", details=details
+    )
     sections.append(
         f'<section class="owner-section"><h2>Agent jobs in this phase</h2>{roles_html}</section>'
     )
@@ -699,6 +743,7 @@ def _owner_run_head(
     run_status: str,
     state: Mapping[str, Any],
     now: datetime | None,
+    run_dir: Path | None = None,
 ) -> str:
     parts = [_label(run_status)]
     started = _parse_ts(_mapping(run.get("started")).get("ts"))
@@ -710,13 +755,35 @@ def _owner_run_head(
     parts.append(f"Event {state.get('last_seq', 0)}")
     subhead = " · ".join(_h(part) for part in parts)
     best = run.get("best_candidate_id") or "Not selected"
+    known = {
+        str(_mapping(item).get("attempt_id")) for item in _sequence(state.get("attempts"))
+    }
+    if isinstance(best, str) and best in known:
+        best_html = f'<a href="{_href("owner/attempts", best)}"><code>{_h(best)}</code></a>'
+    else:
+        best_html = f"<code>{_h(best)}</code>"
+    champion_links = []
+    if run_dir is not None and isinstance(best, str):
+        if (run_dir / "final_solver").is_dir():
+            champion_links.append('<a href="final_solver/"><code>final_solver/</code></a>')
+        candidate_tree = run_dir / "candidates" / best
+        if candidate_tree.is_dir() and safe_page_name(best):
+            champion_links.append(
+                f'<a href="candidates/{_h(quote(best))}/"><code>candidates/{_h(best)}/'
+                "</code></a>"
+            )
+    champion_html = (
+        '<span class="sub">' + " · ".join(champion_links) + "</span>"
+        if champion_links
+        else ""
+    )
     return (
         f'<div class="run-head">{_status_icon(run_status)}'
         f'<div><h1>Evolution run<span class="owner-tag">Private</span></h1>'
         f'<p class="subhead">{subhead}</p></div></div>'
         '<div class="run-summary">'
-        f'<div class="metric"><span>Best candidate</span><strong><code>{_h(best)}'
-        "</code></strong></div>"
+        f'<div class="metric"><span>Best candidate</span><strong>{best_html}'
+        f"</strong>{champion_html}</div>"
         f'<div class="metric"><span>Iterations</span>'
         f"<strong>{len(_sequence(state.get('iterations')))}</strong></div>"
         f'<div class="metric"><span>Attempts</span>'
@@ -771,10 +838,17 @@ def _render_owner_attempt_groups(
                 else "-"
             )
             island = member.get("island")
+            failure_note = ""
+            if status == "failed" and private.get("error"):
+                failure_note = (
+                    f'<span class="missing">{_h(compact_text(str(private.get("error"))[:80]))}'
+                    "</span>"
+                )
             rows.append(
                 f'<a class="attempt-link" href="{_href(prefix, attempt_id)}">'
                 f"{_status_icon(status)}<code>{_h(attempt_id)}</code>"
-                f'<span class="grow">Island {_h(island if island is not None else "-")}</span>'
+                f'<span class="grow">Island {_h(island if island is not None else "-")} '
+                f"{failure_note}</span>"
                 f'<span class="score">Public {_h(score_text)}</span>'
                 f'<span class="score">Val {_h(validation_text)}</span>'
                 f'<span class="dur">{_h(_duration_text(member, now))}</span></a>'
@@ -792,20 +866,28 @@ def _render_owner_roles(
     now: datetime | None,
     *,
     prefix: str = "owner/roles",
+    details: Mapping[str, Any] | None = None,
 ) -> str:
     roles = _sequence(values)
     if not roles:
         return '<p class="empty">No trusted agent jobs recorded.</p>'
+    private_roles = _mapping(_mapping(details or {}).get("roles"))
     rows = []
     for value in roles:
         role = _mapping(value)
         job_id = str(role.get("job_id"))
+        status = _safe_status(role.get("status"))
+        status_html = _status_line(status)
+        if status == "failed":
+            failure = _role_failure_class(_mapping(private_roles.get(job_id)))
+            if failure:
+                status_html += f'<div class="missing">{_h(failure)}</div>'
         rows.append(
             "<tr>"
             f'<td><a href="{_href(prefix, job_id)}"><code>{_h(job_id)}</code></a></td>'
             f"<td>{_h(role.get('role'))}</td>"
             f"<td>{_h(role.get('phase') or '-')}</td>"
-            f"<td>{_status_line(_safe_status(role.get('status')))}</td>"
+            f"<td>{status_html}</td>"
             f"<td>{_h(_duration_text(role, now) or '-')}</td>"
             "</tr>"
         )
@@ -1276,18 +1358,36 @@ def _render_role_page(
     if role.get("phase"):
         parts.append(f"Phase {role.get('phase')}")
     subhead = " · ".join(_h(str(part)) for part in parts)
+    failure = _role_failure_class(private) if status == "failed" else None
     facts = [
         ("Role", role_name or "-"),
         ("Return code", private.get("returncode", "-")),
         ("Timed out", private.get("timed_out", "-")),
         ("Termination", private.get("termination_reason") or "-"),
     ]
+    if failure:
+        facts.append(("Failure", failure))
+    gateway_outcome = private.get("provider_gateway_outcome")
+    if gateway_outcome:
+        count = private.get("provider_gateway_request_count")
+        gateway_text = str(gateway_outcome)
+        if isinstance(count, int):
+            gateway_text += f" ({count} requests)"
+        facts.append(("Provider gateway", gateway_text))
     kv = "".join(
         f"<div><span>{_h(name)}</span><strong>{_h(value)}</strong></div>"
         for name, value in facts
     )
     workspace = run_dir / "research" / "roles" / role_name / job_id
     outputs = _sequence(private.get("outputs"))
+    missing_outputs = _sequence(private.get("missing_outputs"))
+    missing_note = ""
+    if status == "failed" and missing_outputs:
+        names = ", ".join(f"<code>{_h(name)}</code>" for name in missing_outputs)
+        missing_note = (
+            '<p class="truncated">Job failed: it finished its provider requests '
+            f"but never wrote the declared outputs {names}.</p>"
+        )
     output_items = []
     for name in outputs:
         target = resolve_role_output(workspace, str(name))
@@ -1327,7 +1427,7 @@ def _render_role_page(
     <div class="kv">{kv}</div>
     <section class="owner-section"><h2>Transcript (messages and tool calls)</h2>{transcript_html}</section>
     <section class="owner-section"><h2>Raw capture</h2>{streams_html}<ul class="evidence-list">{"".join(f"<li>{item}</li>" for item in links)}</ul></section>
-    <section class="owner-section"><h2>Declared outputs</h2>{outputs_html}</section>
+    <section class="owner-section"><h2>Declared outputs</h2>{missing_note}{outputs_html}</section>
     <p class="footnote">Private owner evidence page. Share only the public/ bundle.</p>
   </main>
 </body>

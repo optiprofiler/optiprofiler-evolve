@@ -104,6 +104,7 @@ class _Attempt:
     changed: tuple[str, ...]
     worker_outcome: WorkerOutcome
     step_results: tuple[StepResult, ...]
+    evaluated: bool = False
 
 
 class _AgentRunnerAdapter:
@@ -212,6 +213,10 @@ class EvolutionEngine:
         self.final_result: FinalistResult | None = None
         self.final_solver: Path | None = None
         self.result: EvolveResult | None = None
+        self._render_lock = threading.Lock()
+        self._refresh_stop = threading.Event()
+        self._refresh_thread: threading.Thread | None = None
+        self._refresh_poll_seconds = 2.0
         self.direction_assignments: dict[int, dict[str, object]] = {}
         self.variant_handles: dict[str, VariantHandle] = {}
         self.variant_bases: dict[str, Path] = {}
@@ -460,6 +465,11 @@ class EvolutionEngine:
         self._initialize_run_directory()
         self._cancellation_event.clear()
         self.events = EventWriter(self.run_dir / "events.jsonl")
+        self._refresh_stop.clear()
+        self._refresh_thread = threading.Thread(
+            target=self._refresh_status_loop, name="ope-status-refresher", daemon=True
+        )
+        self._refresh_thread.start()
         self.run_id = secrets.token_hex(16)
         reviewer_worker = self.config.integrity_review.resolved_worker(self.config.workers)
         provenance_workers = self.config.workers.pool
@@ -559,6 +569,10 @@ class EvolutionEngine:
                     )
                 except Exception:
                     pass
+            self._refresh_stop.set()
+            if self._refresh_thread is not None:
+                self._refresh_thread.join(timeout=10)
+                self._refresh_thread = None
             try:
                 if self.events is not None:
                     self._refresh_status(include_report=True)
@@ -1077,7 +1091,8 @@ class EvolutionEngine:
                 valid=False,
                 error=f"{type(exc).__name__}: {exc}",
             )
-        return _Attempt(record, changed, outcome, tuple(results))
+        evaluated = any("public_score" in result.metrics for result in results)
+        return _Attempt(record, changed, outcome, tuple(results), evaluated)
 
     def _failed_attempt(
         self,
@@ -1148,7 +1163,7 @@ class EvolutionEngine:
             "attempt_index": record.attempt_index,
             "parent_id": record.parent_id,
             "guidance": record.guidance,
-            "public_score": record.public_score,
+            "public_score": record.public_score if attempt.evaluated else None,
             "validation_score": record.validation_score,
             "review_verdict": record.review_verdict,
             "review_report": record.review_report,
@@ -1446,31 +1461,46 @@ class EvolutionEngine:
 
         return emit
 
+    def _refresh_status_loop(self) -> None:
+        # Events stream into the ledger continuously, but the main thread
+        # only refreshes at attempt and phase boundaries; during a long
+        # agent invocation the on-disk dashboards would otherwise go stale
+        # for the whole invocation. The ledger stays the single source of
+        # truth; this thread merely re-renders projections of it.
+        while not self._refresh_stop.wait(self._refresh_poll_seconds):
+            try:
+                self._refresh_status_if_due(interval_seconds=4.0)
+            except Exception:
+                continue
+
     def _refresh_status(self, *, include_report: bool = False) -> None:
         if self.events is None:
             return
-        self.events.flush()
-        try:
-            public_events = self.run_dir / "public_events.jsonl"
-            project_public_events(self.run_dir / "events.jsonl", public_events)
-            state = render_status(public_events, self.run_dir / "public_status.html")
-            render_public_report(state, self.run_dir / "PUBLIC_REPORT.md")
-            if include_report:
-                render_final_report(public_events, self.run_dir / "report.html")
-            materialize_public_bundle(self.run_dir)
-            render_owner_views(
-                self.run_dir / "events.jsonl",
-                self.run_dir,
-                final=include_report,
-            )
-        except Exception as exc:
-            self._emit(
-                "public_view_refresh_failed",
-                "failed",
-                data={"error": f"{type(exc).__name__}: {exc}"},
-            )
-        finally:
-            self._last_status_refresh = time.monotonic()
+        with self._render_lock:
+            if self.events is None:
+                return
+            self.events.flush()
+            try:
+                public_events = self.run_dir / "public_events.jsonl"
+                project_public_events(self.run_dir / "events.jsonl", public_events)
+                state = render_status(public_events, self.run_dir / "public_status.html")
+                render_public_report(state, self.run_dir / "PUBLIC_REPORT.md")
+                if include_report:
+                    render_final_report(public_events, self.run_dir / "report.html")
+                materialize_public_bundle(self.run_dir)
+                render_owner_views(
+                    self.run_dir / "events.jsonl",
+                    self.run_dir,
+                    final=include_report,
+                )
+            except Exception as exc:
+                self._emit(
+                    "public_view_refresh_failed",
+                    "failed",
+                    data={"error": f"{type(exc).__name__}: {exc}"},
+                )
+            finally:
+                self._last_status_refresh = time.monotonic()
 
     def _refresh_status_if_due(self, interval_seconds: float = 1.0) -> None:
         if time.monotonic() - self._last_status_refresh >= interval_seconds:

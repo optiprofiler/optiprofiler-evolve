@@ -545,6 +545,109 @@ class OwnerViewTests(unittest.TestCase):
             self.assertNotIn("Key events", public)
             self.assertNotIn("st-line started", public)
 
+
+    def test_failure_classes_fallback_markers_and_champion_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = _build_run_dir(Path(directory))
+            extra = [
+                json.dumps(
+                    {
+                        "seq": 110,
+                        "ts": "2026-07-23T10:07:20+00:00",
+                        "kind": "role_agent_started",
+                        "scope": {"role": "direction-scout", "job_id": "scout-x", "phase": "explore"},
+                        "status": "running",
+                        "data": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "seq": 111,
+                        "ts": "2026-07-23T10:08:20+00:00",
+                        "kind": "role_agent_finished",
+                        "scope": {"role": "direction-scout", "job_id": "scout-x", "phase": "explore"},
+                        "status": "failed",
+                        "data": {
+                            "returncode": 0,
+                            "timed_out": False,
+                            "outputs": [],
+                            "missing_outputs": ["direction_cards.json"],
+                            "provider_gateway_outcome": "completed",
+                            "provider_gateway_request_count": 9,
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "seq": 112,
+                        "ts": "2026-07-23T10:08:30+00:00",
+                        "kind": "attempt_started",
+                        "scope": {"phase": "explore", "iteration": 1, "island": 0, "attempt_id": "it001-i00-a01"},
+                        "status": "running",
+                        "data": {"parent_id": "seed", "worker": "claude:m"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "seq": 113,
+                        "ts": "2026-07-23T10:08:40+00:00",
+                        "kind": "attempt_finished",
+                        "scope": {"phase": "explore", "iteration": 1, "island": 0, "attempt_id": "it001-i00-a01"},
+                        "status": "failed",
+                        "data": {
+                            "candidate_id": "it001-i00-a01",
+                            "parent_id": "seed",
+                            "public_score": None,
+                            "valid": False,
+                            "accepted": False,
+                            "error": "worker_failed_not_admitted: returncode=1, termination=error_max_budget_usd",
+                            "worker_returncode": 1,
+                        },
+                    }
+                ),
+            ]
+            with (run_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write("\n".join(extra) + "\n")
+            (run_dir / "final_solver").mkdir()
+            (run_dir / "final_solver" / "solver.py").write_text("champion", encoding="utf-8")
+            (run_dir / "candidates" / ATTEMPT).mkdir(parents=True)
+            (run_dir / "candidates" / ATTEMPT / "solver.py").write_text("champion", encoding="utf-8")
+
+            render_owner_views(run_dir / "events.jsonl", run_dir, final=True)
+            index = (run_dir / "status.html").read_text(encoding="utf-8")
+            role_page = (run_dir / "owner" / "roles" / "scout-x.html").read_text(
+                encoding="utf-8"
+            )
+            phase_page = (run_dir / "owner" / "phases" / "explore.html").read_text(
+                encoding="utf-8"
+            )
+
+            # Missing-output failures are explicit wherever the job appears.
+            self.assertIn("missing outputs: direction_cards.json", index)
+            self.assertIn("missing outputs: direction_cards.json", role_page)
+            self.assertIn("never wrote the declared outputs", role_page)
+            self.assertIn("completed", role_page)  # gateway did finish its requests
+
+            # Fallback completion is marked without recoloring the failed job.
+            self.assertIn("fallback: 1 agent job failed", index)
+            self.assertIn("Fallback completion", phase_page)
+            self.assertIn('class="st-line failed"', phase_page)
+
+            # Not-evaluated is distinct from a numeric zero.
+            self.assertIn("Public -", index)
+            self.assertNotIn("Public 0.0000", index)
+            self.assertIn("Public 0.7500", index)
+            attempt_page = (
+                run_dir / "owner" / "attempts" / "it001-i00-a01.html"
+            ).read_text(encoding="utf-8")
+            self.assertIn("unavailable", attempt_page)
+            self.assertIn("worker_failed_not_admitted", index)
+
+            # The champion has stable, linked, durable paths.
+            self.assertIn('href="final_solver/"', index)
+            self.assertIn(f'href="candidates/{ATTEMPT}/"', index)
+            self.assertIn(f'href="owner/attempts/{ATTEMPT}.html"', index)
+
     def test_public_bundle_never_contains_owner_material(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = _build_run_dir(Path(directory))

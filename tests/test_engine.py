@@ -5,6 +5,7 @@ import os
 import signal
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -119,6 +120,36 @@ def reviewer_config(*, strict: bool = False) -> dict:
 
 class EngineTests(unittest.TestCase):
 
+    def test_background_refresher_rerenders_between_engine_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            engine = EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=(".",),
+                config=load_config(minimal_config()),
+                run_dir=root / "run",
+                agent_runner=fake_agent_runner,
+                evaluator_factory=fake_evaluator_factory,
+            )
+            calls: list[int] = []
+            engine._refresh_status = lambda **_kwargs: calls.append(1)
+            engine._refresh_poll_seconds = 0.02
+            engine._last_status_refresh = 0.0
+            thread = threading.Thread(target=engine._refresh_status_loop, daemon=True)
+            thread.start()
+            time.sleep(0.3)
+            engine._refresh_stop.set()
+            thread.join(timeout=2)
+
+            self.assertFalse(thread.is_alive())
+            self.assertGreaterEqual(len(calls), 1)
+
+
     def test_nonzero_worker_exit_blocks_admission_and_keeps_evidence(self) -> None:
         def budget_exhausted_runner(**kwargs) -> AgentRunResult:
             workspace = kwargs["workspace"]
@@ -173,6 +204,7 @@ class EngineTests(unittest.TestCase):
                 self.assertFalse(event["data"]["valid"])
                 self.assertIn("worker_failed_not_admitted", event["data"]["error"])
                 self.assertIn("error_max_budget_usd", event["data"]["error"])
+                self.assertIsNone(event["data"]["public_score"])
             mutate_steps = [
                 event
                 for event in events
@@ -233,6 +265,11 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(FakeEvaluator.calls.count("public_score"), 3)
             self.assertEqual(FakeEvaluator.calls.count("hidden"), 1)
             self.assertIn("improved", (result.best_solver / "solver.py").read_text())
+            self.assertEqual(result.best_solver, result.run_dir / "final_solver")
+            self.assertTrue((result.run_dir / "final_solver" / "solver.py").is_file())
+            self.assertTrue(
+                (result.run_dir / "candidates" / "it001-i00-a00" / "solver.py").is_file()
+            )
             first_workspace = result.run_dir / "workspaces" / "it001-i00-a00"
             second_workspace = result.run_dir / "workspaces" / "it001-i01-a00"
             self.assertTrue(first_workspace.is_dir())
