@@ -666,6 +666,9 @@ class EvolutionEngine:
                 "interface": f"{self.interface.file}:{self.interface.function}",
                 "runtime": self.runtime,
                 "editable": list(self.editable),
+                "forbidden_candidate_imports": list(
+                    self.config.evaluation.forbidden_candidate_imports
+                ),
             },
         )
         self.evaluator = self.evaluator_factory(

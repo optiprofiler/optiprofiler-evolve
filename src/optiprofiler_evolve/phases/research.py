@@ -1003,6 +1003,10 @@ Research up to {max_directions} genuinely different DFO algorithm directions for
 You are read-only with respect to the seed. Do not implement or evaluate a solver. Use web
 search only for public literature and document every claim with a URL.
 
+Every proposed tactic must respect the runtime, editable scope, and forbidden candidate
+imports in solver_contract.json. Recommend mechanisms that can be implemented directly
+inside the candidate rather than delegating to an unavailable or prohibited optimizer.
+
 Create a valid draft direction_cards.json before broad reading or web research, then refine
 it as evidence permits. Read artifact_index.json, feedback.md, reports, and selected plots;
 do not inspect copied benchmark implementation files. Preserve a valid output even if the

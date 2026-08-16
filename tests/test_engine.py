@@ -120,6 +120,33 @@ def reviewer_config(*, strict: bool = False) -> dict:
 
 class EngineTests(unittest.TestCase):
 
+    def test_solver_contract_exposes_candidate_dependency_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            raw = minimal_config()
+            raw["evaluation"]["forbidden_candidate_imports"] = ["scipy.optimize", "prima"]
+            engine = EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=(".",),
+                config=load_config(raw),
+                run_dir=root / "run",
+                agent_runner=fake_agent_runner,
+                evaluator_factory=fake_evaluator_factory,
+            )
+
+            engine._phase_prepare()
+
+            contract = json.loads((root / "run" / "solver_contract.json").read_text())
+            self.assertEqual(
+                contract["forbidden_candidate_imports"],
+                ["scipy.optimize", "prima"],
+            )
+
     def test_live_run_updates_phase_page_between_attempts(self) -> None:
         captured: dict[str, str] = {}
         state = {"calls": 0}
