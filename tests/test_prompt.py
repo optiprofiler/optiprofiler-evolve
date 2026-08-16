@@ -106,6 +106,8 @@ class PromptTests(unittest.TestCase):
         self.assertIn("waiting cannot restore it", prompt)
         self.assertIn("do not sleep or retry", prompt)
         self.assertIn("render_pdf", prompt)
+        self.assertIn("diagnostic outputs under `/tmp`", prompt)
+        self.assertIn("strict scope audit rejects", prompt)
         self.assertIn("scipy.optimize", prompt)
         self.assertNotIn("s2mpj", prompt)
         self.assertNotIn("fixed reference solver", prompt)

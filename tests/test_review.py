@@ -6,7 +6,9 @@ import unittest
 from pathlib import Path
 
 from optiprofiler_evolve.review import (
+    IntegrityReviewRequest,
     REQUIRED_CHECKS,
+    _review_prompt,
     parse_review,
     write_sanitized_transcript,
 )
@@ -23,6 +25,32 @@ def _payload(verdict: str = "approve", findings: list[dict] | None = None) -> di
 
 
 class ReviewParserTests(unittest.TestCase):
+    def test_reviewer_prioritizes_source_diff_over_full_transcript_replay(self) -> None:
+        request = IntegrityReviewRequest(
+            candidate_id="candidate",
+            candidate=Path("candidate"),
+            parent=Path("parent"),
+            changed_files=("solver.py",),
+            interface="solver.py:solver",
+            editable=("solver.py",),
+            mutation_transcript=Path("mutation_transcript.txt"),
+            reviewer_worker=None,
+            review_attempt=1,
+            timeout_seconds=60,
+            token_budget=1000,
+            max_budget_usd=None,
+            run_agent=lambda _job: None,  # type: ignore[arg-type,return-value]
+        )
+
+        prompt = _review_prompt(request)
+
+        self.assertIn("Prioritize the actual source diff", prompt)
+        self.assertIn(
+            "rather than reading the entire file sequentially",
+            " ".join(prompt.split()),
+        )
+        self.assertIn("Write `review.json` as soon", prompt)
+
     def test_approve_may_have_no_findings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

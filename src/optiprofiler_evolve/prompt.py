@@ -96,6 +96,10 @@ Evaluation tools
   history plots before your final edit. Record in your final response which files you read
   and what algorithmic decision each one informed. Opaque problem IDs are stable within the
   run, but their source-library names are intentionally unavailable.
+- Put rendered pages, downloads, scratch data, and other diagnostic outputs under `/tmp`,
+  not `/workspace`. Before finishing, remove any diagnostic file accidentally created
+  outside the declared editable paths; otherwise the strict scope audit rejects the
+  candidate even when its solver code is valid.
 - Prefer these bounded tools over calling the solver directly.
 - MANDATORY: every local command that invokes the solver must cap objective evaluations
   and use a wall-clock guard such as `timeout 30s python test_solver.py`. Never launch an
