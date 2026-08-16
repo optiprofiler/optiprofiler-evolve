@@ -611,6 +611,7 @@ def _sanitize_worker_artifacts(output_dir: Path, data: DataPlan) -> None:
     if not replacements or not output_dir.is_dir():
         return
     removed_binary = 0
+    removed_internal = 0
     for original in list(output_dir.rglob("*")):
         metadata = original.lstat()
         if original.is_symlink():
@@ -619,6 +620,12 @@ def _sanitize_worker_artifacts(output_dir: Path, data: DataPlan) -> None:
         if not stat.S_ISREG(metadata.st_mode):
             continue
         path = original
+        # The reproducibility bundle can contain copied package source, pickles,
+        # and raw HDF5 state. Those are owner evidence, not agent feedback.
+        if path.suffix.lower() in {".py", ".pyc", ".pkl", ".pickle", ".h5", ".hdf5"}:
+            path.unlink()
+            removed_internal += 1
+            continue
         relative = path.relative_to(output_dir).as_posix()
         redacted_relative = relative
         for name in sorted(replacements, key=len, reverse=True):
@@ -659,9 +666,16 @@ def _sanitize_worker_artifacts(output_dir: Path, data: DataPlan) -> None:
             directory.rmdir()
         except OSError:
             pass
-    if removed_binary:
+    if removed_binary or removed_internal:
         (output_dir / "redaction_report.json").write_text(
-            json.dumps({"removed_binary_artifacts": removed_binary}, indent=2) + "\n",
+            json.dumps(
+                {
+                    "removed_binary_artifacts": removed_binary,
+                    "removed_internal_artifacts": removed_internal,
+                },
+                indent=2,
+            )
+            + "\n",
             encoding="utf-8",
         )
 

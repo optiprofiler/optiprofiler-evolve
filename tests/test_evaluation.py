@@ -130,6 +130,13 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
             leaked.write_text("problem=SECRET_NAME", encoding="utf-8")
             binary = root / "plot.bin"
             binary.write_bytes(b"\xffSECRET_NAME\x00")
+            internal_source = root / "benchmark" / "test_log" / "profiles.py"
+            internal_source.parent.mkdir(parents=True)
+            internal_source.write_text("def benchmark_internal(): pass\n", encoding="utf-8")
+            raw_state = internal_source.with_name("curves.pkl")
+            raw_state.write_bytes(b"pickle-state")
+            useful_log = internal_source.with_name("report.txt")
+            useful_log.write_text("public summary", encoding="utf-8")
             outside = root.parent / f"{root.name}-outside.txt"
             outside.write_text("SECRET_NAME", encoding="utf-8")
             link = root / "linked.txt"
@@ -142,9 +149,13 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
             self.assertEqual(redacted.read_text(encoding="utf-8"), "problem=P_OPAQUE")
             self.assertFalse(binary.exists())
             self.assertFalse(link.exists())
+            self.assertFalse(internal_source.exists())
+            self.assertFalse(raw_state.exists())
+            self.assertEqual(useful_log.read_text(encoding="utf-8"), "public summary")
             self.assertEqual(outside.read_text(encoding="utf-8"), "SECRET_NAME")
             report = json.loads((root / "redaction_report.json").read_text())
             self.assertEqual(report["removed_binary_artifacts"], 1)
+            self.assertEqual(report["removed_internal_artifacts"], 2)
             outside.unlink()
 
     def test_trusted_request_is_mounted_outside_worker_visible_artifacts(self) -> None:

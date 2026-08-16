@@ -38,8 +38,9 @@
   the container PID budget.
 - Public evaluation output is first written to a controller-only staging
   directory. Direct occurrences of real problem names in text and paths are
-  replaced with opaque IDs, and matching binary artifacts are withheld and
-  counted in `redaction_report.json`. The completed directory is then published
+  replaced with opaque IDs. Matching binary artifacts, copied evaluator source,
+  and raw pickle/HDF5 state are withheld and counted in
+  `redaction_report.json`. The completed directory is then published
   atomically into the worker's read-only artifact mount.
 - The append-only `events.jsonl` ledger is controller-private. Shareable status
   and report files are rebuilt from a centralized default-deny projection;

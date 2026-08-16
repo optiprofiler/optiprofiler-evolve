@@ -1003,6 +1003,11 @@ Research up to {max_directions} genuinely different DFO algorithm directions for
 You are read-only with respect to the seed. Do not implement or evaluate a solver. Use web
 search only for public literature and document every claim with a URL.
 
+Create a valid draft direction_cards.json before broad reading or web research, then refine
+it as evidence permits. Read artifact_index.json, feedback.md, reports, and selected plots;
+do not inspect copied benchmark implementation files. Preserve a valid output even if the
+remaining tool or model budget is exhausted.
+
 Write direction_cards.json with this shape:
 {{"cards":[{{"card_id":"d1","title":"...","hypothesis":"...",
 "tactics":["..."],"citations":[{{"url":"...","claim":"..."}}]}}]}}
