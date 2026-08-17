@@ -117,6 +117,16 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cannot load previous"):
             load_config(raw)
 
+    def test_profile_tensor_fitness_source_is_strict(self) -> None:
+        raw = minimal_config()
+        raw["evaluation"]["fitness_source"] = "profile_scores_mean"
+        config = load_config(raw)
+        self.assertEqual(config.evaluation.fitness_source, "profile_scores_mean")
+
+        raw["evaluation"]["fitness_source"] = "unknown"
+        with self.assertRaisesRegex(ValueError, "fitness_source"):
+            load_config(raw)
+
     def test_forbidden_candidate_imports_are_typed_and_validated(self) -> None:
         raw = minimal_config()
         raw["evaluation"]["forbidden_candidate_imports"] = ["scipy.optimize", "pdfo"]

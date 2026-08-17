@@ -221,6 +221,7 @@ class EvaluationConfig:
     pids_limit: int = 512
     feedback_mode: str = "summary"
     reference: str = "initial"
+    fitness_source: str = "solver_scores"
     forbidden_candidate_imports: tuple[str, ...] = ()
     max_smoke_calls_per_worker: int = 20
     max_public_calls_per_worker: int = 5
@@ -249,6 +250,11 @@ class EvaluationConfig:
             raise ValueError(
                 "evaluation.reference must be 'initial', 'scipy_powell', "
                 "or 'prima_newuoa'."
+            )
+        if self.fitness_source not in {"solver_scores", "profile_scores_mean"}:
+            raise ValueError(
+                "evaluation.fitness_source must be 'solver_scores' or "
+                "'profile_scores_mean'."
             )
         for name in self.forbidden_candidate_imports:
             if not name or any(not part.isidentifier() for part in name.split(".")):

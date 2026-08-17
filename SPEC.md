@@ -31,8 +31,10 @@ candidates.
 
 Workers receive only `smoke_test` and public `evaluate`. The controller owns
 validation and hidden evaluation. Candidate and the configured fixed reference
-are passed together to `optiprofiler.benchmark`; normalized fitness is
-`(candidate - reference + 1) / 2`.
+are passed together to `optiprofiler.benchmark`. The default normalized fitness
+is `(candidate - reference + 1) / 2` using aggregate solver scores. Experiments
+may instead apply that normalization entry by entry to the complete profile
+score tensor and use its mean; both reductions remain controller-owned.
 
 The complete Python evaluator is implemented. `.m` entrypoints are recognized,
 but MATLAB evaluation must fail clearly until its adapter is implemented.

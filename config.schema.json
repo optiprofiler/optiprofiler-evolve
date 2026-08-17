@@ -221,6 +221,14 @@
           ],
           "default": "initial"
         },
+        "fitness_source": {
+          "type": "string",
+          "enum": [
+            "solver_scores",
+            "profile_scores_mean"
+          ],
+          "default": "solver_scores"
+        },
         "forbidden_candidate_imports": {
           "type": "array",
           "items": {

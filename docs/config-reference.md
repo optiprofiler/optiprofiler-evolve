@@ -46,6 +46,7 @@ controller directory.
 | `evaluation.pids_limit` | integer at least `16` | `512` | Evaluator-container process limit; ignored by `unsafe_local`. |
 | `evaluation.feedback_mode` | `summary` or `agent` | `summary` | Amount of structured benchmark feedback exposed after public evaluations. |
 | `evaluation.reference` | `initial`, `scipy_powell`, or `prima_newuoa` | `initial` | Fixed reference solver paired with every candidate benchmark. Use `initial` for seed-relative evolution; reserve a strong solver for post-selection comparison. |
+| `evaluation.fitness_source` | `solver_scores` or `profile_scores_mean` | `solver_scores` | Population fitness source. `profile_scores_mean` computes each entry as `(candidate-reference+1)/2`, clips it to `[0, 1]`, and averages the complete OptiProfiler profile tensor. |
 | `evaluation.forbidden_candidate_imports` | list of dotted Python module names | `[]` | Reject candidate source that uses these imports. This is an auditable experiment ablation, not a security boundary. |
 | `evaluation.max_smoke_calls_per_worker` | nonnegative integer | `20` | Broker quota for worker `smoke_test` calls. |
 | `evaluation.max_public_calls_per_worker` | nonnegative integer | `5` | Broker quota for worker `evaluate` calls. |
@@ -54,6 +55,12 @@ controller directory.
 Evaluation quotas are local to one worker job and each invocation consumes one
 slot, including a failed evaluation. An exhausted quota is non-retryable;
 waiting does not restore it.
+
+`profile_scores_mean` writes `fitness_breakdown.json` beside each evaluation.
+The file records the normalized tensor, its axis meanings, and the exact mean
+used for retention. It changes only the controller-owned fitness reduction;
+workers still receive the configured public feedback and never see validation
+or hidden problem identities.
 
 When a post-selection challenger such as `prima_newuoa` is installed in the
 evaluator image, add its import root (`prima`) to

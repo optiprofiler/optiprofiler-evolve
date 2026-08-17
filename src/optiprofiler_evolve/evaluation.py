@@ -18,6 +18,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from .config import EvaluationConfig, plain_data
 from .data import DataPlan
 from .models import EvaluationResult
@@ -109,8 +111,10 @@ class PythonOptiProfilerEvaluator:
         options = dict(self.config.benchmark)
         if mode == "smoke":
             options.update(self.config.smoke_overrides)
+        if self.config.fitness_source == "profile_scores_mean":
+            options["score_only"] = False
         if mode in {"public_score", "validation"}:
-            options["score_only"] = True
+            options["score_only"] = self.config.fitness_source != "profile_scores_mean"
             options["draw_hist_plots"] = "none"
         with tempfile.TemporaryDirectory(prefix="ope-dataset-") as temporary:
             opaque_root = Path(temporary)
@@ -137,7 +141,35 @@ class PythonOptiProfilerEvaluator:
         reference_score = float(scores[1])
         if not math.isfinite(candidate_score) or not math.isfinite(reference_score):
             raise RuntimeError("OptiProfiler returned a non-finite solver score.")
-        normalized = min(1.0, max(0.0, (candidate_score - reference_score + 1.0) / 2.0))
+        scalar_fitness = min(
+            1.0,
+            max(0.0, (candidate_score - reference_score + 1.0) / 2.0),
+        )
+        normalized = scalar_fitness
+        breakdown: dict[str, Any] = {
+            "schema": "optiprofiler_evolve.fitness_breakdown/1",
+            "fitness_source": self.config.fitness_source,
+            "fitness": scalar_fitness,
+            "candidate_solver_score": candidate_score,
+            "reference_solver_score": reference_score,
+        }
+        if self.config.fitness_source == "profile_scores_mean":
+            normalized, advantage = _profile_scores_mean_fitness(profile_scores)
+            breakdown.update(
+                {
+                    "fitness": normalized,
+                    "axes": {
+                        "0": "tolerance",
+                        "1": "history_or_output",
+                        "2": "performance_data_or_log_ratio",
+                    },
+                    "normalized_profile_advantage": _json_safe(advantage),
+                }
+            )
+        (output_dir / "fitness_breakdown.json").write_text(
+            json.dumps(_json_safe(breakdown), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         return EvaluationResult(
             mode=mode,
             score=normalized,
@@ -147,6 +179,21 @@ class PythonOptiProfilerEvaluator:
             output_dir=output_dir,
             profile_scores=_json_safe(profile_scores),
         )
+
+
+def _profile_scores_mean_fitness(profile_scores: Any) -> tuple[float, np.ndarray]:
+    """Return the mean normalized candidate advantage over a paired reference."""
+
+    values = np.asarray(profile_scores, dtype=float)
+    if values.ndim != 4 or values.shape[0] != 2:
+        raise RuntimeError(
+            "OptiProfiler profile_scores must have shape "
+            "(2, n_tolerances, 2, n_profile_types)."
+        )
+    if values.size == 0 or not np.all(np.isfinite(values)):
+        raise RuntimeError("OptiProfiler returned empty or non-finite profile scores.")
+    advantage = np.clip((values[0] - values[1] + 1.0) / 2.0, 0.0, 1.0)
+    return float(np.mean(advantage)), advantage
 
 
 class DockerOptiProfilerEvaluator:

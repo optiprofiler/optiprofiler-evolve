@@ -15,11 +15,42 @@ from optiprofiler_evolve.data import DataPlan
 from optiprofiler_evolve.evaluation import (
     DockerOptiProfilerEvaluator,
     PythonOptiProfilerEvaluator,
+    _profile_scores_mean_fitness,
     _problems_for_mode,
     _sanitize_worker_artifacts,
     _scoped_data_manifest,
 )
 from optiprofiler_evolve.solver import InterfaceSpec
+
+
+class ProfileTensorFitnessTests(unittest.TestCase):
+    def test_tie_maps_every_tensor_entry_to_one_half(self) -> None:
+        profile_scores = [
+            [[[0.2, 0.4, 0.8], [0.1, 0.3, 0.7]]],
+            [[[0.2, 0.4, 0.8], [0.1, 0.3, 0.7]]],
+        ]
+
+        fitness, normalized = _profile_scores_mean_fitness(profile_scores)
+
+        self.assertEqual(fitness, 0.5)
+        self.assertTrue((normalized == 0.5).all())
+
+    def test_mean_uses_every_profile_entry(self) -> None:
+        profile_scores = [
+            [[[1.0, 0.8, 0.6], [0.4, 0.2, 0.0]]],
+            [[[0.0, 0.2, 0.4], [0.6, 0.8, 1.0]]],
+        ]
+
+        fitness, normalized = _profile_scores_mean_fitness(profile_scores)
+
+        expected = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0]
+        self.assertAlmostEqual(fitness, sum(expected) / len(expected))
+        for actual, target in zip(normalized.flatten().tolist(), expected, strict=True):
+            self.assertAlmostEqual(actual, target)
+
+    def test_requires_paired_four_dimensional_tensor(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "shape"):
+            _profile_scores_mean_fitness([[1.0], [0.0]])
 
 
 @unittest.skipIf(importlib.util.find_spec("optiprofiler") is None, "optiprofiler unavailable")
@@ -53,6 +84,7 @@ class OptiProfilerEvaluationTests(unittest.TestCase):
             config = EvaluationConfig(
                 backend="unsafe_local",
                 feedback_mode="agent",
+                fitness_source="profile_scores_mean",
                 benchmark={"score_only": False, "n_jobs": 1, "max_eval_factor": 5},
             )
             evaluator = PythonOptiProfilerEvaluator(
@@ -65,6 +97,12 @@ class OptiProfilerEvaluationTests(unittest.TestCase):
             self.assertTrue(result.success, result.error)
             self.assertEqual(result.score, 0.5)
             self.assertEqual(result.candidate_score, result.reference_score)
+            breakdown = json.loads(
+                (root / "output" / "fitness_breakdown.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(breakdown["fitness_source"], "profile_scores_mean")
+            self.assertEqual(breakdown["fitness"], 0.5)
+            self.assertTrue(breakdown["normalized_profile_advantage"])
             serialized = (root / "output" / "result.json").read_text(encoding="utf-8")
             self.assertNotIn("ROSENBR", serialized)
             self.assertTrue((root / "output" / "artifact_index.json").is_file())
