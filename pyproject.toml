@@ -35,7 +35,7 @@ dev = [
     "build>=1.2",
     "jsonschema>=4.23",
     "pytest>=8",
-    "ruff>=0.11",
+    "ruff==0.15.22",
 ]
 
 [project.urls]
