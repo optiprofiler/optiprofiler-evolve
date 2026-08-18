@@ -991,19 +991,11 @@ class EvolutionEngine:
                     verdict="reject",
                     error=f"{type(exc).__name__}: {exc}",
                 )
-            # Non-removable admission gate: a worker that did not finish
-            # cleanly (nonzero exit such as budget exhaustion, or a timeout)
-            # must not feed its half-finished workspace into later steps,
-            # evaluation, review, or the population. The trace and workspace
-            # stay on disk for post-mortem analysis.
-            failure = _worker_failure(capabilities.worker_outcome)
-            if failure is not None and result.verdict != "reject":
-                result = StepResult(
-                    verdict="reject",
-                    metrics=result.metrics,
-                    artifacts=result.artifacts,
-                    error=result.error or failure,
-                )
+            # Process completion and candidate validity are separate signals.
+            # A CLI can return nonzero after writing a complete solver (for
+            # example when its model budget is exhausted). The remaining
+            # controller-owned gates decide whether that filesystem snapshot
+            # is safe and complete enough to admit.
             results.append(result)
             status = "failed" if result.verdict == "reject" else "succeeded"
             self._emit(
@@ -1134,15 +1126,7 @@ class EvolutionEngine:
     def _accept_and_record(self, attempt: _Attempt) -> None:
         record = attempt.record
         accepted = False
-        if attempt.worker_outcome.cancelled and record.valid:
-            record = replace(
-                record,
-                valid=False,
-                error="cancelled_candidate_not_admitted",
-            )
-        failure = _worker_failure(attempt.worker_outcome)
-        if failure is not None and record.valid:
-            record = replace(record, valid=False, error=failure)
+        worker_exit_warning = _worker_exit_warning(attempt.worker_outcome)
         if record.valid:
             population = [*self.populations[record.island], record]
             try:
@@ -1178,6 +1162,7 @@ class EvolutionEngine:
             "worker_timed_out": attempt.worker_outcome.timed_out,
             "worker_cancelled": attempt.worker_outcome.cancelled,
             "worker_termination_reason": attempt.worker_outcome.termination_reason,
+            "worker_exit_warning": worker_exit_warning,
             "transcript": str(attempt.worker_outcome.transcript),
             "native_trace": str(attempt.worker_outcome.native_trace)
             if attempt.worker_outcome.native_trace
@@ -2218,16 +2203,18 @@ def _guidance_id(direction: Mapping[str, object] | None) -> str | None:
     return str(direction["card_id"]) if direction and direction.get("card_id") else None
 
 
-def _worker_failure(outcome: WorkerOutcome | None) -> str | None:
-    """Describe why a finished worker invocation must not be admitted."""
+def _worker_exit_warning(outcome: WorkerOutcome | None) -> str | None:
+    """Describe an abnormal worker exit without judging its workspace."""
 
-    if outcome is None or outcome.cancelled:
+    if outcome is None:
         return None
-    if outcome.returncode == 0 and not outcome.timed_out:
+    if outcome.returncode == 0 and not outcome.timed_out and not outcome.cancelled:
         return None
-    parts = [f"worker_failed_not_admitted: returncode={outcome.returncode}"]
+    parts = [f"worker_exit_warning: returncode={outcome.returncode}"]
     if outcome.timed_out:
         parts.append("timed_out")
+    if outcome.cancelled:
+        parts.append("cancelled")
     if outcome.termination_reason:
         parts.append(f"termination={outcome.termination_reason}")
     return ", ".join(parts)

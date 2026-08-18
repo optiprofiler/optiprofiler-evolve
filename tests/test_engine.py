@@ -234,7 +234,7 @@ class EngineTests(unittest.TestCase):
             self.assertGreaterEqual(len(calls), 1)
 
 
-    def test_nonzero_worker_exit_blocks_admission_and_keeps_evidence(self) -> None:
+    def test_nonzero_worker_exit_salvages_candidate_that_passes_all_gates(self) -> None:
         def budget_exhausted_runner(**kwargs) -> AgentRunResult:
             workspace = kwargs["workspace"]
             transcript = kwargs["transcript"]
@@ -265,12 +265,13 @@ class EngineTests(unittest.TestCase):
             )
             result = engine.run()
 
-            # The half-finished workspace never becomes a candidate: the seed
-            # stays champion and no attempt reaches smoke/public evaluation.
-            self.assertEqual(result.public_score, 0.5)
-            self.assertNotIn("improved", (result.best_solver / "solver.py").read_text())
-            self.assertEqual(FakeEvaluator.calls.count("public_score"), 1)
-            self.assertEqual(FakeEvaluator.calls.count("smoke"), 0)
+            # The process status remains visible, but the filesystem snapshot
+            # is judged by the normal static, evaluation, review, and
+            # validation gates instead of being discarded before inspection.
+            self.assertEqual(result.public_score, 0.7)
+            self.assertIn("improved", (result.best_solver / "solver.py").read_text())
+            self.assertEqual(FakeEvaluator.calls.count("public_score"), 3)
+            self.assertEqual(FakeEvaluator.calls.count("smoke"), 2)
 
             events = [
                 json.loads(line)
@@ -283,12 +284,19 @@ class EngineTests(unittest.TestCase):
             ]
             self.assertTrue(finished)
             for event in finished:
-                self.assertEqual(event["status"], "failed")
-                self.assertFalse(event["data"]["accepted"])
-                self.assertFalse(event["data"]["valid"])
-                self.assertIn("worker_failed_not_admitted", event["data"]["error"])
-                self.assertIn("error_max_budget_usd", event["data"]["error"])
-                self.assertIsNone(event["data"]["public_score"])
+                self.assertEqual(event["status"], "succeeded")
+                self.assertTrue(event["data"]["accepted"])
+                self.assertTrue(event["data"]["valid"])
+                self.assertIsNone(event["data"]["error"])
+                self.assertIn(
+                    "worker_exit_warning",
+                    event["data"]["worker_exit_warning"],
+                )
+                self.assertIn(
+                    "error_max_budget_usd",
+                    event["data"]["worker_exit_warning"],
+                )
+                self.assertEqual(event["data"]["public_score"], 0.7)
             mutate_steps = [
                 event
                 for event in events
@@ -297,22 +305,14 @@ class EngineTests(unittest.TestCase):
             ]
             self.assertTrue(mutate_steps)
             for event in mutate_steps:
-                self.assertEqual(event["status"], "failed")
-            # Rejection precedes audit, evaluation, and integrity review.
-            self.assertFalse(
-                [
-                    event
-                    for event in events
-                    if event["kind"].startswith("integrity_review")
-                ]
-            )
+                self.assertEqual(event["status"], "succeeded")
             later_steps = [
                 event
                 for event in events
                 if event["kind"] == "step_finished"
-                and event["scope"].get("step") in {"static_audit", "smoke", "public_evaluate"}
+                    and event["scope"].get("step") in {"static_audit", "smoke", "public_evaluate"}
             ]
-            self.assertEqual(later_steps, [])
+            self.assertEqual(len(later_steps), 6)
 
             # Evidence stays on disk for post-mortem analysis.
             workspace = result.run_dir / "workspaces" / "it001-i00-a00"
@@ -321,6 +321,96 @@ class EngineTests(unittest.TestCase):
             )
             transcript = result.run_dir / "transcripts" / "it001-i00-a00.jsonl"
             self.assertIn("ran out of budget", transcript.read_text())
+
+    def test_nonzero_worker_exit_still_rejects_an_invalid_snapshot(self) -> None:
+        def broken_runner(**kwargs) -> AgentRunResult:
+            workspace = kwargs["workspace"]
+            transcript = kwargs["transcript"]
+            (workspace / "solver.py").write_text("def solver(:\n")
+            transcript.parent.mkdir(parents=True, exist_ok=True)
+            transcript.write_text("budget ended during a broken edit\n")
+            return AgentRunResult(1, transcript, termination_reason="error_max_budget_usd")
+
+        with tempfile.TemporaryDirectory() as directory:
+            FakeEvaluator.calls = []
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            engine = EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=(".",),
+                config=load_config(minimal_config()),
+                run_dir=root / "run",
+                agent_runner=broken_runner,
+                evaluator_factory=fake_evaluator_factory,
+            )
+            result = engine.run()
+
+            self.assertEqual(result.public_score, 0.5)
+            self.assertEqual(FakeEvaluator.calls.count("smoke"), 0)
+            attempts = [
+                json.loads(line)
+                for line in (result.run_dir / "attempts.jsonl").read_text().splitlines()
+            ]
+            self.assertTrue(attempts)
+            self.assertTrue(all(not attempt["valid"] for attempt in attempts))
+            self.assertTrue(
+                all("Invalid Python interface file" in attempt["error"] for attempt in attempts)
+            )
+
+    def test_timed_out_worker_snapshot_is_graded_if_valid(self) -> None:
+        def timed_out_runner(**kwargs) -> AgentRunResult:
+            workspace = kwargs["workspace"]
+            transcript = kwargs["transcript"]
+            solver = workspace / "solver.py"
+            solver.write_text(solver.read_text() + "\n# improved and complete before timeout\n")
+            transcript.parent.mkdir(parents=True, exist_ok=True)
+            transcript.write_text("worker timed out after writing solver\n")
+            return AgentRunResult(
+                124,
+                transcript,
+                timed_out=True,
+                termination_reason="timeout",
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            FakeEvaluator.calls = []
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            result = EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=(".",),
+                config=load_config(minimal_config()),
+                run_dir=root / "run",
+                agent_runner=timed_out_runner,
+                evaluator_factory=fake_evaluator_factory,
+            ).run()
+
+            self.assertEqual(result.public_score, 0.7)
+            self.assertIn("complete before timeout", (result.best_solver / "solver.py").read_text())
+            attempts = [
+                json.loads(line)
+                for line in (result.run_dir / "attempts.jsonl").read_text().splitlines()
+            ]
+            self.assertTrue(attempts)
+            self.assertTrue(all(attempt["valid"] for attempt in attempts))
+            self.assertTrue(
+                all("timed_out" in attempt["worker_exit_warning"] for attempt in attempts)
+            )
+            events = [
+                json.loads(line)
+                for line in (result.run_dir / "events.jsonl").read_text().splitlines()
+            ]
+            finished = [event for event in events if event["kind"] == "attempt_finished"]
+            self.assertTrue(finished)
+            self.assertTrue(all(event["data"]["accepted"] for event in finished))
 
     def test_population_loop_preserves_source_and_tests_one_validated_champion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
