@@ -199,9 +199,11 @@ class EngineTests(unittest.TestCase):
             text = captured["text"]
             # While attempt 2's worker was still running, the on-disk explore
             # page already carried attempt 1 from later ledger events, and the
-            # live page instructs the browser to keep reloading.
+            # live page polls same-origin HTML without a full navigation.
             self.assertIn("it001-i00-a00", text)
-            self.assertIn('http-equiv="refresh"', text)
+            self.assertNotIn('http-equiv="refresh"', text)
+            self.assertIn('name="optiprofiler-evolve-live"', text)
+            self.assertIn("window.fetch(window.location.href", text)
 
 
     def test_background_refresher_rerenders_between_engine_steps(self) -> None:
