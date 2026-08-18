@@ -7,7 +7,13 @@ import unittest
 from pathlib import Path
 from urllib.parse import unquote
 
-from optiprofiler_evolve.owner_views import render_owner_views
+from optiprofiler_evolve.owner_views import (
+    _lineage_lanes,
+    _ordered_islands,
+    _render_lineage_graph,
+    _render_score_chart,
+    render_owner_views,
+)
 from optiprofiler_evolve.projections import project_public_events
 from optiprofiler_evolve.viewers import (
     materialize_public_bundle,
@@ -38,7 +44,14 @@ def _write_events(path: Path, rows: list[tuple[str, str, str, dict, dict]]) -> N
     for seq, (ts, kind, status, scope, data) in enumerate(rows, start=1):
         lines.append(
             json.dumps(
-                {"seq": seq, "ts": ts, "kind": kind, "scope": scope, "status": status, "data": data},
+                {
+                    "seq": seq,
+                    "ts": ts,
+                    "kind": kind,
+                    "scope": scope,
+                    "status": status,
+                    "data": data,
+                },
                 sort_keys=True,
             )
         )
@@ -197,7 +210,9 @@ def _build_run_dir(root: Path, *, terminal: bool = True, accepted: bool = True) 
     transcript.parent.mkdir(parents=True)
     entries = [
         json.dumps({"type": "message", "role": "assistant", "text": TRANSCRIPT_CANARY}),
-        json.dumps({"type": "tool_use", "name": "edit", "input": {"text": "<script>alert(1)</script>"}}),
+        json.dumps(
+            {"type": "tool_use", "name": "edit", "input": {"text": "<script>alert(1)</script>"}}
+        ),
     ]
     entries.extend(
         json.dumps({"type": "message", "text": f"padding line {index} " + "x" * 600})
@@ -207,9 +222,7 @@ def _build_run_dir(root: Path, *, terminal: bool = True, accepted: bool = True) 
 
     traces = run_dir / "traces" / ATTEMPT
     traces.mkdir(parents=True)
-    (traces / "raw.stdout.stream").write_text(
-        STDOUT_CANARY + "\nworker stdout\n", encoding="utf-8"
-    )
+    (traces / "raw.stdout.stream").write_text(STDOUT_CANARY + "\nworker stdout\n", encoding="utf-8")
     (traces / "raw.stderr.stream").write_text(
         "".join(f"stderr line {index}\n" for index in range(300)), encoding="utf-8"
     )
@@ -276,6 +289,107 @@ def _hrefs(page: Path) -> list[str]:
 
 
 class OwnerViewTests(unittest.TestCase):
+    def test_all_island_lineage_highlights_cross_island_migration(self) -> None:
+        points = [
+            {
+                "attempt_id": "parent",
+                "parent_id": "seed",
+                "iteration": 1,
+                "island": 0,
+                "source_order": 1,
+                "outcome": "retained",
+                "public": 0.4,
+                "validation": 0.4,
+                "guidance": "direction-a",
+            },
+            {
+                "attempt_id": "child",
+                "parent_id": "parent",
+                "iteration": 2,
+                "island": 1,
+                "source_order": 2,
+                "outcome": "retained",
+                "public": 0.5,
+                "validation": 0.5,
+                "guidance": "direction-b",
+            },
+        ]
+        graph = _render_lineage_graph(
+            points,
+            {str(point["attempt_id"]): point for point in points},
+            "All islands",
+            group_by_island=True,
+        )
+
+        self.assertEqual(graph.count('class="lineage-island-band"'), 2)
+        self.assertIn('class="lineage-edge migration"', graph)
+        self.assertIn("I0 to I1", graph)
+
+    def test_lineage_layout_separates_sibling_branches(self) -> None:
+        lanes = _lineage_lanes(
+            [
+                {"attempt_id": "root", "parent_id": "seed"},
+                {"attempt_id": "child-a", "parent_id": "root"},
+                {"attempt_id": "child-b", "parent_id": "root"},
+                {"attempt_id": "child-c", "parent_id": "root"},
+            ]
+        )
+
+        self.assertEqual({lanes["child-a"], lanes["child-b"], lanes["child-c"]}, {0.0, 1.0, 2.0})
+        self.assertEqual(lanes["root"], 1.0)
+
+    def test_lineage_uses_one_stable_seed_rail_per_island(self) -> None:
+        points = [
+            {
+                "attempt_id": f"it00{iteration}-i00-a00",
+                "parent_id": "seed",
+                "iteration": iteration,
+                "island": 0,
+                "source_order": iteration,
+                "outcome": "rejected",
+                "public": 0.0,
+                "validation": None,
+                "guidance": None,
+            }
+            for iteration in range(1, 5)
+        ]
+        graph = _render_lineage_graph(
+            points,
+            {str(point["attempt_id"]): point for point in points},
+            "All islands",
+            group_by_island=True,
+        )
+
+        self.assertEqual(graph.count('class="lineage-seed-node"'), 1)
+        self.assertEqual(graph.count('class="lineage-seed-rail"'), 1)
+        self.assertEqual(graph.count('class="lineage-grid"'), 4)
+        self.assertNotIn("external parent seed", graph)
+        self.assertEqual(graph.count('cy="106.0" r="7"'), 4)
+
+    def test_island_filters_use_numeric_order_and_persist_selection(self) -> None:
+        self.assertEqual(
+            _ordered_islands(
+                [
+                    {"island": 1},
+                    {"island": 2},
+                    {"island": 0},
+                    {"island": 3},
+                ]
+            ),
+            [0, 1, 2, 3],
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = _build_run_dir(Path(directory))
+            render_owner_views(run_dir / "events.jsonl", run_dir, final=False)
+            index = (run_dir / "status.html").read_text(encoding="utf-8")
+
+            self.assertIn("window.sessionStorage.getItem(storageKey)", index)
+            self.assertIn("window.sessionStorage.setItem(storageKey, select.value)", index)
+            self.assertIn('value="island-0">Island 0</option>', index)
+            self.assertIn('<option value="all" selected>All islands</option>', index)
+            self.assertIn('value="lineage-0">Island 0</option>', index)
+
     def test_owner_pages_show_private_evidence_and_all_links_resolve(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = _build_run_dir(Path(directory))
@@ -338,19 +452,64 @@ class OwnerViewTests(unittest.TestCase):
             # Terminal run: no refresh anywhere.
             self.assertNotIn('http-equiv="refresh"', index_text)
             self.assertNotIn('http-equiv="refresh"', attempt_text)
+            self.assertNotIn("window.fetch(window.location.href", index_text)
+            self.assertNotIn("window.fetch(window.location.href", attempt_text)
 
-    def test_running_attempt_pages_refresh_and_report_unavailable_validation(self) -> None:
+    def test_running_attempt_pages_refresh_and_show_available_stage_scores(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = _build_run_dir(Path(directory), terminal=False)
             render_owner_views(run_dir / "events.jsonl", run_dir)
 
             index_text = (run_dir / "status.html").read_text(encoding="utf-8")
-            attempt_text = (
-                run_dir / "owner" / "attempts" / f"{ATTEMPT}.html"
-            ).read_text(encoding="utf-8")
-            self.assertIn('http-equiv="refresh"', index_text)
-            self.assertIn('http-equiv="refresh"', attempt_text)
-            self.assertIn("unavailable (not evaluated)", attempt_text)
+            attempt_text = (run_dir / "owner" / "attempts" / f"{ATTEMPT}.html").read_text(
+                encoding="utf-8"
+            )
+            self.assertNotIn('http-equiv="refresh"', index_text)
+            self.assertNotIn('http-equiv="refresh"', attempt_text)
+            self.assertIn('name="optiprofiler-evolve-live"', index_text)
+            self.assertIn('data-live-root', index_text)
+            self.assertIn("window.fetch(window.location.href", index_text)
+            self.assertIn('name="optiprofiler-evolve-live"', attempt_text)
+            self.assertIn('data-live-root', attempt_text)
+            self.assertIn("0.428142", attempt_text)
+            self.assertIn("unavailable (finalists only)", attempt_text)
+
+    def test_early_score_chart_keeps_two_candidates_compact_and_centered(self) -> None:
+        points = [
+            {
+                "attempt_id": "it001-i00-a00",
+                "iteration": 1,
+                "island": 0,
+                "outcome": "retained",
+                "order": 1,
+                "public": 0.50,
+                "validation": None,
+                "hidden": None,
+            },
+            {
+                "attempt_id": "it001-i01-a00",
+                "iteration": 1,
+                "island": 1,
+                "outcome": "retained",
+                "order": 2,
+                "public": 0.55,
+                "validation": None,
+                "hidden": None,
+            },
+        ]
+
+        chart = _render_score_chart(points, "All islands", 0.0, 1.0)
+        positions = [
+            float(value)
+            for value in re.findall(
+                r'class="metric-point public retained" cx="([0-9.]+)"', chart
+            )
+        ]
+
+        self.assertEqual(len(positions), 2)
+        self.assertLess(positions[1] - positions[0], 100.0)
+        self.assertGreater(positions[0], 300.0)
+        self.assertLess(positions[1], 620.0)
 
     def test_owner_index_shows_effective_pareto_population_policy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -385,7 +544,6 @@ class OwnerViewTests(unittest.TestCase):
             self.assertIn("Scalar fallback (one objective)", owner)
             self.assertIn("top_biased_validation_weighted", owner)
 
-
     def test_workflow_canvas_and_phase_pages(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = _build_run_dir(Path(directory))
@@ -393,9 +551,7 @@ class OwnerViewTests(unittest.TestCase):
                 json.dumps(
                     {
                         "components": {
-                            "phases": [
-                                {"name": "explore", "options": {"population": 2}}
-                            ],
+                            "phases": [{"name": "explore", "options": {"population": 2}}],
                             "retention": {
                                 "name": "metric_pareto",
                                 "options": {"objectives": ["fitness"]},
@@ -479,7 +635,6 @@ class OwnerViewTests(unittest.TestCase):
             self.assertNotIn("data-wf", public)
             self.assertNotIn("owner/", public)
 
-
     def test_phase_timeline_started_rows_are_static_and_terminal_pages_never_spin(
         self,
     ) -> None:
@@ -511,9 +666,7 @@ class OwnerViewTests(unittest.TestCase):
                 handle.write("\n".join(extra) + "\n")
 
             render_owner_views(run_dir / "events.jsonl", run_dir, final=True)
-            page = (run_dir / "owner" / "phases" / "explore.html").read_text(
-                encoding="utf-8"
-            )
+            page = (run_dir / "owner" / "phases" / "explore.html").read_text(encoding="utf-8")
 
             # Historical *_started rows are static Started markers, and a
             # terminal run's phase page contains no live spinner anywhere.
@@ -533,9 +686,7 @@ class OwnerViewTests(unittest.TestCase):
             index = (run_dir / "status.html").read_text(encoding="utf-8")
             self.assertIn('class="st running"', index)
 
-            page = (run_dir / "owner" / "phases" / "explore.html").read_text(
-                encoding="utf-8"
-            )
+            page = (run_dir / "owner" / "phases" / "explore.html").read_text(encoding="utf-8")
             timeline = page[page.index("Key events") :]
             self.assertIn(">Started</span>", timeline)
             self.assertNotIn('class="st running"', timeline)
@@ -548,7 +699,6 @@ class OwnerViewTests(unittest.TestCase):
             self.assertNotIn("Key events", public)
             self.assertNotIn("st-line started", public)
 
-
     def test_failure_classes_fallback_markers_and_champion_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = _build_run_dir(Path(directory))
@@ -558,7 +708,11 @@ class OwnerViewTests(unittest.TestCase):
                         "seq": 110,
                         "ts": "2026-07-23T10:07:20+00:00",
                         "kind": "role_agent_started",
-                        "scope": {"role": "direction-scout", "job_id": "scout-x", "phase": "explore"},
+                        "scope": {
+                            "role": "direction-scout",
+                            "job_id": "scout-x",
+                            "phase": "explore",
+                        },
                         "status": "running",
                         "data": {},
                     }
@@ -568,7 +722,11 @@ class OwnerViewTests(unittest.TestCase):
                         "seq": 111,
                         "ts": "2026-07-23T10:08:20+00:00",
                         "kind": "role_agent_finished",
-                        "scope": {"role": "direction-scout", "job_id": "scout-x", "phase": "explore"},
+                        "scope": {
+                            "role": "direction-scout",
+                            "job_id": "scout-x",
+                            "phase": "explore",
+                        },
                         "status": "failed",
                         "data": {
                             "returncode": 0,
@@ -585,7 +743,12 @@ class OwnerViewTests(unittest.TestCase):
                         "seq": 112,
                         "ts": "2026-07-23T10:08:30+00:00",
                         "kind": "attempt_started",
-                        "scope": {"phase": "explore", "iteration": 1, "island": 0, "attempt_id": "it001-i00-a01"},
+                        "scope": {
+                            "phase": "explore",
+                            "iteration": 1,
+                            "island": 0,
+                            "attempt_id": "it001-i00-a01",
+                        },
                         "status": "running",
                         "data": {"parent_id": "seed", "worker": "claude:m"},
                     }
@@ -595,7 +758,12 @@ class OwnerViewTests(unittest.TestCase):
                         "seq": 113,
                         "ts": "2026-07-23T10:08:40+00:00",
                         "kind": "attempt_finished",
-                        "scope": {"phase": "explore", "iteration": 1, "island": 0, "attempt_id": "it001-i00-a01"},
+                        "scope": {
+                            "phase": "explore",
+                            "iteration": 1,
+                            "island": 0,
+                            "attempt_id": "it001-i00-a01",
+                        },
                         "status": "failed",
                         "data": {
                             "candidate_id": "it001-i00-a01",
@@ -614,16 +782,14 @@ class OwnerViewTests(unittest.TestCase):
             (run_dir / "final_solver").mkdir()
             (run_dir / "final_solver" / "solver.py").write_text("champion", encoding="utf-8")
             (run_dir / "candidates" / ATTEMPT).mkdir(parents=True)
-            (run_dir / "candidates" / ATTEMPT / "solver.py").write_text("champion", encoding="utf-8")
+            (run_dir / "candidates" / ATTEMPT / "solver.py").write_text(
+                "champion", encoding="utf-8"
+            )
 
             render_owner_views(run_dir / "events.jsonl", run_dir, final=True)
             index = (run_dir / "status.html").read_text(encoding="utf-8")
-            role_page = (run_dir / "owner" / "roles" / "scout-x.html").read_text(
-                encoding="utf-8"
-            )
-            phase_page = (run_dir / "owner" / "phases" / "explore.html").read_text(
-                encoding="utf-8"
-            )
+            role_page = (run_dir / "owner" / "roles" / "scout-x.html").read_text(encoding="utf-8")
+            phase_page = (run_dir / "owner" / "phases" / "explore.html").read_text(encoding="utf-8")
 
             # Missing-output failures are explicit wherever the job appears.
             self.assertIn("missing outputs: direction_cards.json", index)
@@ -640,9 +806,9 @@ class OwnerViewTests(unittest.TestCase):
             self.assertIn("Public -", index)
             self.assertNotIn("Public 0.0000", index)
             self.assertIn("Public 0.7500", index)
-            attempt_page = (
-                run_dir / "owner" / "attempts" / "it001-i00-a01.html"
-            ).read_text(encoding="utf-8")
+            attempt_page = (run_dir / "owner" / "attempts" / "it001-i00-a01.html").read_text(
+                encoding="utf-8"
+            )
             self.assertIn("unavailable", attempt_page)
             self.assertIn("worker_failed_not_admitted", index)
 
@@ -650,7 +816,6 @@ class OwnerViewTests(unittest.TestCase):
             self.assertIn('href="final_solver/"', index)
             self.assertIn(f'href="candidates/{ATTEMPT}/"', index)
             self.assertIn(f'href="owner/attempts/{ATTEMPT}.html"', index)
-
 
     def test_reviewer_jobs_associate_with_explore_and_zero_accept_is_marked(
         self,
@@ -660,12 +825,10 @@ class OwnerViewTests(unittest.TestCase):
             render_owner_views(run_dir / "events.jsonl", run_dir, final=True)
 
             index = (run_dir / "status.html").read_text(encoding="utf-8")
-            phase_page = (run_dir / "owner" / "phases" / "explore.html").read_text(
+            phase_page = (run_dir / "owner" / "phases" / "explore.html").read_text(encoding="utf-8")
+            review_page = (run_dir / "owner" / "roles" / f"{REVIEW_JOB}.html").read_text(
                 encoding="utf-8"
             )
-            review_page = (
-                run_dir / "owner" / "roles" / f"{REVIEW_JOB}.html"
-            ).read_text(encoding="utf-8")
 
             # Explore says completed-with-zero-accepted instead of a bare
             # Succeeded, on the canvas node and on the phase page header.
@@ -680,7 +843,6 @@ class OwnerViewTests(unittest.TestCase):
             self.assertIn("Phase integrity-reviewer", review_page)
             self.assertNotIn("No trusted agent jobs recorded", phase_page)
 
-
     def test_legacy_ledger_scores_quarantine_badge_and_effective_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = Path(directory) / "run"
@@ -690,20 +852,63 @@ class OwnerViewTests(unittest.TestCase):
             rows = [
                 ("2026-07-24T09:00:00+00:00", "run_started", "running", {}, {}),
                 ("2026-07-24T09:00:01+00:00", "phase_started", "running", {"phase": "explore"}, {}),
-                ("2026-07-24T09:00:02+00:00", "attempt_started", "running", scope,
-                 {"parent_id": "seed", "worker": "claude:m"}),
+                (
+                    "2026-07-24T09:00:02+00:00",
+                    "attempt_started",
+                    "running",
+                    scope,
+                    {"parent_id": "seed", "worker": "claude:m"},
+                ),
                 ("2026-07-24T09:00:03+00:00", "step_started", "running", step, {}),
                 # Historical ledgers: mutate metrics only, no public_score.
-                ("2026-07-24T09:01:03+00:00", "step_finished", "succeeded", step,
-                 {"verdict": "pass", "metrics": {"worker_returncode": 0}, "artifacts": [], "error": None}),
-                ("2026-07-24T09:01:10+00:00", "integrity_review_finished", "succeeded", scope,
-                 {"gate": "quarantined"}),
+                (
+                    "2026-07-24T09:01:03+00:00",
+                    "step_finished",
+                    "succeeded",
+                    step,
+                    {
+                        "verdict": "pass",
+                        "metrics": {"worker_returncode": 0},
+                        "artifacts": [],
+                        "error": None,
+                    },
+                ),
+                (
+                    "2026-07-24T09:01:10+00:00",
+                    "integrity_review_finished",
+                    "succeeded",
+                    scope,
+                    {"gate": "quarantined"},
+                ),
                 # Historical placeholder: 0.0 even though never publicly evaluated.
-                ("2026-07-24T09:01:20+00:00", "attempt_finished", "failed", scope,
-                 {"candidate_id": "leg-1", "parent_id": "seed", "public_score": 0.0,
-                  "valid": False, "accepted": False, "error": "quarantined"}),
-                ("2026-07-24T09:01:30+00:00", "phase_finished", "succeeded", {"phase": "explore"}, {}),
-                ("2026-07-24T09:01:31+00:00", "run_finished", "succeeded", {}, {"best_candidate_id": "seed"}),
+                (
+                    "2026-07-24T09:01:20+00:00",
+                    "attempt_finished",
+                    "failed",
+                    scope,
+                    {
+                        "candidate_id": "leg-1",
+                        "parent_id": "seed",
+                        "public_score": 0.0,
+                        "valid": False,
+                        "accepted": False,
+                        "error": "quarantined",
+                    },
+                ),
+                (
+                    "2026-07-24T09:01:30+00:00",
+                    "phase_finished",
+                    "succeeded",
+                    {"phase": "explore"},
+                    {},
+                ),
+                (
+                    "2026-07-24T09:01:31+00:00",
+                    "run_finished",
+                    "succeeded",
+                    {},
+                    {"best_candidate_id": "seed"},
+                ),
             ]
             _write_events(run_dir / "events.jsonl", rows)
             (run_dir / "provenance.json").write_text(
@@ -730,9 +935,7 @@ class OwnerViewTests(unittest.TestCase):
             attempt_page = (run_dir / "owner" / "attempts" / "leg-1.html").read_text(
                 encoding="utf-8"
             )
-            phase_page = (run_dir / "owner" / "phases" / "explore.html").read_text(
-                encoding="utf-8"
-            )
+            phase_page = (run_dir / "owner" / "phases" / "explore.html").read_text(encoding="utf-8")
 
             # (A) The legacy 0.0 placeholder never renders as a real score.
             self.assertIn("Public -", index)
@@ -756,25 +959,55 @@ class OwnerViewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             run_dir = _build_run_dir(Path(directory))
             # A genuine 0.0 with step evidence must keep rendering as 0.0.
-            zero_scope = {
-                "phase": "explore", "iteration": 1, "island": 0, "attempt_id": "zero-1"
-            }
+            zero_scope = {"phase": "explore", "iteration": 1, "island": 0, "attempt_id": "zero-1"}
             zero_step = {**zero_scope, "step": "public_evaluate", "step_idx": 3}
             extra = [
-                ("2026-07-23T10:08:50+00:00", "attempt_started", "running", zero_scope,
-                 {"parent_id": "seed", "worker": "claude:m"}),
-                ("2026-07-23T10:08:55+00:00", "step_finished", "succeeded", zero_step,
-                 {"verdict": "pass", "metrics": {"public_score": 0.0}, "artifacts": [], "error": None}),
-                ("2026-07-23T10:09:00+00:00", "attempt_finished", "failed", zero_scope,
-                 {"candidate_id": "zero-1", "parent_id": "seed", "public_score": 0.0,
-                  "valid": False, "accepted": False, "error": "quarantined"}),
+                (
+                    "2026-07-23T10:08:50+00:00",
+                    "attempt_started",
+                    "running",
+                    zero_scope,
+                    {"parent_id": "seed", "worker": "claude:m"},
+                ),
+                (
+                    "2026-07-23T10:08:55+00:00",
+                    "step_finished",
+                    "succeeded",
+                    zero_step,
+                    {
+                        "verdict": "pass",
+                        "metrics": {"public_score": 0.0},
+                        "artifacts": [],
+                        "error": None,
+                    },
+                ),
+                (
+                    "2026-07-23T10:09:00+00:00",
+                    "attempt_finished",
+                    "failed",
+                    zero_scope,
+                    {
+                        "candidate_id": "zero-1",
+                        "parent_id": "seed",
+                        "public_score": 0.0,
+                        "valid": False,
+                        "accepted": False,
+                        "error": "quarantined",
+                    },
+                ),
             ]
             with (run_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
                 for seq, (ts, kind, status, scope, data) in enumerate(extra, start=200):
                     handle.write(
                         json.dumps(
-                            {"seq": seq, "ts": ts, "kind": kind, "scope": scope,
-                             "status": status, "data": data},
+                            {
+                                "seq": seq,
+                                "ts": ts,
+                                "kind": kind,
+                                "scope": scope,
+                                "status": status,
+                                "data": data,
+                            },
                             sort_keys=True,
                         )
                         + "\n"
@@ -785,6 +1018,155 @@ class OwnerViewTests(unittest.TestCase):
 
             self.assertIn("Public 0.7500", index)  # evaluated real score intact
             self.assertIn("Public 0.0000", index)  # genuine zero with evidence intact
+
+    def test_owner_score_timeline_tracks_all_outcomes_and_final_hidden_score(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = _build_run_dir(Path(directory))
+            rejected = "it002-i01-a00"
+            active = "it003-i00-a00"
+            scope = {
+                "phase": "explore",
+                "iteration": 2,
+                "island": 1,
+                "attempt_id": rejected,
+            }
+            extra = [
+                (
+                    "2026-07-23T10:08:50+00:00",
+                    "attempt_started",
+                    "running",
+                    scope,
+                    {"parent_id": ATTEMPT, "worker": "claude:m"},
+                ),
+                (
+                    "2026-07-23T10:08:55+00:00",
+                    "step_finished",
+                    "succeeded",
+                    {**scope, "step": "public_evaluate", "step_idx": 3},
+                    {
+                        "verdict": "pass",
+                        "metrics": {"public_score": 0.91},
+                        "artifacts": [],
+                        "error": None,
+                    },
+                ),
+                (
+                    "2026-07-23T10:09:00+00:00",
+                    "integrity_review_finished",
+                    "failed",
+                    scope,
+                    {"gate": "quarantined"},
+                ),
+                (
+                    "2026-07-23T10:09:01+00:00",
+                    "attempt_finished",
+                    "failed",
+                    scope,
+                    {
+                        "candidate_id": rejected,
+                        "parent_id": ATTEMPT,
+                        "public_score": 0.91,
+                        "validation_score": 0.0,
+                        "valid": False,
+                        "accepted": False,
+                        "error": "integrity_review_quarantine",
+                    },
+                ),
+                (
+                    "2026-07-23T10:09:02+00:00",
+                    "attempt_started",
+                    "running",
+                    {
+                        "phase": "explore",
+                        "iteration": 3,
+                        "island": 0,
+                        "attempt_id": active,
+                    },
+                    {"parent_id": ATTEMPT, "worker": "claude:m"},
+                ),
+                (
+                    "2026-07-23T10:09:03+00:00",
+                    "step_finished",
+                    "succeeded",
+                    {
+                        "phase": "explore",
+                        "iteration": 3,
+                        "island": 0,
+                        "attempt_id": active,
+                        "step": "public_evaluate",
+                        "step_idx": 3,
+                    },
+                    {
+                        "verdict": "pass",
+                        "metrics": {"public_score": 0.33},
+                        "artifacts": [],
+                        "error": None,
+                    },
+                ),
+            ]
+            with (run_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
+                for seq, (ts, kind, status, event_scope, data) in enumerate(extra, start=200):
+                    handle.write(
+                        json.dumps(
+                            {
+                                "seq": seq,
+                                "ts": ts,
+                                "kind": kind,
+                                "scope": event_scope,
+                                "status": status,
+                                "data": data,
+                            },
+                            sort_keys=True,
+                        )
+                        + "\n"
+                    )
+            hidden_dir = run_dir / "controller" / "final_evaluations" / ATTEMPT
+            hidden_dir.mkdir(parents=True)
+            (run_dir / "validation_selection.json").write_text(
+                json.dumps({"champion": ATTEMPT, "finalists": [ATTEMPT]}),
+                encoding="utf-8",
+            )
+            (hidden_dir / "result.json").write_text(
+                json.dumps({"score": 0.61, "success": True}),
+                encoding="utf-8",
+            )
+            active_validation = run_dir / "controller" / "evaluations" / active / "validation"
+            active_validation.mkdir(parents=True)
+            (active_validation / "result.json").write_text(
+                json.dumps({"score": 0.44, "success": True}), encoding="utf-8"
+            )
+
+            render_owner_views(run_dir / "events.jsonl", run_dir, final=True)
+            index = (run_dir / "status.html").read_text(encoding="utf-8")
+            attempt = (run_dir / "owner" / "attempts" / f"{ATTEMPT}.html").read_text(
+                encoding="utf-8"
+            )
+
+            self.assertIn('id="score-timeline"', index)
+            self.assertIn("Candidate scores in completion order for All islands", index)
+            self.assertIn('id="score-view-filter"', index)
+            self.assertIn(f"completion 1 · {ATTEMPT}", index)
+            self.assertIn(f"completion 2 · {rejected}", index)
+            self.assertIn(f"completion 3 · {active}", index)
+            self.assertIn('class="metric-line public"', index)
+            self.assertIn('class="metric-line validation"', index)
+            self.assertIn('class="metric-point hidden retained"', index)
+            self.assertIn("Best observed public", index)
+            self.assertIn("0.750000", index)
+            self.assertIn(VALIDATION_CANARY, index)
+            self.assertIn("0.610000", index)
+            self.assertIn(rejected, index)
+            self.assertIn("quarantined", index)
+            self.assertIn("0.910000", index)
+            self.assertIn(active, index)
+            self.assertIn("0.330000", index)
+            self.assertIn("0.440000", index)
+            self.assertIn("0.610000", attempt)
+            self.assertIn('id="lineage"', index)
+            self.assertIn('id="lineage-view-filter"', index)
+            self.assertIn("All islands candidate lineage", index)
+            self.assertIn("Island 0 candidate lineage", index)
+            self.assertIn("dP -0.420", index)
 
     def test_public_bundle_never_contains_owner_material(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -833,13 +1215,9 @@ class OwnerViewTests(unittest.TestCase):
             run_dir = _build_run_dir(Path(directory))
             render_owner_views(run_dir / "events.jsonl", run_dir, final=True)
 
-            manifest = json.loads(
-                (run_dir / "owner" / "MANIFEST.json").read_text(encoding="utf-8")
-            )
+            manifest = json.loads((run_dir / "owner" / "MANIFEST.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["schema"], "optiprofiler_evolve_owner_manifest/1")
-            attempt_entries = {
-                entry["attempt_id"]: entry for entry in manifest["attempts"]
-            }
+            attempt_entries = {entry["attempt_id"]: entry for entry in manifest["attempts"]}
             self.assertIn(ATTEMPT, attempt_entries)
             evidence = attempt_entries[ATTEMPT]["evidence"]
             self.assertIn("transcript", evidence)
