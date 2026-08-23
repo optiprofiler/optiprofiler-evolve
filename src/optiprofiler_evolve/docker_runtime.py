@@ -9,7 +9,7 @@ import re
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,6 +17,7 @@ from typing import Any
 from .broker import BrokerConnection
 from .config import SandboxConfig, WorkerConfig, WorkersConfig
 from .provider_transport import ProviderTransportPlan, prepare_provider_transport
+from .usage import UsageRecord, aggregate_usage
 
 
 _MANAGED_LABEL = "optiprofiler.evolve.managed"
@@ -40,6 +41,9 @@ class GatewayRuntimeOutcome:
     upstream_hash: str | None
     manifest: Path
     inflight_request_count: int | None = None
+    usage: UsageRecord = field(
+        default_factory=lambda: UsageRecord.unavailable("provider_gateway")
+    )
 
     @property
     def healthy(self) -> bool:
@@ -629,6 +633,10 @@ class DockerInvocationRuntime:
                 upstream_hash or self._expected_upstream_hash() or None
             ),
             "error": error,
+            "usage": _read_gateway_usage(
+                self.gateway_audit,
+                request_count=request_count,
+            ).as_dict(),
         }
         _write_private_json(self.gateway_manifest, payload)
         return _read_gateway_manifest(self.gateway_manifest)
@@ -735,8 +743,18 @@ def build_worker_container_command(
 def read_gateway_outcome(trace_dir: Path) -> GatewayRuntimeOutcome | None:
     """Read a controller gateway manifest without exposing transport details."""
 
-    manifest = trace_dir / "provider_gateway" / "manifest.json"
-    return _read_gateway_manifest(manifest) if manifest.is_file() else None
+    gateway_dir = trace_dir / "provider_gateway"
+    manifest = gateway_dir / "manifest.json"
+    if not manifest.is_file():
+        return None
+    outcome = _read_gateway_manifest(manifest)
+    audit = gateway_dir / "requests.jsonl"
+    if audit.is_file():
+        outcome = replace(
+            outcome,
+            usage=_read_gateway_usage(audit, request_count=outcome.request_count),
+        )
+    return outcome
 
 
 def recover_gateway_trace(trace_dir: Path) -> GatewayRuntimeOutcome | None:
@@ -779,6 +797,10 @@ def recover_gateway_trace(trace_dir: Path) -> GatewayRuntimeOutcome | None:
                 if terminal is not None
                 else "controller recovered gateway evidence without a terminal outcome"
             ),
+            "usage": _read_gateway_usage(
+                audit,
+                request_count=request_count,
+            ).as_dict(),
         },
     )
     return _read_gateway_manifest(manifest)
@@ -977,6 +999,57 @@ def _parse_docker_time(value: object) -> datetime:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
+def _read_gateway_usage(path: Path, *, request_count: int) -> UsageRecord:
+    generation_records: list[UsageRecord] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            return UsageRecord.from_values(
+                source="provider_gateway",
+                calls=request_count,
+            )
+        if not isinstance(record, Mapping):
+            continue
+        if record.get("path") not in {"/v1/messages", "/v1/responses"}:
+            continue
+        generation_records.append(_usage_record_from_mapping(record.get("usage")))
+    aggregate = aggregate_usage(generation_records)
+    return UsageRecord.from_values(
+        source="provider_gateway",
+        calls=request_count,
+        input_tokens=aggregate.input_tokens,
+        output_tokens=aggregate.output_tokens,
+        cache_read_tokens=aggregate.cache_read_tokens,
+        cache_write_tokens=aggregate.cache_write_tokens,
+        cost_usd=aggregate.cost_usd,
+    )
+
+
+def _usage_record_from_mapping(value: object) -> UsageRecord:
+    if not isinstance(value, Mapping):
+        return UsageRecord.unavailable("provider_gateway")
+    return UsageRecord.from_values(
+        source="provider_gateway",
+        calls=_nonnegative_int(value.get("calls")),
+        input_tokens=_nonnegative_int(value.get("input_tokens")),
+        output_tokens=_nonnegative_int(value.get("output_tokens")),
+        cache_read_tokens=_nonnegative_int(value.get("cache_read_tokens")),
+        cache_write_tokens=_nonnegative_int(value.get("cache_write_tokens")),
+        cost_usd=_nonnegative_float(value.get("cost_usd")),
+    )
+
+
+def _nonnegative_float(value: object) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+        return float(value)
+    return None
+
+
 def _read_gateway_manifest(path: Path) -> GatewayRuntimeOutcome:
     payload = _read_json(path)
     if payload.get("schema") != "provider_gateway_manifest/1":
@@ -1011,6 +1084,7 @@ def _read_gateway_manifest(path: Path) -> GatewayRuntimeOutcome:
         inflight_request_count = _nonnegative_int(inflight_request_count)
         if inflight_request_count is None:
             raise ValueError(f"Invalid provider gateway inflight count: {path}")
+    usage = _usage_record_from_mapping(payload.get("usage"))
     return GatewayRuntimeOutcome(
         outcome=str(outcome),
         request_count=request_count,
@@ -1019,6 +1093,7 @@ def _read_gateway_manifest(path: Path) -> GatewayRuntimeOutcome:
         upstream_hash=upstream_hash,
         manifest=path,
         inflight_request_count=inflight_request_count,
+        usage=usage,
     )
 
 

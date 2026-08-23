@@ -21,6 +21,7 @@ usable default for a real run.
 | `data.split.hidden_fraction` | float in `[0, 1)` | `0.2` | Final holdout fraction evaluated once after champion selection. |
 | `data.split.smoke_count` | positive integer | `3` | Number of public problems in the fast `smoke_test` subset. |
 | `data.split.seed` | integer | `0` | Deterministic split and smoke-sampling seed. |
+| `data.split.lockbox_required` | boolean | `false` | Fail before evolution or final publication when no nonempty hidden split can be evaluated. Enable for paper-grade runs. |
 | `data.split.public` | list of strings | `[]` | Explicit worker-facing training set. A nonempty value enables explicit splitting. |
 | `data.split.validation` | list of strings | `[]` | Explicit controller-only selection set. |
 | `data.split.hidden` | list of strings | `[]` | Explicit controller-only final holdout set. |
@@ -44,7 +45,7 @@ controller directory.
 | `evaluation.cpus` | positive number | `2.0` | CPU limit passed to the evaluator container; ignored by `unsafe_local`. |
 | `evaluation.memory` | Docker memory string | `4g` | Evaluator-container memory limit; ignored by `unsafe_local`. |
 | `evaluation.pids_limit` | integer at least `16` | `512` | Evaluator-container process limit; ignored by `unsafe_local`. |
-| `evaluation.feedback_mode` | `summary` or `agent` | `summary` | Amount of structured benchmark feedback exposed after public evaluations. |
+| `evaluation.feedback_mode` | `score_only`, `structured_numeric`, or `full_artifacts` | `score_only` | Worker-visible projection of controller-owned benchmark evidence. `structured_numeric` requires the formal Core `agent_report/1` validator. |
 | `evaluation.reference` | `initial`, `scipy_powell`, or `prima_newuoa` | `initial` | Fixed reference solver paired with every candidate benchmark. Use `initial` for seed-relative evolution; reserve a strong solver for post-selection comparison. |
 | `evaluation.fitness_source` | `solver_scores` or `profile_scores_mean` | `solver_scores` | Population fitness source. `profile_scores_mean` computes each entry as `(candidate-reference+1)/2`, clips it to `[0, 1]`, and averages the complete OptiProfiler profile tensor. |
 | `evaluation.forbidden_candidate_imports` | list of dotted Python module names | `[]` | Reject candidate source that uses these imports. This is an auditable experiment ablation, not a security boundary. |

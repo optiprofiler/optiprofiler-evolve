@@ -580,7 +580,7 @@ def _write_feedback(result: EvaluationResult, output_dir: Path, feedback_mode: s
             f"- problems: `{result.problem_count}`\n\n"
             "Use this fitness only to compare candidates produced within this run.\n"
         )
-        if feedback_mode == "agent":
+        if feedback_mode == "full_artifacts":
             text += (
                 "\n## Benchmark artifacts\n\n"
                 "Read `artifact_index.json` to discover the complete benchmark bundle. "

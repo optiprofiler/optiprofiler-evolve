@@ -93,6 +93,10 @@
           "type": "integer",
           "default": 0
         },
+        "lockbox_required": {
+          "type": "boolean",
+          "default": false
+        },
         "public": {
           "type": "array",
           "items": {
@@ -207,10 +211,11 @@
         "feedback_mode": {
           "type": "string",
           "enum": [
-            "summary",
-            "agent"
+            "score_only",
+            "structured_numeric",
+            "full_artifacts"
           ],
-          "default": "summary"
+          "default": "score_only"
         },
         "reference": {
           "type": "string",

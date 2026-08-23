@@ -44,6 +44,7 @@ class CliWorkerAdapter:
             provider_gateway_outcome=result.provider_gateway_outcome,
             provider_gateway_request_count=result.provider_gateway_request_count,
             provider_gateway_manifest=result.provider_gateway_manifest,
+            usage=result.usage,
         )
 
     def provenance(self, workers: Sequence[WorkerConfig]) -> Mapping[str, object]:

@@ -14,6 +14,8 @@ from random import Random
 from threading import Event
 from typing import Any, Protocol, TYPE_CHECKING
 
+from .usage import UsageRecord
+
 if TYPE_CHECKING:
     from .config import SandboxConfig, ToolConfig, WorkerConfig, WorkersConfig
     from .models import CandidateRecord, EvaluationResult
@@ -56,6 +58,7 @@ class WorkerOutcome:
     provider_gateway_outcome: str | None = None
     provider_gateway_request_count: int | None = None
     provider_gateway_manifest: Path | None = None
+    usage: UsageRecord = field(default_factory=UsageRecord.unavailable)
 
 
 @dataclass(frozen=True)

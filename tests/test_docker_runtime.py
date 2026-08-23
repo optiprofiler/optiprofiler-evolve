@@ -20,6 +20,7 @@ from optiprofiler_evolve.config import (
 from optiprofiler_evolve.docker_runtime import (
     DockerInvocationRuntime,
     DockerResource,
+    read_gateway_outcome,
     recover_gateway_trace,
     remove_managed_resources,
     select_gc_resources,
@@ -31,6 +32,64 @@ def _completed(command: list[str], stdout: str = "") -> subprocess.CompletedProc
 
 
 class DockerInvocationRuntimeTests(unittest.TestCase):
+    def test_gateway_outcome_aggregates_native_usage_without_zero_filling(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / "trace"
+            gateway = trace / "provider_gateway"
+            gateway.mkdir(parents=True)
+            (gateway / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "provider_gateway_manifest/1",
+                        "outcome": "completed",
+                        "request_count": 2,
+                        "inflight_request_count": 0,
+                        "audit_failure": False,
+                        "exit_code": 0,
+                        "upstream_hash": "a" * 64,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            records = [
+                {
+                    "schema": "provider_gateway_request/1",
+                    "path": "/v1/responses",
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 20,
+                        "cache_read_tokens": 5,
+                        "cache_write_tokens": None,
+                        "cost_usd": None,
+                    },
+                },
+                {
+                    "schema": "provider_gateway_request/1",
+                    "path": "/v1/responses",
+                    "usage": {
+                        "input_tokens": 50,
+                        "output_tokens": 10,
+                        "cache_read_tokens": 0,
+                        "cache_write_tokens": None,
+                        "cost_usd": None,
+                    },
+                },
+            ]
+            (gateway / "requests.jsonl").write_text(
+                "".join(json.dumps(record) + "\n" for record in records),
+                encoding="utf-8",
+            )
+
+            outcome = read_gateway_outcome(trace)
+
+        assert outcome is not None
+        self.assertEqual(outcome.usage.calls, 2)
+        self.assertEqual(outcome.usage.input_tokens, 150)
+        self.assertEqual(outcome.usage.output_tokens, 30)
+        self.assertIsNone(outcome.usage.cache_write_tokens)
+        self.assertIsNone(outcome.usage.cost_usd)
+        self.assertTrue(outcome.usage.incomplete)
+
     def test_transport_setup_failure_writes_valid_launch_manifest_without_hash(self) -> None:
         worker = WorkerConfig(
             harness="codex",

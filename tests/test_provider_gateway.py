@@ -210,6 +210,69 @@ class ProviderTransportTests(unittest.TestCase):
 
 
 class ProviderGatewayTests(unittest.TestCase):
+    def test_openai_usage_is_reduced_to_numeric_audit_evidence(self) -> None:
+        def respond(handler: BaseHTTPRequestHandler, _body: bytes) -> None:
+            payload = json.dumps(
+                {
+                    "id": "response-test",
+                    "usage": {
+                        "input_tokens": 120,
+                        "output_tokens": 30,
+                        "input_tokens_details": {"cached_tokens": 40},
+                    },
+                }
+            ).encode()
+            handler.send_response(200)
+            handler.send_header("Content-Type", "application/json")
+            handler.send_header("Content-Length", str(len(payload)))
+            handler.end_headers()
+            handler.wfile.write(payload)
+
+        with _FakeUpstream(respond) as upstream, tempfile.TemporaryDirectory() as directory:
+            audit = Path(directory) / "gateway.jsonl"
+            route = _route(
+                upstream.base_url + "/v1",
+                protocol="openai_responses",
+                auth_mode="bearer",
+            )
+            with ProviderGatewayServer(route, audit_path=audit) as gateway:
+                status, _, _ = _request(gateway, "POST", "/v1/responses", b"{}")
+
+            record = json.loads(audit.read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 200)
+        self.assertEqual(record["usage"]["input_tokens"], 120)
+        self.assertEqual(record["usage"]["output_tokens"], 30)
+        self.assertEqual(record["usage"]["cache_read_tokens"], 40)
+        self.assertIsNone(record["usage"]["cost_usd"])
+
+    def test_anthropic_stream_usage_combines_start_and_delta_events(self) -> None:
+        def respond(handler: BaseHTTPRequestHandler, _body: bytes) -> None:
+            payload = (
+                'data: {"type":"message_start","message":{"usage":'
+                '{"input_tokens":90,"cache_read_input_tokens":10}}}\n\n'
+                'data: {"type":"message_delta","usage":{"output_tokens":25}}\n\n'
+                "data: [DONE]\n\n"
+            ).encode()
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Content-Length", str(len(payload)))
+            handler.end_headers()
+            handler.wfile.write(payload)
+
+        with _FakeUpstream(respond) as upstream, tempfile.TemporaryDirectory() as directory:
+            audit = Path(directory) / "gateway.jsonl"
+            with ProviderGatewayServer(
+                _route(upstream.base_url), audit_path=audit
+            ) as gateway:
+                status, _, _ = _request(gateway, "POST", "/v1/messages", b"{}")
+            record = json.loads(audit.read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 200)
+        self.assertEqual(record["usage"]["input_tokens"], 90)
+        self.assertEqual(record["usage"]["output_tokens"], 25)
+        self.assertEqual(record["usage"]["cache_read_tokens"], 10)
+
     @unittest.skipUnless(os.name == "posix", "SIGTERM lifecycle requires POSIX")
     def test_process_marks_an_inflight_request_interrupted_on_sigterm(self) -> None:
         request_started = threading.Event()

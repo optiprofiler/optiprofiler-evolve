@@ -20,7 +20,7 @@ evaluation:
   cpus: 2
   memory: 4g
   pids_limit: 512
-  feedback_mode: agent
+  feedback_mode: full_artifacts
   reference: initial
   # Keep the post-selection PRIMA challenger unavailable to candidates.
   forbidden_candidate_imports:

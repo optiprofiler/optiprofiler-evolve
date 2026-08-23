@@ -29,6 +29,32 @@ def minimal_config() -> dict:
 
 class ConfigTests(unittest.TestCase):
 
+    def test_feedback_modes_are_explicit_and_legacy_names_normalize(self) -> None:
+        for mode in ("score_only", "structured_numeric", "full_artifacts"):
+            raw = minimal_config()
+            raw["evaluation"]["feedback_mode"] = mode
+            self.assertEqual(load_config(raw).evaluation.feedback_mode, mode)
+
+        aliases = {"summary": "score_only", "agent": "full_artifacts"}
+        for legacy, canonical in aliases.items():
+            raw = minimal_config()
+            raw["evaluation"]["feedback_mode"] = legacy
+            self.assertEqual(load_config(raw).evaluation.feedback_mode, canonical)
+
+        raw = minimal_config()
+        raw["evaluation"]["feedback_mode"] = "everything"
+        with self.assertRaisesRegex(ValueError, "feedback_mode"):
+            load_config(raw)
+
+    def test_required_lockbox_rejects_a_configuration_without_hidden_data(self) -> None:
+        raw = minimal_config()
+        raw["data"]["split"].update(
+            {"hidden_fraction": 0.0, "lockbox_required": True}
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires a nonempty hidden"):
+            load_config(raw)
+
     def test_prompt_note_is_validated(self) -> None:
         raw = minimal_config()
         raw["workers"]["prompt_note"] = "One local change, two smoke calls, then finish."

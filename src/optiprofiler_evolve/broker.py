@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .evaluation import Evaluator
+from .feedback import AgentReportValidator, project_feedback
 from .models import EvaluationResult
 
 
@@ -77,6 +78,8 @@ class EvaluationBroker:
         max_smoke_calls: int,
         max_public_calls: int,
         candidate_validator: Callable[[Path], None] | None = None,
+        feedback_mode: str = "full_artifacts",
+        agent_report_validator: AgentReportValidator | None = None,
     ) -> None:
         self.workspace = workspace.resolve()
         self.evaluator = evaluator
@@ -84,6 +87,8 @@ class EvaluationBroker:
         self.exchange = self.control_dir / "exchange"
         self.artifacts = self.control_dir / "artifacts"
         self.candidate_validator = candidate_validator
+        self.feedback_mode = feedback_mode
+        self.agent_report_validator = agent_report_validator
         self.quotas = {"smoke": max_smoke_calls, "public": max_public_calls}
         self.counts = {"smoke": 0, "public": 0}
         self.token = secrets.token_urlsafe(32)
@@ -200,29 +205,39 @@ class EvaluationBroker:
             request_path.unlink(missing_ok=True)
 
     def _evaluate_and_publish(self, mode: str, output: Path) -> EvaluationResult:
-        """Publish one complete evaluation tree atomically after sanitization."""
+        """Retain trusted evidence privately and atomically publish its projection."""
 
         staging_root = self.control_dir / "staging"
         staging_root.mkdir(parents=True, exist_ok=True)
-        staging = Path(tempfile.mkdtemp(prefix="evaluation-", dir=staging_root))
+        staging = Path(tempfile.mkdtemp(prefix="private-evaluation-", dir=staging_root))
+        publication = Path(tempfile.mkdtemp(prefix="worker-feedback-", dir=staging_root))
+        private_output = self.control_dir / "private_evaluations" / mode / output.name
         try:
-            result = self.evaluator.evaluate(self.workspace, mode, staging)
-            output.parent.mkdir(parents=True, exist_ok=True)
             if output.exists():
                 raise FileExistsError(f"Evaluation output already exists: {output}")
-            staging.replace(output)
-            result = replace(result, output_dir=output)
-            result_path = output / "result.json"
-            if result_path.is_file():
-                result_path.write_text(
-                    json.dumps(_worker_result_payload(result), indent=2, sort_keys=True)
-                    + "\n",
-                    encoding="utf-8",
+            if private_output.exists():
+                raise FileExistsError(
+                    f"Private evaluation output already exists: {private_output}"
                 )
+            result = self.evaluator.evaluate(self.workspace, mode, staging)
+            private_output.parent.mkdir(parents=True, exist_ok=True)
+            staging.replace(private_output)
+            project_feedback(
+                private_output,
+                publication,
+                result,
+                mode=self.feedback_mode,
+                validate_agent_report=self.agent_report_validator,
+            )
+            output.parent.mkdir(parents=True, exist_ok=True)
+            publication.replace(output)
+            result = replace(result, output_dir=output)
             return result
         finally:
             if staging.exists():
                 shutil.rmtree(staging)
+            if publication.exists():
+                shutil.rmtree(publication)
 
     def _respond(self, request_id: str, status: int, payload: dict[str, Any]) -> None:
         responses = self.exchange / "responses"

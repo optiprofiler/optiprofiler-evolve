@@ -120,6 +120,52 @@ def reviewer_config(*, strict: bool = False) -> dict:
 
 class EngineTests(unittest.TestCase):
 
+    def test_required_lockbox_evaluation_failure_does_not_publish_a_final_solver(self) -> None:
+        class FailingHiddenEvaluator(FakeEvaluator):
+            def evaluate(
+                self, candidate: Path, mode: str, output_dir: Path
+            ) -> EvaluationResult:
+                if mode != "hidden":
+                    return super().evaluate(candidate, mode, output_dir)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                return EvaluationResult(
+                    mode,
+                    0.0,
+                    0.0,
+                    0.5,
+                    1,
+                    output_dir,
+                    success=False,
+                    error="lockbox unavailable",
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            raw = minimal_config()
+            raw["evolution"].update({"islands": 1, "attempts_per_island": 1})
+            raw["workers"]["max_parallel"] = 1
+            raw["data"]["split"]["lockbox_required"] = True
+            run_dir = root / "run"
+            engine = EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=(".",),
+                config=load_config(raw),
+                run_dir=run_dir,
+                agent_runner=fake_agent_runner,
+                evaluator_factory=lambda **_kwargs: FailingHiddenEvaluator(),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "hidden evaluation failed"):
+                engine.run()
+
+            self.assertFalse((run_dir / "final_solver").exists())
+            self.assertFalse((run_dir / "final_ranking.json").exists())
+
     def test_solver_contract_exposes_candidate_dependency_policy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -455,6 +501,29 @@ class EngineTests(unittest.TestCase):
             public_manifest = (result.run_dir / "public_data_manifest.json").read_text()
             self.assertNotIn("controller/data_manifest", public_manifest)
             self.assertNotIn("P1", public_manifest)
+            fingerprints = json.loads(
+                (result.run_dir / "controller" / "experiment_fingerprints.json").read_text()
+            )
+            provenance = json.loads((result.run_dir / "provenance.json").read_text())
+            self.assertEqual(fingerprints["schema_version"], "experiment_fingerprints/1")
+            self.assertEqual(
+                fingerprints["config_fingerprint"],
+                provenance["config_hash"],
+            )
+            self.assertEqual(len(fingerprints["experiment_fingerprint"]), 64)
+            attempts = [
+                json.loads(line)
+                for line in (result.run_dir / "attempts.jsonl").read_text().splitlines()
+            ]
+            self.assertIsNone(attempts[0]["usage"]["calls"])
+            self.assertIsNone(attempts[0]["usage"]["cost_usd"])
+            self.assertTrue(attempts[0]["usage"]["incomplete"])
+            usage = json.loads(
+                (result.run_dir / "controller" / "usage.json").read_text()
+            )
+            self.assertEqual(usage["schema"], "usage_aggregate/1")
+            self.assertIsNone(usage["aggregate"]["calls"])
+            self.assertTrue(usage["aggregate"]["incomplete"])
             self.assertTrue((result.run_dir / "checkpoints" / "iteration_001.json").is_file())
             for trace_root in sorted((result.run_dir / "traces").iterdir()):
                 self.assertEqual((trace_root / "raw.stdout.stream").read_text(), "fake worker\n")

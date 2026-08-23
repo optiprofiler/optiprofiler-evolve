@@ -14,7 +14,7 @@ evaluation:
   cpus: 1
   memory: 2g
   pids_limit: 256
-  feedback_mode: agent
+  feedback_mode: full_artifacts
   benchmark:
     max_eval_factor: 20
     n_jobs: 2

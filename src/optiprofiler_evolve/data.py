@@ -27,6 +27,9 @@ class DataPlan:
     smoke: tuple[str, ...]
     split_seed: int
     manifest_hash: str
+    universe_fingerprint: str = ""
+    split_fingerprint: str = ""
+    lockbox_required: bool = False
     custom_problem_libraries_path: str | None = None
     aliases: Mapping[str, str] | None = None
 
@@ -89,6 +92,10 @@ def resolve_data_plan(config: DataConfig) -> DataPlan:
         validation = tuple(sorted(shuffled[hidden_count : hidden_count + validation_count]))
         public = tuple(sorted(shuffled[hidden_count + validation_count :]))
 
+    if split.lockbox_required and not hidden:
+        raise ValueError(
+            "The required lockbox cannot run because the resolved hidden split is empty."
+        )
     if not public:
         raise ValueError("The public split cannot be empty.")
     if split.smoke:
@@ -99,20 +106,23 @@ def resolve_data_plan(config: DataConfig) -> DataPlan:
         random.Random(split.seed ^ 0x5A17).shuffle(smoke_pool)
         smoke = tuple(sorted(smoke_pool[:smoke_count]))
 
-    payload = {
+    universe_payload = {
         "library": config.library,
         "selection": dict(config.selection),
         "universe": list(universe),
+        "custom_problem_libraries_path": config.custom_problem_libraries_path,
+    }
+    universe_fingerprint = _fingerprint(universe_payload)
+    split_payload = {
+        "universe_fingerprint": universe_fingerprint,
         "public": list(public),
         "validation": list(validation),
         "hidden": list(hidden),
         "smoke": list(smoke),
         "split_seed": split.seed,
-        "custom_problem_libraries_path": config.custom_problem_libraries_path,
+        "lockbox_required": split.lockbox_required,
     }
-    manifest_hash = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    split_fingerprint = _fingerprint(split_payload)
     aliases = {name: _new_opaque_name() for name in universe}
     return DataPlan(
         library=config.library,
@@ -123,7 +133,10 @@ def resolve_data_plan(config: DataConfig) -> DataPlan:
         hidden=hidden,
         smoke=smoke,
         split_seed=split.seed,
-        manifest_hash=manifest_hash,
+        universe_fingerprint=universe_fingerprint,
+        split_fingerprint=split_fingerprint,
+        manifest_hash=split_fingerprint,
+        lockbox_required=split.lockbox_required,
         custom_problem_libraries_path=config.custom_problem_libraries_path,
         aliases=aliases,
     )
@@ -194,6 +207,11 @@ def _split_count(total: int, fraction: float, available: int) -> int:
 
 def _new_opaque_name() -> str:
     return f"P_{secrets.token_hex(8).upper()}"
+
+
+def _fingerprint(payload: Mapping[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 __all__: list[str] = []

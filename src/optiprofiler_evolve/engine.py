@@ -27,6 +27,7 @@ from .config import EvolveConfig, ToolConfig, WorkerConfig
 from .data import DataPlan, resolve_data_plan, write_data_manifests
 from .docker_runtime import cleanup_managed_resources, read_gateway_outcome
 from .events import EventWriter
+from .fingerprints import build_experiment_fingerprints
 from .models import CandidateRecord, EvaluationResult, EvolveResult, FinalistResult
 from .prompt import build_worker_prompt
 from .protocols import (
@@ -78,6 +79,7 @@ from .solver import (
 )
 from .trace_ledger import TraceLedger
 from .traces import finalize_adapter_trace
+from .usage import UsageRecord, aggregate_usage
 from .owner_views import render_owner_views
 from .viewers import (
     materialize_public_bundle,
@@ -137,6 +139,7 @@ class _AgentRunnerAdapter:
             capture_error=result.capture_error,
             cancelled=result.cancelled,
             termination_reason=result.termination_reason,
+            usage=result.usage,
         )
 
     def provenance(self, workers: Sequence[WorkerConfig]) -> Mapping[str, object]:
@@ -200,6 +203,8 @@ class EvolutionEngine:
             "reviewer", config.integrity_review.component
         )
         self.attempt_history: list[dict[str, Any]] = []
+        self.usage_records: list[UsageRecord] = []
+        self.usage_entries: list[dict[str, Any]] = []
         self.candidates: dict[str, CandidateRecord] = {}
         self.populations: list[list[CandidateRecord]] = []
         self.artifacts: dict[str, object] = {}
@@ -214,6 +219,7 @@ class EvolutionEngine:
         self.final_solver: Path | None = None
         self.result: EvolveResult | None = None
         self._render_lock = threading.Lock()
+        self._usage_lock = threading.Lock()
         self._refresh_stop = threading.Event()
         self._refresh_thread: threading.Thread | None = None
         self._refresh_poll_seconds = 2.0
@@ -292,6 +298,7 @@ class EvolutionEngine:
                 provider_gateway_outcome=gateway.outcome,
                 provider_gateway_request_count=gateway.request_count,
                 provider_gateway_manifest=gateway.manifest,
+                usage=gateway.usage,
             )
         if gateway_expected:
             self._emit(
@@ -303,7 +310,7 @@ class EvolutionEngine:
                     "request_count": gateway.request_count if gateway is not None else 0,
                 },
             )
-        return replace(
+        outcome = replace(
             outcome,
             native_trace=paths.stdout,
             stderr_trace=paths.stderr,
@@ -315,6 +322,28 @@ class EvolutionEngine:
                 or ("controller_cancelled" if cancelled else "adapter_exit")
             ),
         )
+        self._record_worker_usage(request, outcome)
+        return outcome
+
+    def _record_worker_usage(
+        self, request: WorkerRequest, outcome: WorkerOutcome
+    ) -> None:
+        entry = {
+            "worker": f"{request.worker.harness}:{request.worker.model}",
+            "trace": dict(request.trace_context.get("join", {})),
+            "usage": outcome.usage.as_dict(),
+        }
+        with self._usage_lock:
+            self.usage_records.append(outcome.usage)
+            self.usage_entries.append(entry)
+            _write_json(
+                self.run_dir / "controller" / "usage.json",
+                {
+                    "schema": "usage_aggregate/1",
+                    "aggregate": aggregate_usage(self.usage_records).as_dict(),
+                    "records": list(self.usage_entries),
+                },
+            )
 
     def _raise_if_cancelled(self) -> None:
         if self._cancellation_event.is_set():
@@ -658,6 +687,18 @@ class EvolutionEngine:
         self._validate_candidate(seed_path)
         self.data = resolve_data_plan(self.config.data)
         write_data_manifests(self.data, self.run_dir)
+        fingerprints = build_experiment_fingerprints(
+            config=self.config,
+            data=self.data,
+            source_tree=seed_path,
+            interface=self.interface,
+            runtime=self.runtime,
+            editable=self.editable,
+        )
+        _write_json(
+            self.run_dir / "controller" / "experiment_fingerprints.json",
+            fingerprints.as_dict(),
+        )
         solver_contract = self.run_dir / "solver_contract.json"
         _write_json(
             solver_contract,
@@ -678,7 +719,11 @@ class EvolutionEngine:
             data=self.data,
             config=self.config.evaluation,
         )
-        seed_public_mode = "public" if self.config.evaluation.feedback_mode == "agent" else "public_score"
+        seed_public_mode = (
+            "public"
+            if self.config.evaluation.feedback_mode != "score_only"
+            else "public_score"
+        )
         seed_public = self.evaluator.evaluate(
             seed_path,
             seed_public_mode,
@@ -1177,6 +1222,7 @@ class EvolutionEngine:
             if attempt.worker_outcome.trace_outcome
             else None,
             "trace_capture_error": attempt.worker_outcome.capture_error,
+            "usage": attempt.worker_outcome.usage.as_dict(),
         }
         self.attempt_history.append(summary)
         _append_json(self.run_dir / "attempts.jsonl", summary)
@@ -1282,6 +1328,11 @@ class EvolutionEngine:
             final_score = result.score if result.success else 0.0
             success = result.success
             error = result.error
+        elif data.lockbox_required:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            final_score = 0.0
+            success = False
+            error = "required lockbox has no hidden problems"
         else:
             output_dir.mkdir(parents=True, exist_ok=True)
             final_score = record.validation_score
@@ -1682,6 +1733,7 @@ class _EngineControllerServices:
                     if outcome.provider_gateway_manifest
                     else None
                 ),
+                "usage": outcome.usage.as_dict(),
                 "outputs": sorted(outputs),
                 "missing_outputs": missing_outputs,
             },
@@ -2042,6 +2094,7 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
             max_smoke_calls=engine.config.evaluation.max_smoke_calls_per_worker,
             max_public_calls=engine.config.evaluation.max_public_calls_per_worker,
             candidate_validator=self._ensure_candidate_safe,
+            feedback_mode=engine.config.evaluation.feedback_mode,
         )
         broker.install_tools(tools_dir)
         connection = broker.start(docker=engine.config.sandbox.backend == "docker")

@@ -15,7 +15,7 @@ import socket
 import ssl
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -70,6 +70,14 @@ _WORKER_STRIPPED_HEADERS = _HOP_BY_HOP_HEADERS | frozenset(
 )
 _RESPONSE_STRIPPED_HEADERS = _HOP_BY_HOP_HEADERS | frozenset({"set-cookie"})
 _CHUNK_BYTES = 64 * 1024
+_USAGE_SCAN_BYTES = 2 * 1024 * 1024
+_USAGE_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "cost_usd",
+)
 
 
 @dataclass(frozen=True)
@@ -124,6 +132,66 @@ class _ForwardState:
     status: int | None = None
     response_started: bool = False
     response_bytes: int = 0
+    usage: dict[str, int | float | None] | None = None
+
+
+class _ProviderUsageCollector:
+    """Extract provider-native numeric usage without retaining response content."""
+
+    def __init__(self, protocol: str, content_type: str) -> None:
+        self.protocol = protocol
+        self.event_stream = "text/event-stream" in content_type.lower()
+        self.buffer = bytearray()
+        self.values: dict[str, int | float | None] = {
+            name: None for name in _USAGE_FIELDS
+        }
+        self.overflow = False
+
+    def feed(self, chunk: bytes) -> None:
+        if self.event_stream:
+            self.buffer.extend(chunk)
+            while b"\n" in self.buffer:
+                line, _, remainder = self.buffer.partition(b"\n")
+                self.buffer = bytearray(remainder)
+                self._consume_sse_line(line)
+            if len(self.buffer) > _USAGE_SCAN_BYTES:
+                self.buffer.clear()
+                self.overflow = True
+            return
+        if len(self.buffer) + len(chunk) <= _USAGE_SCAN_BYTES:
+            self.buffer.extend(chunk)
+        else:
+            self.buffer.clear()
+            self.overflow = True
+
+    def finish(self) -> dict[str, int | float | None]:
+        if self.event_stream:
+            if self.buffer:
+                self._consume_sse_line(bytes(self.buffer))
+        elif not self.overflow and self.buffer:
+            self._consume_json(bytes(self.buffer))
+        return _usage_payload(self.values)
+
+    def _consume_sse_line(self, line: bytes) -> None:
+        stripped = line.strip()
+        if not stripped.startswith(b"data:"):
+            return
+        payload = stripped[5:].strip()
+        if not payload or payload == b"[DONE]":
+            return
+        self._consume_json(payload)
+
+    def _consume_json(self, payload: bytes) -> None:
+        try:
+            value = json.loads(payload)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return
+        usage = _native_usage(value, self.protocol)
+        for name, item in usage.items():
+            if item is None:
+                continue
+            previous = self.values[name]
+            self.values[name] = item if previous is None else max(previous, item)
 
 
 class GatewayAuditLog:
@@ -377,6 +445,7 @@ class _GatewayHandler(BaseHTTPRequestHandler):
                             "request_bytes": request_bytes,
                             "response_bytes": response_bytes,
                             "error_type": error_type,
+                            "usage": forward.usage or _usage_payload({}),
                         }
                     )
                 except OSError:
@@ -472,6 +541,10 @@ class _GatewayHandler(BaseHTTPRequestHandler):
             response = connection.getresponse()
             state.status = response.status
             state.response_started = True
+            collector = _ProviderUsageCollector(
+                route.protocol,
+                response.getheader("Content-Type", ""),
+            )
             self.send_response(response.status)
             for name, value in _filtered_response_headers(response.getheaders()):
                 self.send_header(name, value)
@@ -480,12 +553,14 @@ class _GatewayHandler(BaseHTTPRequestHandler):
             self.end_headers()
             count = 0
             while chunk := response.read1(_CHUNK_BYTES):
+                collector.feed(chunk)
                 self.wfile.write(chunk)
                 self.wfile.flush()
                 count += len(chunk)
                 state.response_bytes = count
             if response.length not in {None, 0}:
                 raise http.client.IncompleteRead(b"", response.length)
+            state.usage = collector.finish()
             self.close_connection = True
             return response.status, count
         finally:
@@ -502,6 +577,84 @@ class _GatewayHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             self.wfile.flush()
         self.close_connection = True
+
+
+def _native_usage(value: object, protocol: str) -> dict[str, int | float | None]:
+    if not isinstance(value, Mapping):
+        return {name: None for name in _USAGE_FIELDS}
+    candidates: list[Mapping[str, object]] = []
+    direct = value.get("usage")
+    if isinstance(direct, Mapping):
+        candidates.append(direct)
+    for container_name in ("response", "message"):
+        container = value.get(container_name)
+        if isinstance(container, Mapping):
+            usage = container.get("usage")
+            if isinstance(usage, Mapping):
+                candidates.append(usage)
+
+    merged: dict[str, int | float | None] = {name: None for name in _USAGE_FIELDS}
+    for usage in candidates:
+        _merge_native_usage(merged, usage, protocol)
+    return merged
+
+
+def _merge_native_usage(
+    target: dict[str, int | float | None],
+    usage: Mapping[str, object],
+    protocol: str,
+) -> None:
+    for name in ("input_tokens", "output_tokens"):
+        value = _nonnegative_integer(usage.get(name))
+        if value is not None:
+            previous = target[name]
+            target[name] = value if previous is None else max(previous, value)
+
+    cache_read = _nonnegative_integer(usage.get("cache_read_input_tokens"))
+    cache_write = _nonnegative_integer(usage.get("cache_creation_input_tokens"))
+    if protocol == "openai_responses":
+        details = usage.get("input_tokens_details")
+        if isinstance(details, Mapping):
+            cache_read = _nonnegative_integer(details.get("cached_tokens"))
+            cache_write = _nonnegative_integer(details.get("cache_write_tokens"))
+    for name, value in (
+        ("cache_read_tokens", cache_read),
+        ("cache_write_tokens", cache_write),
+    ):
+        if value is not None:
+            previous = target[name]
+            target[name] = value if previous is None else max(previous, value)
+
+    for key in ("cost_usd", "total_cost_usd", "cost"):
+        cost = _nonnegative_number(usage.get(key))
+        if cost is not None:
+            previous = target["cost_usd"]
+            target["cost_usd"] = cost if previous is None else max(previous, cost)
+            break
+
+
+def _usage_payload(
+    values: Mapping[str, int | float | None],
+) -> dict[str, object]:
+    payload = {name: values.get(name) for name in _USAGE_FIELDS}
+    missing = [name for name in _USAGE_FIELDS if payload[name] is None]
+    return {
+        **payload,
+        "incomplete": bool(missing),
+        "missing_fields": missing,
+    }
+
+
+def _nonnegative_integer(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
+
+
+def _nonnegative_number(value: object) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+        return float(value)
+    return None
 
 
 class _GatewayRejection(Exception):

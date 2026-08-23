@@ -30,7 +30,7 @@ class BlockingEvaluator:
 
     def evaluate(self, candidate: Path, mode: str, output_dir: Path) -> EvaluationResult:
         output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / "partial.txt").write_text("not yet public", encoding="utf-8")
+        (output_dir / "evaluator.log").write_text("not yet public", encoding="utf-8")
         self.ready.set()
         if not self.release.wait(timeout=5):
             raise TimeoutError("test evaluator was not released")
@@ -41,6 +41,81 @@ class BlockingEvaluator:
 
 
 class BrokerTests(unittest.TestCase):
+    def test_private_evidence_is_projected_by_feedback_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            workspace.mkdir()
+
+            class EvidenceEvaluator(FakeEvaluator):
+                def evaluate(
+                    self,
+                    candidate: Path,
+                    mode: str,
+                    output_dir: Path,
+                ) -> EvaluationResult:
+                    result = super().evaluate(candidate, mode, output_dir)
+                    (output_dir / "agent_report.json").write_text(
+                        json.dumps({"producer": "core-fixture", "score": result.score}),
+                        encoding="utf-8",
+                    )
+                    benchmark = output_dir / "benchmark"
+                    benchmark.mkdir()
+                    (benchmark / "profile.png").write_bytes(b"png")
+                    (benchmark / "run.log").write_text("log", encoding="utf-8")
+                    (benchmark / "state.pkl").write_bytes(b"private")
+                    (output_dir / "private_notes.txt").write_text(
+                        "controller only",
+                        encoding="utf-8",
+                    )
+                    return result
+
+            for mode in ("score_only", "structured_numeric", "full_artifacts"):
+                control = root / mode
+                validated: list[dict[str, object]] = []
+                broker = EvaluationBroker(
+                    workspace=workspace,
+                    control_dir=control,
+                    evaluator=EvidenceEvaluator(),
+                    max_smoke_calls=1,
+                    max_public_calls=1,
+                    feedback_mode=mode,
+                    agent_report_validator=(
+                        lambda report: validated.append(dict(report))
+                        if mode == "structured_numeric"
+                        else None
+                    ),
+                )
+                published = control / "artifacts/evaluations/public/001"
+                result = broker._evaluate_and_publish("public", published)
+
+                self.assertEqual(result.output_dir, published)
+                private = control / "private_evaluations/public/001"
+                self.assertTrue((private / "agent_report.json").is_file())
+                worker_result = json.loads((published / "result.json").read_text())
+                self.assertNotIn("candidate_score", worker_result)
+                self.assertNotIn("reference_score", worker_result)
+                self.assertFalse((published / "private_notes.txt").exists())
+                self.assertFalse((published / "benchmark/state.pkl").exists())
+
+                if mode == "score_only":
+                    files = sorted(
+                        path.relative_to(published).as_posix()
+                        for path in published.rglob("*")
+                    )
+                    self.assertEqual(files, ["feedback.md", "result.json"])
+                elif mode == "structured_numeric":
+                    self.assertEqual(
+                        validated,
+                        [{"producer": "core-fixture", "score": 0.6}],
+                    )
+                    self.assertTrue((published / "agent_report.json").is_file())
+                    self.assertFalse((published / "benchmark").exists())
+                else:
+                    self.assertTrue((published / "benchmark/profile.png").is_file())
+                    self.assertTrue((published / "benchmark/run.log").is_file())
+                    self.assertTrue((published / "artifact_index.json").is_file())
+
     def test_evaluation_tree_is_published_only_after_completion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -73,7 +148,7 @@ class BrokerTests(unittest.TestCase):
                     break
                 time.sleep(0.01)
             self.assertTrue(response.exists())
-            self.assertTrue((published / "partial.txt").is_file())
+            self.assertTrue((published / "evaluator.log").is_file())
             self.assertFalse(any((broker.control_dir / "staging").iterdir()))
             broker.stop()
 

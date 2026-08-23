@@ -150,6 +150,7 @@ class SplitConfig:
     hidden_fraction: float = 0.2
     smoke_count: int = 3
     seed: int = 0
+    lockbox_required: bool = False
     public: tuple[str, ...] = ()
     validation: tuple[str, ...] = ()
     hidden: tuple[str, ...] = ()
@@ -169,6 +170,13 @@ class SplitConfig:
         explicit = bool(self.public) or bool(self.validation) or bool(self.hidden)
         if explicit and not self.public:
             raise ValueError("An explicit data split must provide a nonempty public set.")
+        if self.lockbox_required and (
+            (explicit and not self.hidden)
+            or (not explicit and self.hidden_fraction == 0)
+        ):
+            raise ValueError(
+                "A required lockbox requires a nonempty hidden split."
+            )
         groups = {
             "public": set(self.public),
             "validation": set(self.validation),
@@ -219,7 +227,7 @@ class EvaluationConfig:
     cpus: float = 2.0
     memory: str = "4g"
     pids_limit: int = 512
-    feedback_mode: str = "summary"
+    feedback_mode: str = "score_only"
     reference: str = "initial"
     fitness_source: str = "solver_scores"
     forbidden_candidate_imports: tuple[str, ...] = ()
@@ -242,8 +250,15 @@ class EvaluationConfig:
             raise ValueError(
                 "evaluation cpus/memory must be set and pids_limit must be at least 16."
             )
-        if self.feedback_mode not in {"summary", "agent"}:
-            raise ValueError("evaluation.feedback_mode must be 'summary' or 'agent'.")
+        if self.feedback_mode not in {
+            "score_only",
+            "structured_numeric",
+            "full_artifacts",
+        }:
+            raise ValueError(
+                "evaluation.feedback_mode must be 'score_only', "
+                "'structured_numeric', or 'full_artifacts'."
+            )
         if not self.adapter or not self.adapter.replace("-", "_").isidentifier():
             raise ValueError("evaluation.adapter must be a registered component name.")
         if self.reference not in {"initial", "scipy_powell", "prima_newuoa"}:
@@ -906,9 +921,14 @@ def _normalize_legacy_config(raw: dict[str, Any]) -> dict[str, Any]:
         translated["iterations"] = translated.pop("rounds")
         raw["evolution"] = translated
     evaluation = raw.get("evaluation")
-    if isinstance(evaluation, Mapping) and evaluation.get("backend") == "local":
+    if isinstance(evaluation, Mapping):
         translated = dict(evaluation)
-        translated["backend"] = "unsafe_local"
+        if translated.get("backend") == "local":
+            translated["backend"] = "unsafe_local"
+        feedback_aliases = {"summary": "score_only", "agent": "full_artifacts"}
+        feedback_mode = translated.get("feedback_mode")
+        if feedback_mode in feedback_aliases:
+            translated["feedback_mode"] = feedback_aliases[feedback_mode]
         raw["evaluation"] = translated
     return raw
 

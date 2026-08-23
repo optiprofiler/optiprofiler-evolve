@@ -10,6 +10,34 @@ from optiprofiler_evolve.data import resolve_data_plan, write_data_manifests
 
 
 class DataPlanTests(unittest.TestCase):
+    def test_universe_and_split_have_independent_fingerprints(self) -> None:
+        first = resolve_data_plan(
+            DataConfig(
+                problem_names=("P1", "P2", "P3", "P4"),
+                split=SplitConfig(
+                    public=("P1", "P2"),
+                    validation=("P3",),
+                    hidden=("P4",),
+                    smoke=("P1",),
+                ),
+            )
+        )
+        second = resolve_data_plan(
+            DataConfig(
+                problem_names=("P1", "P2", "P3", "P4"),
+                split=SplitConfig(
+                    public=("P1", "P3"),
+                    validation=("P2",),
+                    hidden=("P4",),
+                    smoke=("P1",),
+                ),
+            )
+        )
+
+        self.assertEqual(first.universe_fingerprint, second.universe_fingerprint)
+        self.assertNotEqual(first.split_fingerprint, second.split_fingerprint)
+        self.assertEqual(first.manifest_hash, first.split_fingerprint)
+
     def test_split_is_deterministic_disjoint_and_smoke_is_public(self) -> None:
         config = DataConfig(
             problem_names=tuple(f"P{index}" for index in range(10)),
@@ -69,6 +97,20 @@ class DataPlanTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "smoke must be a subset"):
             config.validate()
+
+    def test_required_lockbox_fails_if_resolution_produces_no_hidden_problem(self) -> None:
+        config = DataConfig(
+            problem_names=("ONLY",),
+            split=SplitConfig(
+                hidden_fraction=0.2,
+                smoke_count=1,
+                lockbox_required=True,
+            ),
+        )
+        config.validate()
+
+        with self.assertRaisesRegex(ValueError, "resolved hidden split is empty"):
+            resolve_data_plan(config)
 
 
 if __name__ == "__main__":

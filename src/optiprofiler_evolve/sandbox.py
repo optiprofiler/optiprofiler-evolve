@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field as dataclass_field, replace
 from pathlib import Path
 from typing import Mapping
 
@@ -23,6 +23,7 @@ from .traces import (
     run_captured_process,
     trace_paths,
 )
+from .usage import UsageRecord
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class AgentRunResult:
     provider_gateway_outcome: str | None = None
     provider_gateway_request_count: int | None = None
     provider_gateway_manifest: Path | None = None
+    usage: UsageRecord = dataclass_field(default_factory=UsageRecord.unavailable)
 
 
 def run_agent(
@@ -182,6 +184,7 @@ def run_agent(
                 gateway.request_count if gateway is not None else None
             ),
             provider_gateway_manifest=(gateway.manifest if gateway is not None else None),
+            usage=(gateway.usage if gateway is not None else UsageRecord.unavailable()),
         )
     except Exception as exc:
         if runtime is not None and worker_started and not worker_finished:

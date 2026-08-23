@@ -83,7 +83,7 @@ class OptiProfilerEvaluationTests(unittest.TestCase):
             )
             config = EvaluationConfig(
                 backend="unsafe_local",
-                feedback_mode="agent",
+                feedback_mode="full_artifacts",
                 fitness_source="profile_scores_mean",
                 benchmark={"score_only": False, "n_jobs": 1, "max_eval_factor": 5},
             )

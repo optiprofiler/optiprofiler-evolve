@@ -32,7 +32,7 @@ evaluation:
   cpus: 4
   memory: 8g
   pids_limit: 512
-  feedback_mode: agent
+  feedback_mode: full_artifacts
   reference: scipy_powell
   max_smoke_calls_per_worker: 20
   max_public_calls_per_worker: 5
