@@ -221,8 +221,22 @@
           "type": "string",
           "enum": [
             "initial",
+            "scipy_nelder_mead",
             "scipy_powell",
-            "prima_newuoa"
+            "scipy_cobyla",
+            "scipy_cobyqa",
+            "pdfo",
+            "pdfo_uobyqa",
+            "pdfo_newuoa",
+            "pdfo_bobyqa",
+            "pdfo_lincoa",
+            "pdfo_cobyla",
+            "prima",
+            "prima_uobyqa",
+            "prima_newuoa",
+            "prima_bobyqa",
+            "prima_lincoa",
+            "prima_cobyla"
           ],
           "default": "initial"
         },
@@ -289,12 +303,12 @@
         "iterations": {
           "type": "integer",
           "minimum": 1,
-          "default": 3
+          "default": 1
         },
         "islands": {
           "type": "integer",
           "minimum": 1,
-          "default": 4
+          "default": 1
         },
         "attempts_per_island": {
           "type": "integer",
@@ -304,12 +318,12 @@
         "population_per_island": {
           "type": "integer",
           "minimum": 1,
-          "default": 4
+          "default": 2
         },
         "migration_interval": {
           "type": "integer",
           "minimum": 0,
-          "default": 2
+          "default": 0
         },
         "random_seed": {
           "type": "integer",
@@ -556,11 +570,11 @@
             "research",
             "custom"
           ],
-          "default": "research"
+          "default": "minimal"
         },
         "web_search": {
           "type": "boolean",
-          "default": true
+          "default": false
         },
         "network": {
           "type": "boolean",
@@ -580,7 +594,7 @@
         },
         "compilers": {
           "type": "boolean",
-          "default": true
+          "default": false
         },
         "package_install": {
           "type": "boolean",

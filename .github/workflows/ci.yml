@@ -39,7 +39,9 @@ jobs:
           optiprofiler-evolve-worker:ci -c 'read value && test "$value" = probe'
       - run: >-
           docker run --rm --entrypoint python optiprofiler-evolve-evaluator:ci -c
-          'import optiprofiler, optiprofiler_evolve, yaml'
+          'import optiprofiler, optiprofiler_evolve, pdfo, prima, yaml;
+          from optiprofiler_evolve.competitors import competitor_names;
+          assert {"pdfo_newuoa", "prima_newuoa"} <= set(competitor_names("u"))'
       - run: docker run --rm optiprofiler-evolve-gateway:ci --help
       - run: python -m pip install -e .
       - run: >-

@@ -9,7 +9,7 @@ from .data import DataPlan
 from .solver import InterfaceSpec
 
 
-WORKER_PROMPT_VERSION = "solver-worker/1"
+WORKER_PROMPT_VERSION = "solver-worker/2"
 
 
 def build_worker_prompt(
@@ -114,6 +114,12 @@ Required work order
 4. Run `smoke_test` again, then use `evaluate` when the candidate is ready.
 5. Inspect the structured and visual benchmark artifacts, make any justified final edit,
    and finish with a bounded smoke check when quota remains.
+6. Before finishing, write `.optiprofiler_evolve/solver_explanation.json`. It must use
+   schema `solver_explanation/1` and contain: a concise `summary`; a `pseudocode` list;
+   a `mechanisms` list whose entries have `name`, `description`, and `code_bindings`
+   (`file` plus one-based `[start, end]` lines); plus `expected_strengths`,
+   `known_limitations`, and `evidence_consulted` string lists. Describe the algorithm
+   that actually remains in the files, not an intended or discarded experiment.
 Do not spend the worker budget only studying or reimplementing the public problem. The
 deliverable is an edited, valid solver in /workspace.
 {_experiment_note(prompt_note)}

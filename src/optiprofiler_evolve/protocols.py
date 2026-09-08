@@ -58,6 +58,7 @@ class WorkerOutcome:
     provider_gateway_outcome: str | None = None
     provider_gateway_request_count: int | None = None
     provider_gateway_manifest: Path | None = None
+    solver_explanation: Path | None = None
     usage: UsageRecord = field(default_factory=UsageRecord.unavailable)
 
 
@@ -70,6 +71,7 @@ class AgentJob:
     prompt: str
     inputs: Mapping[str, Path] = field(default_factory=dict)
     expected_outputs: tuple[str, ...] = ()
+    recover_outputs_on_nonzero_exit: bool = False
     worker_index: int = 0
     worker: WorkerConfig | None = None
     tools: ToolConfig | None = None
@@ -121,6 +123,7 @@ class PublicVariantEvaluator(Protocol):
         label: str,
         *,
         reference: str | None = None,
+        mode: str = "public_score",
     ) -> EvaluationResult: ...
 
 

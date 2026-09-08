@@ -50,7 +50,7 @@ evolution:
   islands: 4
   attempts_per_island: 1
   population_per_island: 4
-  migration_interval: 2
+  migration_interval: 0
   random_seed: 0
   finalists_per_island: 1
 
@@ -122,26 +122,25 @@ workflow:
     - name: report
   attempt_steps:
     - name: mutate
-    - name: static_audit
     - name: smoke
     - name: public_evaluate
-    - name: feedback
-  after_iteration:
-    - name: migration
+  after_iteration: []
 ```
 
 The `workflow` block above is the built-in default and normally may be omitted.
-It exists to make ablations explicit: phases define the run-level sequence,
-attempt steps define one candidate's path, and after-iteration policies propose
-population changes after all attempts reach the barrier. This is intentionally
-an ordered protocol rather than an arbitrary DAG.
+Calling `evolve(..., config=None)` further uses a one-iteration, one-island
+quick start. Optional `static_audit` and `feedback` steps, whole-candidate
+migration, web search, compilers, and the research phases must be requested
+explicitly. The engine's final source/interface/import gate and semantic
+integrity reviewer remain mandatory. The workflow is intentionally an ordered
+protocol rather than an arbitrary DAG.
 
 The optional full harness is shown in
 [`examples/experiment-research.yaml`](../examples/experiment-research.yaml). It
 inserts `direction_scout` before exploration, `strategy_analysis` and
-`recombine` before final validation, and `challenger` after the one hidden
-evaluation. See [Research workflow](research-workflow.md) for phase contracts,
-failure behavior, and every built-in option.
+`strategy_transfer` before final validation, and `challenger` after the one
+hidden evaluation. See [Research workflow](research-workflow.md) for phase
+contracts, failure behavior, explanation artifacts, and every built-in option.
 
 `data.problem_names` can replace dynamic library selection. Explicit
 `data.split.public`, `data.split.validation`, and `data.split.hidden` can

@@ -167,7 +167,9 @@ class ExtensibilityTests(unittest.TestCase):
                 )
 
     def test_frozen_config_helpers_create_isolated_ablation_variants(self) -> None:
-        base = load_config(minimal_config())
+        base = load_config(minimal_config()).with_step(
+            ComponentConfig("static_audit"), after="mutate"
+        ).with_step(ComponentConfig("feedback"))
         without = base.without_step("static_audit")
         reordered = base.reorder_steps(
             ["mutate", "smoke", "public_evaluate", "feedback", "static_audit"]
@@ -231,7 +233,9 @@ class ExtensibilityTests(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
-            base = load_config(minimal_config()).with_step(InspectStep(), after="static_audit")
+            base = load_config(minimal_config()).with_step(
+                ComponentConfig("static_audit"), after="mutate"
+            ).with_step(InspectStep(), after="static_audit")
             workflow = dataclasses.replace(
                 base.workflow,
                 after_iteration=(ComponentConfig.from_component(StopAfterFirstIteration()),),
@@ -282,7 +286,7 @@ class ExtensibilityTests(unittest.TestCase):
                     {"tools": {"network": True, "web_search": False}},
                     _factory=NestedOptionsStep,
                 ),
-                after="static_audit",
+                after="smoke",
             )
             engine = EvolutionEngine(
                 initial=source,
@@ -398,7 +402,9 @@ class ExtensibilityTests(unittest.TestCase):
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             (source / "locked.txt").write_text("original", encoding="utf-8")
-            config = load_config(minimal_config()).without_step("static_audit")
+            config = load_config(minimal_config()).with_step(
+                ComponentConfig("static_audit"), after="mutate"
+            ).without_step("static_audit")
             engine = EvolutionEngine(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
@@ -507,14 +513,77 @@ class ExtensibilityTests(unittest.TestCase):
                 "changed_files": ["solver.py"],
                 "worker_returncode": 0,
                 "worker_timed_out": False,
+                "solver_explanation_summary": {
+                    "summary": "Adaptive polling.",
+                    "mechanisms": ["poll ordering"],
+                    "pseudocode": ["rank directions"],
+                },
             }
         ]
         memory = engine._memory_for(0)
         self.assertIsNotNone(memory)
         self.assertIn("public_score", memory)
+        self.assertIn("Adaptive polling", memory)
         self.assertNotIn("validation", memory)
         self.assertNotIn("SECRET", memory)
         self.assertNotIn('"valid"', memory)
+
+    def test_controller_summary_handles_attempts_without_public_scores(self) -> None:
+        base = load_config(minimal_config())
+        config = dataclasses.replace(
+            base,
+            workers=dataclasses.replace(
+                base.workers,
+                tools=dataclasses.replace(
+                    base.workers.tools,
+                    communication="controller_summary",
+                ),
+            ),
+        )
+        engine = EvolutionEngine(
+            initial=Path("solver"),
+            interface=InterfaceSpec.parse("solver.py:solver"),
+            runtime="python",
+            editable=(".",),
+            config=config,
+            run_dir=Path("run"),
+            agent_runner=agent_runner,
+            evaluator_factory=evaluator_factory,
+        )
+        engine.attempt_history = [
+            {
+                "attempt_id": "failed-before-evaluation",
+                "candidate_id": "failed-before-evaluation",
+                "island": 0,
+                "iteration": 1,
+                "attempt_index": 0,
+                "parent_id": "seed",
+                "public_score": None,
+                "changed_files": [],
+                "worker_returncode": 1,
+                "worker_timed_out": False,
+                "solver_explanation_summary": None,
+            },
+            {
+                "attempt_id": "evaluated",
+                "candidate_id": "evaluated",
+                "island": 0,
+                "iteration": 1,
+                "attempt_index": 1,
+                "parent_id": "seed",
+                "public_score": 0.6,
+                "changed_files": ["solver.py"],
+                "worker_returncode": 0,
+                "worker_timed_out": False,
+                "solver_explanation_summary": None,
+            },
+        ]
+
+        memory = engine._memory_for(0)
+
+        self.assertIsNotNone(memory)
+        self.assertIn("failed-before-evaluation", memory)
+        self.assertIn("evaluated", memory)
 
     def test_component_class_is_instantiated_not_returned_as_an_instance(self) -> None:
         component = build("step", ComponentConfig.from_component(InspectStep))

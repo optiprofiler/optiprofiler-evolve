@@ -5,10 +5,14 @@ from __future__ import annotations
 import os
 
 from .config import (
+    DataConfig,
     EvolveConfig,
     EvaluationConfig,
+    EvolutionConfig,
+    IntegrityReviewConfig,
     ProviderGatewayConfig,
     SandboxConfig,
+    ToolConfig,
     WorkerConfig,
     WorkersConfig,
 )
@@ -31,11 +35,27 @@ def dfo_default(*, worker: WorkerConfig | None = None) -> EvolveConfig:
         ),
     )
     return EvolveConfig(
+        data=DataConfig(selection={"ptype": "u", "mindim": 1, "maxdim": 5}),
         evaluation=EvaluationConfig(
             backend="docker",
             docker_image="optiprofiler-evolve-evaluator:latest",
+            benchmark={"max_eval_factor": 20, "n_jobs": 1, "score_only": True},
+            smoke_overrides={"max_eval_factor": 5},
         ),
-        workers=WorkersConfig(pool=(selected,)),
+        evolution=EvolutionConfig(
+            iterations=1,
+            islands=1,
+            attempts_per_island=1,
+            population_per_island=2,
+            migration_interval=0,
+            finalists_per_island=1,
+        ),
+        workers=WorkersConfig(
+            pool=(selected,),
+            max_parallel=1,
+            tools=ToolConfig(),
+        ),
+        integrity_review=IntegrityReviewConfig(allow_same_model=True),
         sandbox=SandboxConfig(
             backend="docker",
             worker_image="optiprofiler-evolve-worker:latest",

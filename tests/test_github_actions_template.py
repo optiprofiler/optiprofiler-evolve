@@ -8,6 +8,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / "examples" / "github-actions" / "evolve.yml"
+SELF_HOSTED_WORKFLOW = ROOT / "examples" / "github-actions" / "evolve-self-hosted.yml"
 EXTERNAL_ROOT = ROOT / "examples" / "external-repository"
 EXTERNAL_WORKFLOW = EXTERNAL_ROOT / "evolve.yml"
 
@@ -38,6 +39,43 @@ class GitHubActionsTemplateTests(unittest.TestCase):
         self.assertNotIn("owner/", text)
         self.assertIn("permissions:\n  contents: read", text)
         self.assertIn("workflow_dispatch:", text)
+
+    def test_self_hosted_template_is_one_safe_job_for_syu_ubuntu(self) -> None:
+        payload = yaml.safe_load(SELF_HOSTED_WORKFLOW.read_text(encoding="utf-8"))
+        self.assertEqual(set(payload["jobs"]), {"evolve"})
+        job = payload["jobs"]["evolve"]
+        self.assertEqual(
+            job["runs-on"],
+            ["self-hosted", "linux", "x64", "syu-ubuntu"],
+        )
+        self.assertIn("github.run_id", job["env"]["OPTIPROFILER_EVOLVE_RUN_DIR"])
+        self.assertEqual(
+            job["env"]["OPTIPROFILER_EVOLVE_CONFIG"],
+            "examples/experiment-research.yaml",
+        )
+        uploads = [
+            step
+            for step in job["steps"]
+            if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        ]
+        self.assertEqual(len(uploads), 1)
+        self.assertEqual(
+            uploads[0]["with"]["path"],
+            "${{ env.OPTIPROFILER_EVOLVE_RUN_DIR }}/public",
+        )
+        text = SELF_HOSTED_WORKFLOW.read_text(encoding="utf-8")
+        self.assertNotIn("FINAL_REPORT.md", text)
+        self.assertNotIn("path: ${{ env.OPTIPROFILER_EVOLVE_RUN_DIR }}\n", text)
+        for marker in ("actions/checkout@", "actions/setup-python@", "actions/upload-artifact@"):
+            reference = text.split(marker, 1)[1].split()[0]
+            self.assertEqual(len(reference), 40)
+
+    def test_github_launcher_accepts_an_explicit_experiment_config(self) -> None:
+        launcher = (ROOT / "examples" / "github-actions" / "run.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("OPTIPROFILER_EVOLVE_CONFIG", launcher)
+        compile(launcher, str(ROOT / "examples" / "github-actions" / "run.py"), "exec")
 
     def test_external_repository_template_fetches_package_outside_solver_tree(self) -> None:
         payload = yaml.safe_load(EXTERNAL_WORKFLOW.read_text(encoding="utf-8"))

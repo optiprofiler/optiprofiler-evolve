@@ -27,6 +27,11 @@ from .config import EvolveConfig, ToolConfig, WorkerConfig
 from .data import DataPlan, resolve_data_plan, write_data_manifests
 from .docker_runtime import cleanup_managed_resources, read_gateway_outcome
 from .events import EventWriter
+from .explanations import (
+    capture_solver_explanation,
+    explanation_memory,
+    explanation_status,
+)
 from .fingerprints import build_experiment_fingerprints
 from .models import CandidateRecord, EvaluationResult, EvolveResult, FinalistResult
 from .prompt import build_worker_prompt
@@ -55,7 +60,7 @@ from .protocols import (
 from .provenance import build_run_provenance, coordinate_seed
 from .projections import project_public_events
 from .references import materialize_reference
-from .research import file_hash, read_json_object, safe_relative_path
+from .research import file_hash, read_json_object, safe_relative_path, source_diff
 from .review import (
     CandidateReviewer,
     IntegrityReviewDecision,
@@ -676,16 +681,19 @@ class EvolutionEngine:
             raise ValueError(f"Unknown core phase action: {action!r}") from exc
 
     def _phase_prepare(self) -> Mapping[str, object]:
+        self.data = resolve_data_plan(self.config.data)
+        ptype_value = self.data.selection.get("ptype")
+        ptype = str(ptype_value) if ptype_value in {"u", "b", "l", "n"} else None
         self.reference = materialize_reference(
             initial=self.initial,
             destination=self.run_dir / "controller" / "reference",
             interface=self.interface,
             config=self.config.evaluation,
+            ptype=ptype,
         )
         seed_path = self.run_dir / "candidates" / "seed"
         copy_initial_source(self.initial, seed_path)
         self._validate_candidate(seed_path)
-        self.data = resolve_data_plan(self.config.data)
         write_data_manifests(self.data, self.run_dir)
         fingerprints = build_experiment_fingerprints(
             config=self.config,
@@ -953,7 +961,16 @@ class EvolutionEngine:
         if self.final_result is None or self.final_solver is None:
             raise RuntimeError("Report phase requires a hidden evaluation result.")
         _write_json(self.run_dir / "final_ranking.json", [self.final_result.as_dict()])
-        self._write_final_report(self.final_result, [self.final_result], self.final_solver)
+        explanation = self._write_final_solver_explanation(
+            self.final_result,
+            self.final_solver,
+        )
+        self._write_final_report(
+            self.final_result,
+            [self.final_result],
+            self.final_solver,
+            explanation,
+        )
         self.result = EvolveResult(
             run_dir=self.run_dir,
             best_solver=self.final_solver,
@@ -1222,6 +1239,21 @@ class EvolutionEngine:
             if attempt.worker_outcome.trace_outcome
             else None,
             "trace_capture_error": attempt.worker_outcome.capture_error,
+            "solver_explanation": (
+                str(attempt.worker_outcome.solver_explanation)
+                if attempt.worker_outcome.solver_explanation
+                else None
+            ),
+            "solver_explanation_status": (
+                explanation_status(attempt.worker_outcome.solver_explanation)
+                if attempt.worker_outcome.solver_explanation
+                else "missing"
+            ),
+            "solver_explanation_summary": (
+                explanation_memory(attempt.worker_outcome.solver_explanation)
+                if attempt.worker_outcome.solver_explanation
+                else None
+            ),
             "usage": attempt.worker_outcome.usage.as_dict(),
         }
         self.attempt_history.append(summary)
@@ -1359,7 +1391,11 @@ class EvolutionEngine:
         if mode == "controller_summary":
             ranked = sorted(
                 history,
-                key=lambda item: item["public_score"],
+                key=lambda item: (
+                    float(item["public_score"])
+                    if isinstance(item.get("public_score"), (int, float))
+                    else float("-inf")
+                ),
                 reverse=True,
             )[:5]
             recent = history[-2:]
@@ -1377,6 +1413,7 @@ class EvolutionEngine:
             "changed_files",
             "worker_returncode",
             "worker_timed_out",
+            "solver_explanation_summary",
         }
         worker_visible = [
             {key: value for key, value in item.items() if key in allowed} for item in history
@@ -1411,6 +1448,7 @@ class EvolutionEngine:
         best: FinalistResult,
         finalists: list[FinalistResult],
         final_solver: Path,
+        explanation: Path,
     ) -> None:
         lines = [
             "# Evolution Result",
@@ -1420,6 +1458,7 @@ class EvolutionEngine:
             f"- Validation fitness: `{best.validation_score:.6f}`",
             f"- Hidden fitness: `{best.final_score:.6f}`",
             f"- Materialized solver: `{final_solver}`",
+            f"- Human-readable algorithm explanation: `{explanation}`",
             "",
             "## Validation-selected champion",
             "",
@@ -1438,6 +1477,7 @@ class EvolutionEngine:
             for path in (
                 self.run_dir / "research" / "directions.json",
                 self.run_dir / "research" / "analysis" / "island_bundles.json",
+                self.run_dir / "research" / "strategy_transfer.json",
                 self.run_dir / "research" / "recombination.json",
                 self.run_dir / "research" / "challenger_report.json",
             )
@@ -1450,6 +1490,205 @@ class EvolutionEngine:
                 for path in research_artifacts
             )
         (self.run_dir / "FINAL_REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def _write_final_solver_explanation(
+        self,
+        best: FinalistResult,
+        final_solver: Path,
+    ) -> Path:
+        source = self.run_dir / "explanations" / f"{best.candidate_id}.json"
+        payload: Mapping[str, object] = {}
+        if source.is_file():
+            try:
+                loaded = read_json_object(source)
+                if loaded.get("status") == "complete":
+                    payload = loaded
+            except ValueError:
+                pass
+
+        diff_path = self.run_dir / "final_solver.diff"
+        diff_path.write_text(
+            source_diff(self.run_dir / "candidates" / "seed", final_solver),
+            encoding="utf-8",
+        )
+        lines = [
+            "# Final Solver Explanation",
+            "",
+            f"- Candidate: `{best.candidate_id}`",
+            f"- Island: `{best.island}`",
+            "- Source diff: [`final_solver.diff`](final_solver.diff)",
+            "",
+        ]
+        if payload:
+            lines.extend(["## Summary", "", str(payload.get("summary", "")), ""])
+            pseudocode = payload.get("pseudocode", [])
+            if isinstance(pseudocode, list) and pseudocode:
+                lines.extend(["## Pseudocode", ""])
+                lines.extend(f"{index}. {step}" for index, step in enumerate(pseudocode, 1))
+                lines.append("")
+            mechanisms = payload.get("mechanisms", [])
+            if isinstance(mechanisms, list) and mechanisms:
+                lines.extend(["## Mechanisms", ""])
+                for mechanism in mechanisms:
+                    if not isinstance(mechanism, Mapping):
+                        continue
+                    lines.append(f"- **{mechanism.get('name', 'Unnamed')}**: {mechanism.get('description', '')}")
+                    bindings = mechanism.get("code_bindings", [])
+                    if isinstance(bindings, list):
+                        locations = []
+                        for binding in bindings:
+                            if not isinstance(binding, Mapping):
+                                continue
+                            span = binding.get("lines", [])
+                            if isinstance(span, list) and len(span) == 2:
+                                locations.append(
+                                    f"`{binding.get('file')}:{span[0]}-{span[1]}`"
+                                )
+                        if locations:
+                            lines.append(f"  Code: {', '.join(locations)}")
+                lines.append("")
+            strengths = payload.get("expected_strengths", [])
+            if isinstance(strengths, list) and strengths:
+                lines.extend(["## Expected Strengths", ""])
+                lines.extend(f"- {item}" for item in strengths)
+                lines.append("")
+            limitations = payload.get("known_limitations", [])
+            if isinstance(limitations, list) and limitations:
+                lines.extend(["## Known Limitations", ""])
+                lines.extend(f"- {item}" for item in limitations)
+                lines.append("")
+            consulted = payload.get("evidence_consulted", [])
+            if isinstance(consulted, list) and consulted:
+                lines.extend(["## Evidence Consulted", ""])
+                lines.extend(f"- `{item}`" for item in consulted)
+                lines.append("")
+        else:
+            lines.extend(
+                [
+                    "## Explanation Status",
+                    "",
+                    "The winning candidate has no complete worker-authored explanation. "
+                    "Review the source diff and verified strategy artifacts before reuse.",
+                    "",
+                ]
+            )
+
+        winning_strategy_ids, transferred_strategy_ids = self._winning_strategy_ids(best)
+        strategy_paths = sorted(
+            (self.run_dir / "research" / "analysis").glob("island-*/strategy_cards.json")
+        )
+        supported: list[tuple[int, Mapping[str, object]]] = []
+        for path in strategy_paths:
+            try:
+                strategy_payload = read_json_object(path)
+                source_island = int(strategy_payload.get("island", -1))
+                cards = strategy_payload.get("cards", [])
+            except ValueError:
+                continue
+            if isinstance(cards, list):
+                supported.extend(
+                    (source_island, card)
+                    for card in cards
+                    if isinstance(card, Mapping)
+                    and str(card.get("strategy_id")) in winning_strategy_ids
+                    and isinstance(card.get("ablation"), Mapping)
+                    and card["ablation"].get("conclusion") == "supported"
+                )
+        if supported:
+            lines.extend(["## Strategy Evidence for This Winner", ""])
+            for source_island, card in supported:
+                effect = card.get("ablation", {}).get("mean_effect_when_present")
+                suffix = f" (measured effect `{effect}`)" if effect is not None else ""
+                transfer_note = (
+                    f"; transferred from island {source_island}, where its isolated effect was measured"
+                    if str(card.get("strategy_id")) in transferred_strategy_ids
+                    else "; measured on the winner's source island"
+                )
+                lines.append(
+                    f"- `{card.get('strategy_id')}`: {card.get('claim', '')}"
+                    f"{suffix}{transfer_note}."
+                )
+                mechanism = str(card.get("mechanism", "")).strip()
+                if mechanism:
+                    lines.append(f"  Mechanism: {mechanism}")
+                pseudocode = card.get("pseudocode", [])
+                if isinstance(pseudocode, list) and pseudocode:
+                    lines.append(
+                        "  Pseudocode: "
+                        + " -> ".join(str(step) for step in pseudocode)
+                    )
+                bindings = card.get("code_bindings", [])
+                if isinstance(bindings, list):
+                    locations = []
+                    for binding in bindings:
+                        if not isinstance(binding, Mapping):
+                            continue
+                        span = binding.get("lines", [])
+                        if isinstance(span, list) and len(span) == 2:
+                            locations.append(
+                                f"`{binding.get('file')}:{span[0]}-{span[1]}`"
+                            )
+                    if locations:
+                        lines.append(f"  Code: {', '.join(locations)}")
+            lines.append("")
+
+        destination = self.run_dir / "FINAL_SOLVER_EXPLANATION.md"
+        destination.write_text("\n".join(lines), encoding="utf-8")
+        return destination
+
+    def _winning_strategy_ids(
+        self,
+        best: FinalistResult,
+    ) -> tuple[set[str], set[str]]:
+        """Return only strategies retained or applied on the winning lineage."""
+
+        selected: set[str] = set()
+        transferred: set[str] = set()
+        bundles_path = self.run_dir / "research" / "analysis" / "island_bundles.json"
+        if bundles_path.is_file():
+            try:
+                bundles = read_json_object(bundles_path).get("bundles", [])
+            except ValueError:
+                bundles = []
+            if isinstance(bundles, list):
+                for bundle in bundles:
+                    if not isinstance(bundle, Mapping) or bundle.get("island") != best.island:
+                        continue
+                    kept = bundle.get("kept_strategy_ids", [])
+                    if isinstance(kept, list):
+                        selected.update(str(item) for item in kept)
+
+        transfer_path = self.run_dir / "research" / "strategy_transfer.json"
+        if transfer_path.is_file():
+            try:
+                islands = read_json_object(transfer_path).get("islands", [])
+            except ValueError:
+                islands = []
+            if isinstance(islands, list):
+                for island in islands:
+                    if (
+                        not isinstance(island, Mapping)
+                        or island.get("island") != best.island
+                        or island.get("winner_candidate_id") != best.candidate_id
+                    ):
+                        continue
+                    attempts = island.get("attempts", [])
+                    if not isinstance(attempts, list):
+                        continue
+                    for attempt in attempts:
+                        if (
+                            not isinstance(attempt, Mapping)
+                            or attempt.get("variant_id") != best.candidate_id
+                        ):
+                            continue
+                        manifest = attempt.get("manifest", {})
+                        if not isinstance(manifest, Mapping):
+                            continue
+                        applied = manifest.get("applied_strategy_ids", [])
+                        if isinstance(applied, list):
+                            transferred.update(str(item) for item in applied)
+        selected.update(transferred)
+        return selected, transferred
 
     def _append_trace_coverage(self, coverage: Mapping[str, object]) -> None:
         report = self.run_dir / "FINAL_REPORT.md"
@@ -1626,6 +1865,7 @@ class _EngineControllerServices:
         role_phase = {
             "direction-scout": "direction_scout",
             "strategy-analyst": "strategy_analysis",
+            "strategy-integrator": "strategy_transfer",
         }.get(role, role)
         scope: dict[str, object] = {"phase": role_phase, "role": role, "job_id": job_id}
         trace_links = dict(job.trace_links)
@@ -1705,11 +1945,17 @@ class _EngineControllerServices:
                 continue
             outputs[relative] = path
         missing_outputs = sorted(set(job.expected_outputs).difference(outputs))
+        # Candidate-producing jobs may exhaust a model budget after atomically
+        # writing complete outputs. Only those jobs opt into recovery because
+        # their solver still crosses schema, source, audit, and evaluation gates.
+        process_completed = (
+            outcome.returncode == 0 or job.recover_outputs_on_nonzero_exit
+        )
         succeeded = (
-            outcome.returncode == 0
-            and not outcome.timed_out
+            not outcome.timed_out
             and not outcome.cancelled
             and not missing_outputs
+            and process_completed
         )
         engine._emit(
             "role_agent_finished",
@@ -1717,6 +1963,7 @@ class _EngineControllerServices:
             scope=scope,
             data={
                 "returncode": outcome.returncode,
+                "worker_exit_warning": _worker_exit_warning(outcome),
                 "timed_out": outcome.timed_out,
                 "cancelled": outcome.cancelled,
                 "termination_reason": outcome.termination_reason,
@@ -1736,20 +1983,25 @@ class _EngineControllerServices:
                 "usage": outcome.usage.as_dict(),
                 "outputs": sorted(outputs),
                 "missing_outputs": missing_outputs,
+                "recovered_nonzero_exit": bool(
+                    outcome.returncode != 0
+                    and job.recover_outputs_on_nonzero_exit
+                    and succeeded
+                ),
             },
         )
         if outcome.cancelled:
             raise _RunCancelled("Trusted role agent cancelled by controller signal.")
         if not succeeded:
             details = []
-            if outcome.returncode != 0:
-                details.append(f"returncode={outcome.returncode}")
             if outcome.timed_out:
                 details.append("timed_out=true")
             if outcome.cancelled:
                 details.append("cancelled=true")
             if missing_outputs:
                 details.append(f"missing_outputs={missing_outputs!r}")
+            if outcome.returncode != 0:
+                details.append(f"returncode={outcome.returncode}")
             raise RuntimeError(
                 f"Trusted role {role!r} did not complete successfully ({', '.join(details)})."
             )
@@ -1843,6 +2095,7 @@ class _EngineControllerServices:
         label: str,
         *,
         reference: str | None = None,
+        mode: str = "public_score",
     ) -> EvaluationResult:
         engine = self.engine
         label = _safe_identifier(label, "evaluation label")
@@ -1851,17 +2104,26 @@ class _EngineControllerServices:
         if engine.evaluator is None or engine.data is None:
             raise RuntimeError("Public variant evaluation requires a prepared evaluator.")
         evaluator = engine.evaluator
-        mode = "public_score"
+        if mode not in {"smoke", "public_score"}:
+            raise ValueError("Research variants may use only smoke or public_score evaluation.")
+        evaluation_mode = mode
         if reference is not None:
-            if reference not in {"initial", "scipy_powell", "prima_newuoa"}:
-                raise ValueError(f"Unsupported challenger reference: {reference!r}")
+            if mode != "public_score":
+                raise ValueError("Challenger evaluation cannot use smoke mode.")
             challenger_root = engine.run_dir / "controller" / "challengers" / reference
             if not challenger_root.exists():
+                ptype_value = engine.data.selection.get("ptype")
+                ptype = (
+                    str(ptype_value)
+                    if ptype_value in {"u", "b", "l", "n"}
+                    else None
+                )
                 materialize_reference(
                     initial=engine.initial,
                     destination=challenger_root,
                     interface=engine.interface,
                     config=replace(engine.config.evaluation, reference=reference),
+                    ptype=ptype,
                 )
             evaluator = engine.evaluator_factory(
                 runtime=engine.runtime,
@@ -1870,7 +2132,7 @@ class _EngineControllerServices:
                 data=engine.data,
                 config=replace(engine.config.evaluation, reference=reference),
             )
-            mode = "public"
+            evaluation_mode = "public"
         output_dir = (
             engine.run_dir
             / "controller"
@@ -1878,15 +2140,21 @@ class _EngineControllerServices:
             / handle.variant_id
             / label
         )
-        result = evaluator.evaluate(handle.path, mode, output_dir)
-        if reference is None:
+        result = evaluator.evaluate(handle.path, evaluation_mode, output_dir)
+        if reference is None and evaluation_mode == "public_score":
             engine.variant_public[handle.variant_id] = result
         engine._emit(
             "research_evaluation_finished",
             "succeeded" if result.success else "failed",
             scope={"variant_id": handle.variant_id, "evaluation": label},
             data={
-                "mode": "challenger_public" if reference else "public",
+                "mode": (
+                    "challenger_public"
+                    if reference
+                    else "smoke"
+                    if evaluation_mode == "smoke"
+                    else "public"
+                ),
                 "reference": reference or engine.config.evaluation.reference,
                 "output_dir": str(result.output_dir),
                 "success": result.success,
@@ -2159,6 +2427,12 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
             outcome = WorkerOutcome(1, transcript)
         finally:
             broker.stop()
+        explanation = capture_solver_explanation(
+            self._workspace,
+            engine.run_dir / "explanations" / f"{self._attempt_id}.json",
+            attempt_id=self._attempt_id,
+        )
+        outcome = replace(outcome, solver_explanation=explanation)
         self.worker_outcome = outcome
         engine._emit(
             "worker_finished",
@@ -2188,6 +2462,8 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
                     if outcome.provider_gateway_manifest
                     else None
                 ),
+                "solver_explanation": str(explanation),
+                "solver_explanation_status": explanation_status(explanation),
             },
         )
         return outcome

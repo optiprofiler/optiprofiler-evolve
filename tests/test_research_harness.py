@@ -10,7 +10,10 @@ from pathlib import Path
 from optiprofiler_evolve.config import load_config
 from optiprofiler_evolve.engine import EvolutionEngine
 from optiprofiler_evolve.models import EvaluationResult
-from optiprofiler_evolve.phases.research import RecombinePhase, StrategyAnalysisPhase
+from optiprofiler_evolve.phases.research import (
+    RecombinePhase,
+    StrategyAnalysisPhase,
+)
 from optiprofiler_evolve.protocols import PhaseContext, VariantRequest
 from optiprofiler_evolve.sandbox import AgentRunResult
 from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
@@ -210,6 +213,8 @@ class FullResearchPathRunner:
                             {
                                 "strategy_id": f"i{island}-effective",
                                 "claim": "The island-specific mechanism improves fitness.",
+                                "mechanism": "Adapt one island-specific search decision.",
+                                "pseudocode": ["measure progress", "apply adaptive decision"],
                                 "code_bindings": [{"file": "solver.py", "lines": [3, 6]}],
                                 "toggle": {
                                     "kind": "removal_patch",
@@ -233,6 +238,48 @@ class FullResearchPathRunner:
                     }
                 )
             )
+        elif "ROLE: strategy-integrator" in prompt:
+            candidate = workspace / "candidate" / "solver.py"
+            text = candidate.read_text(encoding="utf-8")
+            if "target island 0" in prompt:
+                text += "\n# improved-1\n"
+                used = ["i1-effective"]
+            else:
+                text += "\n# improved-0\n"
+                used = ["i0-effective"]
+            candidate.write_text(text, encoding="utf-8")
+            metadata = workspace / "candidate" / ".optiprofiler_evolve"
+            metadata.mkdir()
+            (metadata / "solver_explanation.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "solver_explanation/1",
+                        "summary": "Preserve the island mechanism and add one verified donor strategy.",
+                        "pseudocode": ["run local mechanism", "apply donor mechanism"],
+                        "mechanisms": [
+                            {
+                                "name": "verified strategy transfer",
+                                "description": "Integrates one controller-verified semantic strategy.",
+                                "code_bindings": [{"file": "solver.py", "lines": [1, 8]}],
+                            }
+                        ],
+                        "expected_strengths": ["mixed public set"],
+                        "known_limitations": ["single scripted transfer"],
+                        "evidence_consulted": ["transfer_strategies.json"],
+                    }
+                )
+            )
+            (workspace / "transfer_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "strategy_transfer_manifest/1",
+                        "attempted_strategy_ids": used,
+                        "applied_strategy_ids": used,
+                        "rejected_strategy_ids": [],
+                        "summary": "Applied one compatible donor mechanism.",
+                    }
+                )
+            )
         else:
             island = 0 if "island: 0" in prompt else 1
             solver = workspace / "solver.py"
@@ -243,6 +290,16 @@ class FullResearchPathRunner:
         transcript.parent.mkdir(parents=True, exist_ok=True)
         transcript.write_text("scripted full research path", encoding="utf-8")
         return AgentRunResult(0, transcript)
+
+
+class NonzeroAfterOutputResearchRunner(FullResearchPathRunner):
+    """Model a candidate-producing CLI that exits after writing its solver."""
+
+    def __call__(self, **kwargs: object) -> AgentRunResult:
+        result = super().__call__(**kwargs)
+        if "ROLE: strategy-integrator" in str(kwargs["prompt"]):
+            return AgentRunResult(17, result.transcript)
+        return result
 
 
 def research_config() -> dict:
@@ -283,6 +340,153 @@ class ResearchHarnessTests(unittest.TestCase):
 
         self.assertTrue(phase.tools.network)
         self.assertFalse(phase.tools.web_search)
+
+    def test_strategy_analysis_uses_smoke_ablation_by_default(self) -> None:
+        self.assertEqual(StrategyAnalysisPhase().evaluation_mode, "smoke")
+
+    def test_valid_role_outputs_survive_a_nonzero_cli_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text(
+                "def solver(fun, x0):\n"
+                "    return x0\n"
+                "# strategy-0-slot\n"
+                "# strategy-1-slot\n"
+                "# inert-0-slot\n"
+                "# inert-1-slot\n"
+            )
+            raw = research_config()
+            raw["workflow"]["phases"] = [
+                {"name": "strategy_transfer"} if item["name"] == "recombine" else item
+                for item in raw["workflow"]["phases"]
+            ]
+            engine = EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=("solver.py",),
+                config=load_config(raw),
+                run_dir=root / "run",
+                agent_runner=NonzeroAfterOutputResearchRunner(),
+                evaluator_factory=research_evaluator_factory,
+            )
+
+            result = engine.run()
+
+            transfer = json.loads(
+                (root / "run" / "research" / "strategy_transfer.json").read_text()
+            )
+            self.assertEqual(transfer["status"], "ok")
+            self.assertTrue(result.best_candidate_id.startswith("transfer-i"))
+
+    def test_strategy_transfer_keeps_one_base_per_island_and_borrows_only_supported_cards(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ResearchEvaluator.calls = []
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text(
+                "def solver(fun, x0):\n"
+                "    return x0\n"
+                "# strategy-0-slot\n"
+                "# strategy-1-slot\n"
+                "# inert-0-slot\n"
+                "# inert-1-slot\n"
+            )
+            raw = research_config()
+            raw["workflow"]["phases"] = [
+                {"name": "strategy_transfer"} if item["name"] == "recombine" else item
+                for item in raw["workflow"]["phases"]
+            ]
+            engine = EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=("solver.py",),
+                config=load_config(raw),
+                run_dir=root / "run",
+                agent_runner=FullResearchPathRunner(),
+                evaluator_factory=research_evaluator_factory,
+            )
+
+            result = engine.run()
+
+            transfer = json.loads(
+                (root / "run" / "research" / "strategy_transfer.json").read_text()
+            )
+            self.assertEqual(transfer["status"], "ok")
+            self.assertEqual(
+                {item["island"] for item in transfer["islands"]},
+                {0, 1},
+            )
+            for item in transfer["islands"]:
+                self.assertEqual(len(item["donor_strategy_ids"]), 1)
+                self.assertNotIn(
+                    f"i{item['island']}-effective",
+                    item["donor_strategy_ids"],
+                )
+                self.assertTrue(item["winner_candidate_id"].startswith("transfer-i"))
+                winner_solver = Path(item["winner_solver"])
+                self.assertTrue((winner_solver / "solver.py").is_file())
+                explanation = root / "run" / "explanations" / (
+                    item["winner_candidate_id"] + ".json"
+                )
+                self.assertTrue(explanation.is_file())
+                self.assertEqual(json.loads(explanation.read_text())["status"], "complete")
+            self.assertTrue((root / "run" / "FINAL_SOLVER_EXPLANATION.md").is_file())
+            self.assertTrue(result.best_candidate_id.startswith("transfer-i"))
+            final_explanation = (
+                root / "run" / "FINAL_SOLVER_EXPLANATION.md"
+            ).read_text(encoding="utf-8")
+            winner_island = int(result.best_candidate_id.split("-i", 1)[1][:2])
+            donor_island = 1 - winner_island
+            self.assertIn(f"i{winner_island}-effective", final_explanation)
+            self.assertIn(f"i{donor_island}-effective", final_explanation)
+            self.assertNotIn("placebo", final_explanation)
+            self.assertIn("transferred from island", final_explanation)
+            self.assertIn("Adapt one island-specific search decision", final_explanation)
+            self.assertIn("measure progress -> apply adaptive decision", final_explanation)
+
+    def test_strategy_transfer_still_materializes_each_island_winner_without_a_donor(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text(
+                "def solver(fun, x0):\n"
+                "    return x0\n"
+                "# strategy-0-slot\n"
+                "# strategy-1-slot\n"
+                "# inert-0-slot\n"
+                "# inert-1-slot\n"
+            )
+            raw = research_config()
+            raw["evolution"]["islands"] = 1
+            raw["workflow"]["phases"] = [
+                {"name": "strategy_transfer"} if item["name"] == "recombine" else item
+                for item in raw["workflow"]["phases"]
+            ]
+
+            EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=("solver.py",),
+                config=load_config(raw),
+                run_dir=root / "run",
+                agent_runner=FullResearchPathRunner(),
+                evaluator_factory=research_evaluator_factory,
+            ).run()
+
+            transfer = json.loads(
+                (root / "run" / "research" / "strategy_transfer.json").read_text()
+            )
+            self.assertEqual(transfer["status"], "skipped")
+            self.assertEqual(len(transfer["islands"]), 1)
+            winner = Path(transfer["islands"][0]["winner_solver"])
+            self.assertTrue((winner / "solver.py").is_file())
 
     def test_scripted_full_workflow_detects_effective_and_placebo_strategies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -391,6 +595,8 @@ class ResearchHarnessTests(unittest.TestCase):
                 matrix = json.loads(Path(analysis["trace"]["ablation_matrix"]).read_text())
                 self.assertEqual(matrix["status"], "populated")
                 self.assertTrue(matrix["entries"])
+                self.assertTrue(matrix["entries"][0]["base_artifact_dirs"])
+                self.assertTrue(matrix["entries"][0]["ablated_artifact_dirs"])
             self.assertTrue(all(item["dropped_strategy_ids"] == [] for item in bundles))
             recombination = json.loads(
                 (root / "run" / "research" / "recombination.json").read_text(encoding="utf-8")

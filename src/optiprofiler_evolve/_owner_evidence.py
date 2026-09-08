@@ -283,6 +283,10 @@ _PHASE_ARTIFACTS: dict[str, tuple[tuple[str, str], ...]] = {
         ("Research artifacts", "research"),
     ),
     "strategy_analysis": (("Research artifacts", "research"),),
+    "strategy_transfer": (
+        ("Strategy transfer report", "research/strategy_transfer.json"),
+        ("Research artifacts", "research"),
+    ),
     "recombine": (("Research artifacts", "research"),),
     "challenger": (
         ("Challenger evidence", "controller/challengers"),

@@ -13,6 +13,7 @@ from .phases.research import (
     DirectionScoutPhase,
     RecombinePhase,
     StrategyAnalysisPhase,
+    StrategyTransferPhase,
 )
 from .policies.builtin import EarlyStopPolicy, MigrationPolicy
 from .registry import register, registered
@@ -55,6 +56,7 @@ def register_builtin_components() -> None:
         _register("phase", action, partial(CorePhase, action=action))
     _register("phase", "direction_scout", DirectionScoutPhase)
     _register("phase", "strategy_analysis", StrategyAnalysisPhase)
+    _register("phase", "strategy_transfer", StrategyTransferPhase)
     _register("phase", "recombine", RecombinePhase)
     _register("phase", "challenger", ChallengerPhase)
     _register("worker", "cli", CliWorkerAdapter)

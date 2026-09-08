@@ -84,7 +84,7 @@ class ReferenceTests(unittest.TestCase):
                 )
             self.assertTrue(np.array_equal(solution, np.zeros(3)))
             self.assertEqual(calls[0]["method"], "newuoa")
-            self.assertEqual(calls[0]["options"], {"maxfun": 60, "quiet": True})
+            self.assertEqual(calls[0]["options"], {"maxfev": 60, "quiet": True})
 
 
 if __name__ == "__main__":

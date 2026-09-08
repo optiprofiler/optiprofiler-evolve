@@ -1,162 +1,164 @@
 # Research Workflow
 
-The default workflow stops after population search, validation selection, one
-hidden evaluation, and reporting. The optional research workflow keeps that
-kernel and adds four bounded phases:
+`evolve(...)` has one small default path:
+
+```text
+prepare -> explore -> validate -> hidden -> report
+```
+
+Each default exploration attempt runs only `mutate -> smoke ->
+public_evaluate`. Whole-candidate migration, web search, compilers, additional
+audit evidence, feedback injection, and research phases are explicit opt-ins.
+The mandatory controller safety gate and semantic integrity review are not
+removed by this smaller visible pipeline.
+
+For strategy-level research, use the ordered workflow in
+[`examples/experiment-research.yaml`](../examples/experiment-research.yaml):
 
 ```text
 prepare
   -> direction_scout
   -> explore
   -> strategy_analysis
-  -> recombine
+  -> strategy_transfer
   -> validate
   -> hidden
   -> challenger
   -> report
 ```
 
-It is enabled by the ordered `workflow.phases` list in
-[`examples/experiment-research.yaml`](../examples/experiment-research.yaml).
-There is no second public API and no generic DAG compiler.
-
-The research workflow requires the `git` executable for fail-closed unified-patch
-checks and application. The default lightweight workflow does not use this patch
-path.
+This remains one controller-owned workflow, not a DAG compiler or a second
+public API.
 
 ## 1. Direction scout
 
-The scout receives a copy of the seed solver, its sanitized public benchmark
-bundle, and the solver contract. It cannot edit the real seed and receives no
-evaluation broker. It writes bounded direction cards which may guide selected
-islands. Unguided islands remain independent controls.
+The optional scout receives a copy of the seed, the solver contract, and
+sanitized public evidence. It proposes bounded direction cards before search.
+Only configured islands receive cards; the remaining islands are independent
+controls. Scout failure is recorded and search continues unguided.
 
-| Option | Default | Meaning |
-|---|---:|---|
-| `mode` | `shared` | `off`, one `shared` scout, or `per_island` scouts. |
-| `guided_islands` | first half | Island indexes receiving cards. |
-| `max_directions` | `4` | Maximum normalized cards. |
-| `worker_index` | `0` | Entry in `workers.pool`. |
-| `timeout_seconds` | worker default | Role-specific wall time. |
-| `token_budget` | worker default | Role-specific advisory token budget. |
-| `max_budget_usd` | worker default | Role-specific Claude budget. |
-| `tools` | network/web on | Role-specific tool policy. Native search may use the provider loop; the role shell remains internal. |
-| `prompt_version` | `direction-scout/1` | Recorded prompt contract. |
-
-If a scout fails or returns invalid JSON, guided islands fall back to unguided
-search and `directions.json` records `off-fallback`. No search iteration is lost.
+The `mode` option is `off`, `shared`, or `per_island`. Other limits cover the
+number of directions, guided island indexes, worker selection, tools, time,
+tokens, and cost. The scout cannot edit the seed and receives no evaluation
+broker, validation data, or hidden data.
 
 ## 2. Per-island strategy analysis
 
-The controller validation-selects one finalist per island. An isolated analyst
-receives copies of that finalist, seed, optional parent, source diff, exploration
-trace, and the actual sanitized public plots/logs plus a compact evidence index.
-It proposes strategy cards and executable leave-one-out variants.
+The controller validation-selects one finalist from each island. An isolated
+analyst receives copies of the seed, finalist, optional parent, source diff,
+exploration trace, and the finalist's sanitized public benchmark bundle. It
+must describe code-bound mechanisms and produce an executable leave-one-out
+variant for every mechanism that can safely be separated.
 
-Every toggle is a full variant tree or unified removal patch. The controller
-materializes it in a new directory, applies the mandatory tree/interface/import/
-edit-scope gates, and then evaluates it. Agent prose cannot earn evidence status:
+For each proposed strategy, the controller independently evaluates both the
+finalist and its ablated variant. The default `evaluation_mode: smoke` keeps
+this pass bounded; `public` requests canonical public evaluation. Removing a
+strategy yields one of three controller-owned conclusions:
 
-- `Observed`: the concrete toggle ran successfully;
-- `Inferred`: the agent supplied a code-grounded hypothesis not yet run;
-- `Unverified`: materialization, gate, or evaluation failed.
+- `supported`: removal reduces fitness by at least `min_effect`;
+- `contradicted`: removal improves fitness by at least `min_effect`;
+- `placebo`: the absolute measured change is smaller than `min_effect`.
 
-An observed strategy is `supported` when removing it lowers public fitness by at
-least `min_effect`, `contradicted` when removal improves fitness by that amount,
-and otherwise `placebo`. `n_repeats: 1` is explicitly marked as one measurement,
-not statistical certainty. Both the finalist and the ablated variant are freshly
-evaluated `n_repeats` times; the exploration-time finalist score is retained only
-as provenance. Paired per-problem inference still awaits OptiProfiler's versioned
-`agent_report`.
+Materialization, gate, or evaluation failures remain `unverified`. An agent's
+prose never assigns its own evidence status. With `n_repeats: 1`, the artifact
+states that this is a single measurement, not statistical certainty.
 
-Only `placebo` or `contradicted` strategies with a valid removal patch are
-eligible for pruning. Failed or missing toggles remain `unverified`, and rejected
-strategies that cannot be materialized are listed under
-`unprunable_strategy_ids` rather than reported as removed.
+The analyst can inspect existing profile and history plots through the public
+evidence index. Reliable automatic selection of the most discriminative
+problems awaits OptiProfiler's versioned `agent_report/1`; Evolve does not infer
+problem-level effects from filenames or duplicate Core's report schema.
+Each ablation entry keeps the base and removed-variant artifact directories, so
+the owner can compare their profile and history plots instead of relying only
+on the scalar effect.
 
-| Option | Default | Meaning |
-|---|---:|---|
-| `max_strategies` | `6` | Maximum normalized cards per island. |
-| `max_ablations` | `6` | Maximum executable toggles per island. |
-| `min_effect` | `0.01` | Public-fitness effect threshold. |
-| `n_repeats` | `1` | Fresh repeated evaluations of both finalist and ablated variant. |
-| `worker_index` | `0` | Analyst worker entry. |
-| `timeout_seconds` | worker default | Analyst wall time. |
-| `token_budget` | worker default | Analyst advisory token budget. |
-| `max_budget_usd` | worker default | Analyst Claude budget. |
-| `tools` | network on, web off | Analyst tool policy. Model transport uses the gateway; the role shell has no general egress. |
-| `prompt_version` | `strategy-analysis/1` | Recorded prompt contract. |
+## 3. Cross-island strategy transfer
 
-Invalid or failed analysts produce zero verified strategies for that island and
-the original validation-selected finalist continues.
+The recommended cross-island phase transfers only semantic strategy cards
+whose leave-one-out tests were `supported` on their source island. It never
+copies a donor island's complete solver tree.
 
-## 3. Cross-island recombination
+For each target island:
 
-Only supported strategies with an explicit portable patch are eligible. The
-controller first chooses one island bundle as the base. It then enumerates a
-bounded set of patch combinations, never all `2^k` subsets. Every combination
-passes the same mandatory solver gates and a real public evaluation. Patch
-conflicts are recorded and skipped; they are never force-merged by another
-agent. Controller validation returns selected IDs only, and the engine registers
-those finalists for the normal `validate` phase.
+1. start from that island's own selected bundle;
+2. offer a bounded set of supported strategies from other islands;
+3. let one isolated integrator apply only compatible mechanisms;
+4. run normal source/interface/import gates and public evaluation;
+5. run the independent integrity reviewer;
+6. validation-select between the unchanged island base and integrated variants;
+7. retain exactly one winner for that island.
 
-| Option | Default | Meaning |
-|---|---:|---|
-| `max_strategies` | `8` | Maximum portable strategies considered. |
-| `max_combination_size` | `2` | Maximum patches in one combination. |
-| `max_combinations` | `12` | Hard evaluation cap for combinations. |
-| `beam_width` | `3` | Validation-selected combinations registered. |
+The transfer manifest records attempted, applied, and rejected strategy IDs.
+The final explanation distinguishes source-island ablation evidence from the
+combined target-island selection result; it does not claim that each imported
+mechanism was independently attributed on the target.
 
-When no verified portable patch exists, the phase writes a clean skipped
-artifact. Whole-tree variants remain useful for attribution but are not silently
-treated as portable across different base trees.
+Useful options are `max_strategies_per_island`, `attempts_per_island`,
+`worker_index`, role-specific tools, time, tokens, cost, and `prompt_version`.
 
-## 4. Strong challenger
+## 4. Why whole-code migration defaults to off
 
-After the champion has been fixed and hidden has been evaluated once, the
-challenger phase runs a separate public comparison against `scipy_powell`,
-independent PRIMA `prima_newuoa`, or the initial solver. It cannot affect selection. The report preserves both solver
-scores and warns that pairwise OptiProfiler scores depend on the competitor set,
-so candidate-vs-seed and candidate-vs-challenger numbers are not interchangeable.
-If the challenger package is present in the evaluator image but candidates must
-not call it, pair the challenger with the corresponding
-`evaluation.forbidden_candidate_imports` entry, for example `prima` for
-`prima_newuoa`. The import policy is recorded for auditability and is not a
-sandbox boundary.
+`evolution.migration_interval: 0` and an empty `workflow.after_iteration` keep
+whole candidates inside their original island by default. This makes island
+diversity, strategy attribution, and transfer ablations easier to interpret.
 
-| Option | Default | Meaning |
-|---|---:|---|
-| `reference` | `scipy_powell` | `scipy_powell`, `prima_newuoa`, or `initial`. The evaluator image must contain PRIMA when `prima_newuoa` is selected. |
+This is an OptiProfiler Evolve experimental default, not a claim that mature
+island systems universally disable migration. [OpenEvolve exposes configurable
+periodic migration](https://github.com/algorithmicsuperintelligence/openevolve/blob/main/configs/default_config.yaml),
+while [FunSearch periodically resets weaker islands from stronger
+ones](https://www.nature.com/articles/s41586-023-06924-6). Both remain useful
+ablation baselines. To reproduce a whole-code migration study, add the built-in
+`migration` after-iteration policy explicitly.
 
-## Artifacts and failure semantics
+The older `recombine` phase is also retained for compatibility with experiments
+that produce portable patches against a common seed. It is not in the
+recommended workflow because patch portability and mechanism portability are
+not the same claim.
 
-Research artifacts live under `run_dir/research/` and include:
+## 5. Strong challenger
+
+After champion selection and the one-shot hidden evaluation, `challenger` runs
+a separate public comparison against any registered compatible competitor.
+This result cannot affect selection. Pairwise OptiProfiler scores depend on the
+competitor set, so candidate-versus-seed and candidate-versus-challenger scores
+are preserved as separate evidence.
+
+## Solver explanations
+
+Every worker that emits a solver is asked to write
+`.optiprofiler_evolve/solver_explanation.json`. The controller validates and
+moves this untrusted metadata outside the executable solver tree before audit
+and evaluation. Missing or malformed explanations are visible but do not turn
+into a numerical rejection.
+
+The final run contains:
 
 ```text
-directions.json
-analysis/island-*/source.diff
-analysis/island-*/evidence_manifest.json
-analysis/island-*/strategy_cards.json
-analysis/island-*/ablation/matrix.json
-analysis/island_bundles.json
-recombination.json
-challenger_report.json
-roles/<role>/<job>/
-transcripts/<role>/
-variants/
+final_solver/                    executable champion
+final_solver.diff                exact seed-to-champion source diff
+FINAL_SOLVER_EXPLANATION.md      summary, pseudocode, mechanisms, limits, evidence
+explanations/*.json              normalized per-attempt explanations
 ```
 
-All JSON contracts carry a schema string. Agent workspaces contain only copied,
-sanitized inputs. Scout and analyst roles receive no `smoke_test`, `evaluate`,
-problem-name manifest, immutable reference, validation/hidden bundle, sibling
-repository, host home, or Docker socket. The engine remains the sole writer of
-candidate registration, validation selection, and authoritative events.
+## Research artifacts
 
-`research/validation_usage.json` separates controller selection calls from new
-validation evaluations. Reusing a cached validation result increments the former
-but not the latter. Phase-local artifacts report `validation_selection_calls`;
-the controller ledger is authoritative for actual evaluator usage.
+```text
+research/directions.json
+research/analysis/island-*/source.diff
+research/analysis/island-*/evidence_manifest.json
+research/analysis/island-*/strategy_cards.json
+research/analysis/island-*/ablation/matrix.json
+research/analysis/island_bundles.json
+research/strategy_transfer.json
+research/transfer/island-*/winner_solver/
+research/challenger_report.json
+research/roles/<role>/<job>/
+research/transcripts/<role>/
+research/variants/
+```
 
-Phase-level resume is not implemented yet. A long research run can resume only
-after the package gains an explicit phase checkpoint protocol; current iteration
-checkpoints do not claim otherwise.
+All machine-readable contracts carry schema strings. Agent workspaces contain
+only copied, sanitized inputs. The engine remains the sole writer of candidate
+registration, validation selection, authoritative events, and final promotion.
+
+Phase-level resume is not implemented yet. Iteration checkpoints do not claim
+that an interrupted strategy-analysis or transfer phase can resume midway.

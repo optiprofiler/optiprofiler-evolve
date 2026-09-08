@@ -38,7 +38,9 @@ evolution:
   islands: 4
   attempts_per_island: 1
   population_per_island: 4
-  migration_interval: 2
+  # Keep whole solvers inside their islands. Cross-island learning below
+  # transfers only controller-supported semantic strategies.
+  migration_interval: 0
   finalists_per_island: 1
   random_seed: 20260721
 
@@ -102,18 +104,23 @@ workflow:
         max_ablations: 6
         min_effect: 0.01
         n_repeats: 1
+        evaluation_mode: smoke
         worker_index: 0
         token_budget: 30000
         prompt_version: strategy-analysis/1
         tools:
           network: true
           web_search: false
-    - name: recombine
+    - name: strategy_transfer
       options:
-        max_strategies: 8
-        max_combination_size: 2
-        max_combinations: 12
-        beam_width: 3
+        max_strategies_per_island: 3
+        attempts_per_island: 1
+        worker_index: 0
+        token_budget: 30000
+        prompt_version: strategy-transfer/1
+        tools:
+          network: true
+          web_search: false
     - name: validate
     - name: hidden
     - name: challenger
@@ -126,7 +133,4 @@ workflow:
     - name: smoke
     - name: public_evaluate
     - name: feedback
-  after_iteration:
-    - name: migration
-      options:
-        interval: 2
+  after_iteration: []

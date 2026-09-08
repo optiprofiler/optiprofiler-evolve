@@ -12,7 +12,12 @@ class HarnessCommandTests(unittest.TestCase):
         worker = WorkerConfig(harness="claude", model="test-model")
         workers = WorkersConfig(pool=(worker,))
 
-        enabled = build_harness_command(worker, workers, ToolConfig(), Path("/workspace"))
+        enabled = build_harness_command(
+            worker,
+            workers,
+            ToolConfig(web_search=True),
+            Path("/workspace"),
+        )
         self.assertIn("--verbose", enabled)
         self.assertEqual(enabled[enabled.index("--output-format") + 1], "stream-json")
         enabled_tools = enabled[enabled.index("--tools") + 1].split(",")
@@ -42,7 +47,12 @@ class HarnessCommandTests(unittest.TestCase):
         worker = WorkerConfig(harness="codex", model="test-model")
         workers = WorkersConfig(pool=(worker,))
 
-        enabled = build_harness_command(worker, workers, ToolConfig(), Path("/workspace"))
+        enabled = build_harness_command(
+            worker,
+            workers,
+            ToolConfig(web_search=True),
+            Path("/workspace"),
+        )
         self.assertIn("--search", enabled)
 
         disabled = build_harness_command(

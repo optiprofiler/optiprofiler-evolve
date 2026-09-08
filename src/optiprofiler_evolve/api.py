@@ -10,6 +10,7 @@ from typing import Any
 from .config import EvolveConfig, load_config
 from .engine import EvolutionEngine
 from .models import EvolveResult
+from .presets import dfo_default
 from .solver import InterfaceSpec
 
 
@@ -19,7 +20,7 @@ def evolve(
     interface: str = "solver.py:solver",
     runtime: str = "auto",
     editable: Sequence[str] = (".",),
-    config: EvolveConfig | Mapping[str, Any] | str | Path,
+    config: EvolveConfig | Mapping[str, Any] | str | Path | None = None,
     run_dir: str | Path | None = None,
 ) -> EvolveResult:
     """Evolve one solver against one fixed OptiProfiler problem-library experiment.
@@ -35,13 +36,14 @@ def evolve(
     editable:
         Relative paths or globs that workers may change.
     config:
-        Strict experiment mapping, :class:`EvolveConfig`, or YAML file.
+        Strict experiment mapping, :class:`EvolveConfig`, or YAML file. When
+        omitted, a bounded one-island quick-start preset is used.
     run_dir:
         New directory for all state and artifacts. A timestamped directory is
         used when omitted.
     """
 
-    loaded = load_config(config)
+    loaded = load_config(dfo_default() if config is None else config)
     declared_interface = InterfaceSpec.parse(interface)
     detected_runtime = declared_interface.detect_runtime(runtime)
     if detected_runtime == "matlab":

@@ -1352,6 +1352,10 @@ _PHASE_NOTES = {
     "strategy_analysis": (
         "Per-island strategy attribution with executable leave-one-out ablations."
     ),
+    "strategy_transfer": (
+        "Each island tests controller-supported semantic strategies from other islands "
+        "while retaining its own solver as the base."
+    ),
     "recombine": "Bounded cross-island recombination of analyzed strategies.",
     "challenger": "Post-selection strong-challenger comparison against the champion.",
 }

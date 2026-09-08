@@ -120,6 +120,69 @@ def reviewer_config(*, strict: bool = False) -> dict:
 
 class EngineTests(unittest.TestCase):
 
+    def test_worker_explanation_is_saved_outside_candidate_and_promoted_for_champion(self) -> None:
+        def explanatory_runner(**kwargs) -> AgentRunResult:
+            workspace = kwargs["workspace"]
+            transcript = kwargs["transcript"]
+            solver = workspace / "solver.py"
+            solver.write_text(solver.read_text() + "\n# improved\n")
+            metadata = workspace / ".optiprofiler_evolve"
+            metadata.mkdir()
+            (metadata / "solver_explanation.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "solver_explanation/1",
+                        "summary": "Adds one deterministic improvement mechanism.",
+                        "pseudocode": ["evaluate", "return improved point"],
+                        "mechanisms": [
+                            {
+                                "name": "test mechanism",
+                                "description": "A test-only algorithm explanation.",
+                                "code_bindings": [{"file": "solver.py", "lines": [1, 3]}],
+                            }
+                        ],
+                        "expected_strengths": [],
+                        "known_limitations": ["test fixture"],
+                        "evidence_consulted": ["smoke/result.json"],
+                    }
+                )
+            )
+            transcript.parent.mkdir(parents=True, exist_ok=True)
+            transcript.write_text("worker\n")
+            return AgentRunResult(0, transcript)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            raw = minimal_config()
+            raw["evolution"].update({"islands": 1, "attempts_per_island": 1})
+            raw["workers"]["max_parallel"] = 1
+            result = EvolutionEngine(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=(".",),
+                config=load_config(raw),
+                run_dir=root / "run",
+                agent_runner=explanatory_runner,
+                evaluator_factory=fake_evaluator_factory,
+            ).run()
+
+            explanation = json.loads(
+                (result.run_dir / "explanations" / "it001-i00-a00.json").read_text()
+            )
+            self.assertEqual(explanation["status"], "complete")
+            self.assertFalse((result.best_solver / ".optiprofiler_evolve").exists())
+            final = (result.run_dir / "FINAL_SOLVER_EXPLANATION.md").read_text()
+            self.assertIn("Adds one deterministic improvement mechanism", final)
+            self.assertIn("solver.py:1-3", final)
+            self.assertIn("test fixture", final)
+            self.assertIn("smoke/result.json", final)
+            attempt = json.loads((result.run_dir / "attempts.jsonl").read_text().splitlines()[0])
+            self.assertEqual(attempt["solver_explanation_status"], "complete")
+
     def test_required_lockbox_evaluation_failure_does_not_publish_a_final_solver(self) -> None:
         class FailingHiddenEvaluator(FakeEvaluator):
             def evaluate(
@@ -360,7 +423,7 @@ class EngineTests(unittest.TestCase):
                 if event["kind"] == "step_finished"
                     and event["scope"].get("step") in {"static_audit", "smoke", "public_evaluate"}
             ]
-            self.assertEqual(len(later_steps), 6)
+            self.assertEqual(len(later_steps), 4)
 
             # Evidence stays on disk for post-mortem analysis.
             workspace = result.run_dir / "workspaces" / "it001-i00-a00"

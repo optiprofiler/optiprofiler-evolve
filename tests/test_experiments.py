@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.config import load_config
+from optiprofiler_evolve.config import ComponentConfig, load_config
 from optiprofiler_evolve.experiments import run_matrix
 from optiprofiler_evolve.models import EvolveResult
 
@@ -25,6 +25,7 @@ class ExperimentMatrixTests(unittest.TestCase):
                 return EvolveResult(run_dir, source, "seed", 0.5, 0.5, 0.5, ())
 
             base = load_config(minimal_config())
+            base = base.with_step(ComponentConfig("static_audit"), after="mutate")
             summary = run_matrix(
                 base,
                 {

@@ -13,6 +13,8 @@ from urllib.parse import unquote, urlsplit
 
 import yaml
 
+from .competitors import competitor_names
+
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _T = TypeVar("_T")
@@ -72,12 +74,12 @@ def _default_phases() -> tuple[ComponentConfig, ...]:
 def _default_attempt_steps() -> tuple[ComponentConfig, ...]:
     return tuple(
         ComponentConfig(name)
-        for name in ("mutate", "static_audit", "smoke", "public_evaluate", "feedback")
+        for name in ("mutate", "smoke", "public_evaluate")
     )
 
 
 def _default_after_iteration() -> tuple[ComponentConfig, ...]:
-    return (ComponentConfig("migration"),)
+    return ()
 
 
 def _default_retention() -> ComponentConfig:
@@ -127,6 +129,13 @@ class WorkflowConfig:
             positions["explore"] < positions["strategy_analysis"] < positions["validate"]
         ):
             raise ValueError("strategy_analysis must run between explore and validate.")
+        if "strategy_transfer" in positions:
+            if "strategy_analysis" not in positions:
+                raise ValueError("strategy_transfer requires strategy_analysis.")
+            if not positions["strategy_analysis"] < positions["strategy_transfer"] < positions["validate"]:
+                raise ValueError(
+                    "strategy_transfer must run after strategy_analysis and before validate."
+                )
         if "recombine" in positions:
             if "strategy_analysis" not in positions:
                 raise ValueError("recombine requires strategy_analysis.")
@@ -261,10 +270,9 @@ class EvaluationConfig:
             )
         if not self.adapter or not self.adapter.replace("-", "_").isidentifier():
             raise ValueError("evaluation.adapter must be a registered component name.")
-        if self.reference not in {"initial", "scipy_powell", "prima_newuoa"}:
+        if self.reference != "initial" and self.reference not in competitor_names():
             raise ValueError(
-                "evaluation.reference must be 'initial', 'scipy_powell', "
-                "or 'prima_newuoa'."
+                "evaluation.reference must be 'initial' or a registered DFO competitor."
             )
         if self.fitness_source not in {"solver_scores", "profile_scores_mean"}:
             raise ValueError(
@@ -293,11 +301,13 @@ class EvaluationConfig:
 class EvolutionConfig:
     """Population scheduling settings."""
 
-    iterations: int = 3
-    islands: int = 4
+    iterations: int = 1
+    islands: int = 1
     attempts_per_island: int = 1
-    population_per_island: int = 4
-    migration_interval: int = 2
+    population_per_island: int = 2
+    # Whole-candidate migration is opt-in. Keeping islands independent by
+    # default makes strategy attribution and later ablations easier to audit.
+    migration_interval: int = 0
     random_seed: int = 0
     finalists_per_island: int = 1
     retention: ComponentConfig = dataclasses.field(default_factory=_default_retention)
@@ -437,13 +447,13 @@ class WorkerConfig:
 class ToolConfig:
     """Tools exposed inside a worker sandbox."""
 
-    preset: str = "research"
-    web_search: bool = True
+    preset: str = "minimal"
+    web_search: bool = False
     network: bool = True
     shell: bool = True
     python: bool = True
     git: bool = True
-    compilers: bool = True
+    compilers: bool = False
     package_install: bool = False
     communication: str = "none"
 

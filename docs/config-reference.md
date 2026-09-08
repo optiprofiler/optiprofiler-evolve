@@ -6,7 +6,9 @@ invalid combinations fail before workers start. The checked-in
 validation; Python validation in `config.py` remains authoritative for
 cross-field rules.
 
-Defaults shown below are package defaults. Fields marked **required** have no
+Defaults shown below are package defaults. Calling `evolve(..., config=None)`
+uses the same bounded quick-start values: one iteration, one island, one
+attempt, and no whole-candidate migration. Fields marked **required** have no
 usable default for a real run.
 
 ## Data
@@ -46,7 +48,7 @@ controller directory.
 | `evaluation.memory` | Docker memory string | `4g` | Evaluator-container memory limit; ignored by `unsafe_local`. |
 | `evaluation.pids_limit` | integer at least `16` | `512` | Evaluator-container process limit; ignored by `unsafe_local`. |
 | `evaluation.feedback_mode` | `score_only`, `structured_numeric`, or `full_artifacts` | `score_only` | Worker-visible projection of controller-owned benchmark evidence. `structured_numeric` requires the formal Core `agent_report/1` validator. |
-| `evaluation.reference` | `initial`, `scipy_powell`, or `prima_newuoa` | `initial` | Fixed reference solver paired with every candidate benchmark. Use `initial` for seed-relative evolution; reserve a strong solver for post-selection comparison. |
+| `evaluation.reference` | registered competitor name | `initial` | Fixed reference solver paired with every candidate benchmark. Use `initial` for seed-relative evolution; reserve a strong solver for post-selection comparison. |
 | `evaluation.fitness_source` | `solver_scores` or `profile_scores_mean` | `solver_scores` | Population fitness source. `profile_scores_mean` computes each entry as `(candidate-reference+1)/2`, clips it to `[0, 1]`, and averages the complete OptiProfiler profile tensor. |
 | `evaluation.forbidden_candidate_imports` | list of dotted Python module names | `[]` | Reject candidate source that uses these imports. This is an auditable experiment ablation, not a security boundary. |
 | `evaluation.max_smoke_calls_per_worker` | nonnegative integer | `20` | Broker quota for worker `smoke_test` calls. |
@@ -75,15 +77,38 @@ and the fixed reference solver must be executed together in each canonical
 benchmark call. The controller overrides `plibs`, `problem_names`, solver names,
 normalization, and other identity-sensitive fields.
 
+### Built-in competitor registry
+
+The Python evaluator can materialize these trusted reference wrappers. Optional
+packages are imported inside the evaluator only; choosing PDFO or PRIMA does
+not make either package a mandatory dependency of the controller.
+The checked-in evaluator image includes SciPy, PDFO, and independent PRIMA. It
+pins NumPy 1.26 because the current PDFO wheel is not compatible with NumPy 2.
+Custom evaluator images must provide the package named by the selected
+competitor; a missing runtime fails on its first evaluator call instead of
+silently falling back to another solver.
+
+| Family | Unconstrained `u` | Bounds `b` | Linear `l` | Nonlinear `n` |
+|---|---|---|---|---|
+| SciPy | `scipy_nelder_mead`, `scipy_powell`, `scipy_cobyla`, `scipy_cobyqa` | `scipy_powell`, `scipy_cobyla`, `scipy_cobyqa` | `scipy_cobyla`, `scipy_cobyqa` | `scipy_cobyla`, `scipy_cobyqa` |
+| PDFO | `pdfo`, `pdfo_uobyqa`, `pdfo_newuoa`, `pdfo_bobyqa`, `pdfo_lincoa`, `pdfo_cobyla` | `pdfo`, `pdfo_bobyqa`, `pdfo_lincoa`, `pdfo_cobyla` | `pdfo`, `pdfo_lincoa`, `pdfo_cobyla` | `pdfo`, `pdfo_cobyla` |
+| independent PRIMA | `prima`, `prima_uobyqa`, `prima_newuoa`, `prima_bobyqa`, `prima_lincoa`, `prima_cobyla` | `prima`, `prima_bobyqa`, `prima_lincoa`, `prima_cobyla` | `prima`, `prima_lincoa`, `prima_cobyla` | `prima`, `prima_cobyla` |
+
+Every wrapper accepts the four OptiProfiler solver arities (`u`, `b`, `l`,
+`n`), checks method compatibility before evaluation, translates bounds and
+constraints, and applies the experiment's evaluation budget. The registry is
+also used by the post-selection challenger phase, so reference and challenger
+names cannot drift apart.
+
 ## Evolution
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `evolution.iterations` | positive integer | `3` | Number of synchronized population iterations. |
-| `evolution.islands` | positive integer | `4` | Number of independently maintained populations. |
+| `evolution.iterations` | positive integer | `1` | Number of synchronized population iterations. |
+| `evolution.islands` | positive integer | `1` | Number of independently maintained populations. |
 | `evolution.attempts_per_island` | positive integer | `1` | Candidate attempts launched for each island in one iteration. |
-| `evolution.population_per_island` | positive integer | `4` | Maximum retained candidates in each island. |
-| `evolution.migration_interval` | nonnegative integer | `2` | Champion ring-migration interval; `0` disables migration. |
+| `evolution.population_per_island` | positive integer | `2` | Maximum retained candidates in each island. |
+| `evolution.migration_interval` | nonnegative integer | `0` | Whole-candidate ring-migration interval; `0` disables migration. |
 | `evolution.random_seed` | integer | `0` | Reproducible controller sampling seed. |
 | `evolution.finalists_per_island` | positive integer | `1` | Validation-ranked candidates per island considered when selecting one champion. |
 | `evolution.retention.name` | registered retention name | `validation_lexicographic` | Bounded island-archive retention strategy. `metric_pareto` enables multi-objective research variants. |
@@ -177,17 +202,21 @@ trace under `research/traces/integrity-reviewer/`.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `workers.tools.preset` | `minimal`, `research`, or `custom` | `research` | Named tool policy recorded for the experiment. |
-| `workers.tools.web_search` | boolean | `true` | Expose harness-native web-search tools when supported. Requires `network: true`; gateway mode carries provider-side search without granting shell egress. |
+| `workers.tools.preset` | `minimal`, `research`, or `custom` | `minimal` | Named tool policy recorded for the experiment. |
+| `workers.tools.web_search` | boolean | `false` | Expose harness-native web-search tools when supported. Requires `network: true`; gateway mode carries provider-side search without granting shell egress. |
 | `workers.tools.network` | boolean | `true` | Permit network-backed harness tools. Gateway-routed workers remain internal; direct worker egress exists only in the double-opt-in unsafe path. |
 | `workers.tools.shell` | boolean | `true` | Include `Bash` in Claude Code's tool list. The built-in Codex adapter cannot enforce `false` and rejects that combination. |
 | `workers.tools.python` | boolean | `true` | Declare Python available to workers. Strict removal requires a different image. |
 | `workers.tools.git` | boolean | `true` | Declare Git available to workers. Strict removal requires a different image. |
-| `workers.tools.compilers` | boolean | `true` | Declare compiler tools available. Strict removal requires a different image. |
+| `workers.tools.compilers` | boolean | `false` | Declare compiler tools available. Strict removal requires a different image. |
 | `workers.tools.package_install` | boolean | `false` | Declare package installation permitted; image and network policy still apply. |
 | `workers.tools.communication` | `none`, `controller_summary`, `island`, or `global` | `none` | Previous-attempt information injected into later worker prompts. |
 
 `web_search` and Claude Code's `shell` setting alter the actual harness command.
+When communication is enabled, the controller includes only bounded public
+fitness metadata plus the normalized solver summary, mechanism names, and
+pseudocode. It never forwards validation/hidden values, reviewer findings, or
+raw explanation paths.
 The Python, Git, compiler, and package-install fields describe the declared
 experiment capability; they cannot remove a binary already present in an image.
 Use separate worker images for strict binary/tool ablation studies. The built-in
@@ -230,9 +259,9 @@ the package.
 |---|---|---|---|
 | `workflow.phases[].name` | registered name | `prepare`, `explore`, `validate`, `hidden`, `report` | Ordered run-level phases with declared artifact requirements and outputs. Core phases are mandatory in the alpha. |
 | `workflow.phases[].options` | mapping | `{}` | Constructor options for one phase. |
-| `workflow.attempt_steps[].name` | registered name | `mutate`, `static_audit`, `smoke`, `public_evaluate`, `feedback` | Ordered steps executed for each candidate attempt. `mutate` and `public_evaluate` are mandatory. |
+| `workflow.attempt_steps[].name` | registered name | `mutate`, `smoke`, `public_evaluate` | Ordered steps executed for each candidate attempt. `mutate` and `public_evaluate` are mandatory. |
 | `workflow.attempt_steps[].options` | mapping | `{}` | Constructor options for one attempt step. |
-| `workflow.after_iteration[].name` | registered name | `migration` | Policies evaluated after the iteration barrier. They propose edits; only the engine applies them. |
+| `workflow.after_iteration[].name` | registered name | none | Optional policies evaluated after the iteration barrier. They propose edits; only the engine applies them. |
 | `workflow.after_iteration[].options` | mapping | `{}` | Constructor options for one after-iteration policy. |
 
 Use immutable config helpers such as `without_step(...)`, `with_step(...)`,
@@ -246,10 +275,10 @@ does not remove the engine's mandatory final safety and edit-scope gate.
 policy returning a nonempty budget edit fails explicitly; it is not silently
 recorded as an effective scheduling ablation.
 
-The built-in full research sequence is:
+The recommended full research sequence is:
 
 ```text
-prepare, direction_scout, explore, strategy_analysis, recombine,
+prepare, direction_scout, explore, strategy_analysis, strategy_transfer,
 validate, hidden, challenger, report
 ```
 
@@ -271,17 +300,54 @@ the phase constructor before a run directory is created:
 | `strategy_analysis` | `max_ablations` | `6` | Executable toggles tested per island. |
 | `strategy_analysis` | `min_effect` | `0.01` | Public-fitness support threshold. |
 | `strategy_analysis` | `n_repeats` | `1` | Repeated ablated evaluations. |
+| `strategy_analysis` | `evaluation_mode` | `smoke` | `smoke` for bounded attribution or `public` for canonical public attribution. |
 | `strategy_analysis` | `worker_index` | `0` | Entry in `workers.pool`. |
 | `strategy_analysis` | `timeout_seconds` | worker default | Role wall time. |
 | `strategy_analysis` | `token_budget` | worker default | Advisory role token budget. |
 | `strategy_analysis` | `max_budget_usd` | worker default | Claude role cost cap. |
 | `strategy_analysis` | `tools` | network on, web off | Role-specific `ToolConfig` overrides. Model transport uses the gateway; the role shell has no general egress. |
 | `strategy_analysis` | `prompt_version` | `strategy-analysis/1` | Recorded prompt contract. |
-| `recombine` | `max_strategies` | `8` | Portable strategies considered. |
-| `recombine` | `max_combination_size` | `2` | Patches in one combination. |
-| `recombine` | `max_combinations` | `12` | Hard combination evaluation cap. |
-| `recombine` | `beam_width` | `3` | Validation-selected combinations registered. |
-| `challenger` | `reference` | `scipy_powell` | `scipy_powell`, `prima_newuoa`, or `initial`. This phase is post-selection only. |
+| `strategy_transfer` | `max_strategies_per_island` | `3` | Controller-supported semantic strategies offered to each other island. |
+| `strategy_transfer` | `attempts_per_island` | `1` | Integration attempts made from each island's own selected base. |
+| `strategy_transfer` | `worker_index` | `0` | Integrator worker entry. |
+| `strategy_transfer` | `timeout_seconds` | worker default | Integrator wall time. |
+| `strategy_transfer` | `token_budget` | worker default | Advisory integrator token budget. |
+| `strategy_transfer` | `max_budget_usd` | worker default | Claude integrator cost cap. |
+| `strategy_transfer` | `tools` | network on, web off | Role-specific `ToolConfig` overrides. |
+| `strategy_transfer` | `prompt_version` | `strategy-transfer/1` | Recorded prompt contract. |
+| `challenger` | `reference` | `scipy_powell` | `initial` or any compatible registered competitor. This phase is post-selection only. |
+
+The older `recombine` phase remains available as an advanced compatibility
+component for portable-patch experiments, but it is not part of the recommended
+workflow. Whole-candidate migration is likewise opt-in. This is a deliberate
+causal-attribution default, not a claim that mature island systems universally
+disable migration: [OpenEvolve exposes periodic
+migration](https://github.com/algorithmicsuperintelligence/openevolve/blob/main/configs/default_config.yaml)
+and [FunSearch periodically resets weaker islands from stronger
+ones](https://www.nature.com/articles/s41586-023-06924-6).
+
+## Solver explanations
+
+Every mutation and strategy-integration prompt requires
+`.optiprofiler_evolve/solver_explanation.json` using schema
+`solver_explanation/1`. The controller normalizes and stores it under
+`<run_dir>/explanations/`, then removes the metadata directory from executable
+candidate source. Missing or malformed prose is recorded but never converted
+into numerical evidence and does not by itself discard a valid solver.
+
+The selected champion is accompanied by:
+
+```text
+final_solver/
+final_solver.diff
+FINAL_SOLVER_EXPLANATION.md
+```
+
+The final explanation contains the worker's bounded summary and pseudocode,
+source-bound mechanisms, known limitations, and only strategy cards that occur
+on the winning lineage. A transferred card is explicitly identified as having
+been ablated on its source island; the report does not claim an isolated target-
+island effect that was never measured.
 
 See [Research workflow](research-workflow.md) for artifact schemas, fallback
 behavior, patch portability, and validation-query semantics.

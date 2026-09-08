@@ -16,6 +16,7 @@ STRATEGY_SCHEMA = "strategy_cards/1"
 ABLATION_SCHEMA = "strategy_ablation/1"
 BUNDLE_SCHEMA = "island_bundles/1"
 RECOMBINATION_SCHEMA = "recombination/1"
+STRATEGY_TRANSFER_SCHEMA = "strategy_transfer/1"
 CHALLENGER_SCHEMA = "challenger_report/1"
 EVIDENCE_SCHEMA = "benchmark_evidence/1"
 
@@ -169,6 +170,10 @@ def normalize_strategy_cards(
             {
                 "strategy_id": strategy_id,
                 "claim": _short_text(raw.get("claim"), "Unspecified strategy"),
+                "mechanism": _short_text(raw.get("mechanism"), ""),
+                "pseudocode": _string_list(raw.get("pseudocode", []), maximum=30),
+                "applicability": _string_list(raw.get("applicability", []), maximum=20),
+                "risks": _string_list(raw.get("risks", []), maximum=20),
                 "evidence_level": "Inferred",
                 "code_bindings": bindings,
                 "toggle": normalized_toggle,

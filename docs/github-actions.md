@@ -18,6 +18,14 @@ and its paired [`run.py`](../examples/github-actions/run.py):
    cost are understood.
 5. Inspect the Job Summary and download the public artifact after the job.
 
+For long runs on a controlled machine, start from
+[`evolve-self-hosted.yml`](../examples/github-actions/evolve-self-hosted.yml).
+It targets the labels `self-hosted`, `linux`, `x64`, and `syu-ubuntu`, keeps a
+per-run output directory, and otherwise preserves the same one-job contract.
+The runner must already be registered and its service account must be able to
+run Docker without `sudo`; runner installation is intentionally outside this
+package.
+
 The template has one job by design. Splitting phases or islands into GitHub jobs
 would create a second orchestration model with different resume, cancellation,
 and state semantics.

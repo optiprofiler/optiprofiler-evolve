@@ -10,12 +10,15 @@ class MutateStep:
 
     def run(self, context: AttemptContext) -> StepResult:
         outcome = context.capabilities.run_worker()
+        artifacts = [str(outcome.transcript)]
+        if outcome.solver_explanation is not None:
+            artifacts.append(str(outcome.solver_explanation))
         return StepResult(
             metrics={
                 "worker_returncode": outcome.returncode,
                 "worker_timed_out": outcome.timed_out,
             },
-            artifacts=(str(outcome.transcript),),
+            artifacts=tuple(artifacts),
         )
 
 
