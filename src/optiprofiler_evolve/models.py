@@ -203,12 +203,6 @@ class CandidateRecord:
     def attempt_id(self) -> str:
         return self.candidate_id
 
-    @property
-    def generation(self) -> int:
-        """Compatibility alias for older internal reports."""
-
-        return self.iteration
-
     def as_dict(self) -> dict[str, Any]:
         value = dataclasses.asdict(self)
         value["path"] = str(self.path)

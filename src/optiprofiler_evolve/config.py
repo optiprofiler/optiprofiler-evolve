@@ -313,12 +313,6 @@ class EvolutionConfig:
     retention: ComponentConfig = dataclasses.field(default_factory=_default_retention)
     parent_sampler: ComponentConfig = dataclasses.field(default_factory=_default_parent_sampler)
 
-    @property
-    def rounds(self) -> int:
-        """Compatibility alias for pre-constitution internal callers."""
-
-        return self.iterations
-
     def validate(self) -> None:
         for name in (
             "iterations",
@@ -840,8 +834,7 @@ def load_config(config: EvolveConfig | Mapping[str, Any] | str | Path) -> Evolve
             raise TypeError("config must be an EvolveConfig, mapping, or YAML path.")
         if not isinstance(raw, Mapping):
             raise TypeError("The experiment config must contain a mapping at its root.")
-        normalized = _normalize_legacy_config(dict(raw))
-        loaded = _from_mapping(EvolveConfig, _expand_environment(normalized), "config")
+        loaded = _from_mapping(EvolveConfig, _expand_environment(raw), "config")
     loaded.validate()
     return loaded
 
@@ -918,29 +911,6 @@ def _is_secret_name(name: str) -> bool:
         marker in upper
         for marker in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")
     )
-
-
-def _normalize_legacy_config(raw: dict[str, Any]) -> dict[str, Any]:
-    """Translate early-alpha spellings to their explicit canonical names."""
-
-    evolution = raw.get("evolution")
-    if isinstance(evolution, Mapping) and "rounds" in evolution:
-        if "iterations" in evolution:
-            raise ValueError("Use only evolution.iterations; rounds is a legacy alias.")
-        translated = dict(evolution)
-        translated["iterations"] = translated.pop("rounds")
-        raw["evolution"] = translated
-    evaluation = raw.get("evaluation")
-    if isinstance(evaluation, Mapping):
-        translated = dict(evaluation)
-        if translated.get("backend") == "local":
-            translated["backend"] = "unsafe_local"
-        feedback_aliases = {"summary": "score_only", "agent": "full_artifacts"}
-        feedback_mode = translated.get("feedback_mode")
-        if feedback_mode in feedback_aliases:
-            translated["feedback_mode"] = feedback_aliases[feedback_mode]
-        raw["evaluation"] = translated
-    return raw
 
 
 def _freeze_value(value: Any) -> Any:

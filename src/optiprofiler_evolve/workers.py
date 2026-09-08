@@ -17,7 +17,7 @@ class CliWorkerAdapter:
     name = "cli"
 
     def run(self, request: WorkerRequest) -> WorkerOutcome:
-        result = run_agent(
+        return run_agent(
             worker=request.worker,
             workers=request.workers,
             sandbox=request.sandbox,
@@ -29,22 +29,6 @@ class CliWorkerAdapter:
             trace_dir=request.trace_dir,
             trace_context=request.trace_context,
             cancellation_event=request.cancellation_event,
-        )
-        return WorkerOutcome(
-            returncode=result.returncode,
-            transcript=result.transcript,
-            timed_out=result.timed_out,
-            native_trace=result.native_trace,
-            stderr_trace=result.stderr_trace,
-            trace_chunks=result.trace_chunks,
-            trace_outcome=result.trace_outcome,
-            capture_error=result.capture_error,
-            cancelled=result.cancelled,
-            termination_reason=result.termination_reason,
-            provider_gateway_outcome=result.provider_gateway_outcome,
-            provider_gateway_request_count=result.provider_gateway_request_count,
-            provider_gateway_manifest=result.provider_gateway_manifest,
-            usage=result.usage,
         )
 
     def provenance(self, workers: Sequence[WorkerConfig]) -> Mapping[str, object]:

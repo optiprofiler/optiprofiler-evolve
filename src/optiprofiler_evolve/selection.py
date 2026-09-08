@@ -88,8 +88,6 @@ class MetricParetoRetention:
             raise ValueError("Archive capacity must be positive.")
         if not candidates:
             return ()
-        if len(self.objectives) == 1:
-            return self.scalar_fallback.retain(candidates, capacity)
         ordered = list(self.scalar_fallback.retain(candidates, len(candidates)))
         bundles = self._comparable_bundles(ordered)
         retained: list[CandidateRecord] = []

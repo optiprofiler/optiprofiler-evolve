@@ -60,7 +60,8 @@ from .protocols import (
 from .provenance import build_run_provenance, coordinate_seed
 from .projections import project_public_events
 from .references import materialize_reference
-from .research import file_hash, read_json_object, safe_relative_path, source_diff
+from .reports import append_trace_coverage, write_final_report, write_final_solver_explanation
+from .research import file_hash, read_json_object, safe_relative_path
 from .review import (
     CandidateReviewer,
     IntegrityReviewDecision,
@@ -69,7 +70,6 @@ from .review import (
     write_sanitized_transcript,
 )
 from .registry import build, resolve
-from .sandbox import AgentRunResult
 from .selection import MetricSelectionError
 from .solver import (
     InterfaceSpec,
@@ -94,7 +94,6 @@ from .viewers import (
 )
 
 
-AgentRunner = Callable[..., AgentRunResult]
 
 
 class _RunCancelled(RuntimeError):
@@ -114,47 +113,6 @@ class _Attempt:
     evaluated: bool = False
 
 
-class _AgentRunnerAdapter:
-    """Compatibility adapter for tests and owner-supplied legacy runners."""
-
-    name = "injected-runner"
-
-    def __init__(self, runner: AgentRunner) -> None:
-        self.runner = runner
-
-    def run(self, request: WorkerRequest) -> WorkerOutcome:
-        result = self.runner(
-            worker=request.worker,
-            workers=request.workers,
-            sandbox=request.sandbox,
-            workspace=request.workspace,
-            tools_dir=request.tools_dir,
-            broker=request.broker,
-            prompt=request.prompt,
-            transcript=request.transcript,
-        )
-        return WorkerOutcome(
-            result.returncode,
-            result.transcript,
-            result.timed_out,
-            native_trace=result.native_trace,
-            stderr_trace=result.stderr_trace,
-            trace_chunks=result.trace_chunks,
-            trace_outcome=result.trace_outcome,
-            capture_error=result.capture_error,
-            cancelled=result.cancelled,
-            termination_reason=result.termination_reason,
-            usage=result.usage,
-        )
-
-    def provenance(self, workers: Sequence[WorkerConfig]) -> Mapping[str, object]:
-        module = getattr(self.runner, "__module__", self.runner.__class__.__module__)
-        qualname = getattr(self.runner, "__qualname__", self.runner.__class__.__qualname__)
-        return {
-            "adapter": self.name,
-            "runner": f"{module}:{qualname}",
-            "models": sorted({worker.model for worker in workers}),
-        }
 
 
 class EvolutionEngine:
@@ -169,7 +127,6 @@ class EvolutionEngine:
         editable: Sequence[str],
         config: EvolveConfig,
         run_dir: Path,
-        agent_runner: AgentRunner | None = None,
         worker_adapter: WorkerAdapter | None = None,
         evaluator_factory: Callable[..., Evaluator] | None = None,
     ) -> None:
@@ -180,14 +137,10 @@ class EvolutionEngine:
         self.editable = tuple(editable)
         self.config = config
         self.run_dir = run_dir.expanduser().resolve()
-        if worker_adapter is not None and agent_runner is not None:
-            raise ValueError("Provide worker_adapter or agent_runner, not both.")
-        if worker_adapter is not None:
-            self.worker_adapter = worker_adapter
-        elif agent_runner is not None:
-            self.worker_adapter = _AgentRunnerAdapter(agent_runner)
-        else:
-            self.worker_adapter = resolve("worker", config.workers.adapter)()
+        self.worker_adapter = (
+            worker_adapter if worker_adapter is not None
+            else resolve("worker", config.workers.adapter)()
+        )
         self.evaluator_factory = evaluator_factory or resolve(
             "evaluator", config.evaluation.adapter
         )
@@ -499,36 +452,36 @@ class EvolutionEngine:
     def run(self) -> EvolveResult:
         self._initialize_run_directory()
         self._cancellation_event.clear()
-        self.events = EventWriter(self.run_dir / "events.jsonl")
-        self._refresh_stop.clear()
-        self._refresh_thread = threading.Thread(
-            target=self._refresh_status_loop, name="ope-status-refresher", daemon=True
-        )
-        self._refresh_thread.start()
         self.run_id = secrets.token_hex(16)
-        reviewer_worker = self.config.integrity_review.resolved_worker(self.config.workers)
-        provenance_workers = self.config.workers.pool
-        if reviewer_worker is not None and reviewer_worker not in provenance_workers:
-            provenance_workers = (*provenance_workers, reviewer_worker)
-        provenance = build_run_provenance(
-            self.config,
-            run_id=self.run_id,
-            worker_adapter=self.worker_adapter,
-            worker_provenance=self.worker_adapter.provenance(provenance_workers),
-            evaluator_factory=self.evaluator_factory,
-        )
-        self.trace_ledger = TraceLedger(
-            self.run_dir,
-            run_id=self.run_id,
-            config_hash=str(provenance["config_hash"]),
-            adapter_name=self.worker_adapter.name,
-        )
-        _write_json(self.run_dir / "resolved_config.json", self.config.redacted_dict())
-        _write_json(self.run_dir / "provenance.json", provenance)
-        self._emit("run_started", "running", data=provenance)
+        self.events = EventWriter(self.run_dir / "events.jsonl")
         run_succeeded = False
         try:
             with _controller_cancellation(self._cancellation_event):
+                self._refresh_stop.clear()
+                self._refresh_thread = threading.Thread(
+                    target=self._refresh_status_loop, name="ope-status-refresher", daemon=True
+                )
+                self._refresh_thread.start()
+                reviewer_worker = self.config.integrity_review.resolved_worker(self.config.workers)
+                provenance_workers = self.config.workers.pool
+                if reviewer_worker is not None and reviewer_worker not in provenance_workers:
+                    provenance_workers = (*provenance_workers, reviewer_worker)
+                provenance = build_run_provenance(
+                    self.config,
+                    run_id=self.run_id,
+                    worker_adapter=self.worker_adapter,
+                    worker_provenance=self.worker_adapter.provenance(provenance_workers),
+                    evaluator_factory=self.evaluator_factory,
+                )
+                self.trace_ledger = TraceLedger(
+                    self.run_dir,
+                    run_id=self.run_id,
+                    config_hash=str(provenance["config_hash"]),
+                    adapter_name=self.worker_adapter.name,
+                )
+                _write_json(self.run_dir / "resolved_config.json", self.config.redacted_dict())
+                _write_json(self.run_dir / "provenance.json", provenance)
+                self._emit("run_started", "running", data=provenance)
                 self._run_phases()
                 self._raise_if_cancelled()
                 if self.result is None:
@@ -573,7 +526,7 @@ class EvolutionEngine:
                         **{f"gateway_{key}": value for key, value in gateway.items()},
                     },
                 )
-                self._append_trace_coverage(coverage)
+                append_trace_coverage(self.run_dir, coverage)
             except Exception as exc:
                 trace_failure = exc
                 try:
@@ -605,7 +558,7 @@ class EvolutionEngine:
                 except Exception:
                     pass
             self._refresh_stop.set()
-            if self._refresh_thread is not None:
+            if self._refresh_thread is not None and self._refresh_thread.ident is not None:
                 self._refresh_thread.join(timeout=10)
                 self._refresh_thread = None
             try:
@@ -676,9 +629,10 @@ class EvolutionEngine:
             "report": self._phase_report,
         }
         try:
-            return actions[action]()
+            operation = actions[action]
         except KeyError as exc:
             raise ValueError(f"Unknown core phase action: {action!r}") from exc
+        return operation()
 
     def _phase_prepare(self) -> Mapping[str, object]:
         self.data = resolve_data_plan(self.config.data)
@@ -961,11 +915,13 @@ class EvolutionEngine:
         if self.final_result is None or self.final_solver is None:
             raise RuntimeError("Report phase requires a hidden evaluation result.")
         _write_json(self.run_dir / "final_ranking.json", [self.final_result.as_dict()])
-        explanation = self._write_final_solver_explanation(
+        explanation = write_final_solver_explanation(
+            self.run_dir,
             self.final_result,
             self.final_solver,
         )
-        self._write_final_report(
+        write_final_report(
+            self.run_dir,
             self.final_result,
             [self.final_result],
             self.final_solver,
@@ -1089,7 +1045,15 @@ class EvolutionEngine:
                 raise RuntimeError(error or "attempt pipeline rejected candidate")
             # Non-removable safety and controller-only validation gate.
             changed = capabilities.audit_candidate()
-            public_score = float(metrics["public_score"])
+            public = capabilities.public_evaluation
+            if public is None or public[0] != tree_hash(workspace):
+                public_result = capabilities.evaluate_public("public_score")
+            else:
+                public_result = public[1]
+            if not public_result.success:
+                raise RuntimeError(public_result.error or "public evaluation failed")
+            public_score = public_result.score
+            metrics["public_score"] = public_score
             review_decision, review_report = self._review_candidate(
                 candidate_id=attempt_id,
                 candidate=workspace,
@@ -1149,7 +1113,7 @@ class EvolutionEngine:
                 valid=False,
                 error=f"{type(exc).__name__}: {exc}",
             )
-        evaluated = any("public_score" in result.metrics for result in results)
+        evaluated = capabilities.public_evaluation is not None
         return _Attempt(record, changed, outcome, tuple(results), evaluated)
 
     def _failed_attempt(
@@ -1277,13 +1241,12 @@ class EvolutionEngine:
                 "be used until the engine has an explicit budget consumer."
             )
         killed = set(edit.kill)
-        if killed:
-            self.populations = [
-                [record for record in population if record.candidate_id not in killed]
-                for population in self.populations
-            ]
+        populations = [
+            [record for record in population if record.candidate_id not in killed]
+            for population in self.populations
+        ]
         for candidate_id, target in edit.migrate:
-            if not 0 <= target < len(self.populations):
+            if not 0 <= target < len(populations):
                 raise ValueError(f"Migration target island is out of range: {target}")
             try:
                 record = self.candidates[candidate_id]
@@ -1291,7 +1254,14 @@ class EvolutionEngine:
                 raise ValueError(
                     f"Migration references unknown candidate {candidate_id!r}."
                 ) from exc
-            self.populations[target] = self._trim_population([*self.populations[target], record])
+            if not record.valid or (
+                candidate_id != "seed" and record.review_verdict != "approve"
+            ):
+                raise ValueError(f"Migration candidate {candidate_id!r} has not passed admission.")
+            if candidate_id in killed:
+                raise ValueError(f"Migration candidate {candidate_id!r} is also marked for removal.")
+            populations[target] = self._trim_population([*populations[target], record])
+        self.populations = populations
 
     def _validate_candidate(self, root: Path) -> None:
         validate_tree_safety(
@@ -1317,8 +1287,13 @@ class EvolutionEngine:
         return allowed[selected.candidate_id]
 
     def _select_worker(self, rng: random.Random) -> WorkerConfig:
-        weighted = [worker for worker in self.config.workers.pool for _ in range(worker.weight)]
-        return rng.choice(weighted)
+        pool = self.config.workers.pool
+        ticket = rng.randrange(sum(worker.weight for worker in pool))
+        for worker in pool:
+            ticket -= worker.weight
+            if ticket < 0:
+                return worker
+        raise RuntimeError("Worker pool has no positive weight.")
 
     def _trim_population(self, population: list[CandidateRecord]) -> list[CandidateRecord]:
         capacity = self.config.evolution.population_per_island
@@ -1443,284 +1418,6 @@ class EvolutionEngine:
         _write_json(self.run_dir / "checkpoints" / f"iteration_{iteration:03d}.json", payload)
         _write_json(self.run_dir / "state.json", payload)
 
-    def _write_final_report(
-        self,
-        best: FinalistResult,
-        finalists: list[FinalistResult],
-        final_solver: Path,
-        explanation: Path,
-    ) -> None:
-        lines = [
-            "# Evolution Result",
-            "",
-            f"- Best candidate: `{best.candidate_id}`",
-            f"- Public fitness: `{best.public_score:.6f}`",
-            f"- Validation fitness: `{best.validation_score:.6f}`",
-            f"- Hidden fitness: `{best.final_score:.6f}`",
-            f"- Materialized solver: `{final_solver}`",
-            f"- Human-readable algorithm explanation: `{explanation}`",
-            "",
-            "## Validation-selected champion",
-            "",
-            "| Candidate | Island | Public | Validation | Hidden | Status |",
-            "|---|---:|---:|---:|---:|---|",
-        ]
-        for item in sorted(finalists, key=lambda value: -value.final_score):
-            lines.append(
-                f"| `{item.candidate_id}` | {item.island} | "
-                f"{item.public_score:.6f} | {item.validation_score:.6f} | "
-                f"{item.final_score:.6f} | "
-                f"{'ok' if item.success else item.error or 'failed'} |"
-            )
-        research_artifacts = [
-            path
-            for path in (
-                self.run_dir / "research" / "directions.json",
-                self.run_dir / "research" / "analysis" / "island_bundles.json",
-                self.run_dir / "research" / "strategy_transfer.json",
-                self.run_dir / "research" / "recombination.json",
-                self.run_dir / "research" / "challenger_report.json",
-            )
-            if path.is_file()
-        ]
-        if research_artifacts:
-            lines.extend(["", "## Research workflow artifacts", ""])
-            lines.extend(
-                f"- [`{path.relative_to(self.run_dir).as_posix()}`]({path.relative_to(self.run_dir).as_posix()})"
-                for path in research_artifacts
-            )
-        (self.run_dir / "FINAL_REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-    def _write_final_solver_explanation(
-        self,
-        best: FinalistResult,
-        final_solver: Path,
-    ) -> Path:
-        source = self.run_dir / "explanations" / f"{best.candidate_id}.json"
-        payload: Mapping[str, object] = {}
-        if source.is_file():
-            try:
-                loaded = read_json_object(source)
-                if loaded.get("status") == "complete":
-                    payload = loaded
-            except ValueError:
-                pass
-
-        diff_path = self.run_dir / "final_solver.diff"
-        diff_path.write_text(
-            source_diff(self.run_dir / "candidates" / "seed", final_solver),
-            encoding="utf-8",
-        )
-        lines = [
-            "# Final Solver Explanation",
-            "",
-            f"- Candidate: `{best.candidate_id}`",
-            f"- Island: `{best.island}`",
-            "- Source diff: [`final_solver.diff`](final_solver.diff)",
-            "",
-        ]
-        if payload:
-            lines.extend(["## Summary", "", str(payload.get("summary", "")), ""])
-            pseudocode = payload.get("pseudocode", [])
-            if isinstance(pseudocode, list) and pseudocode:
-                lines.extend(["## Pseudocode", ""])
-                lines.extend(f"{index}. {step}" for index, step in enumerate(pseudocode, 1))
-                lines.append("")
-            mechanisms = payload.get("mechanisms", [])
-            if isinstance(mechanisms, list) and mechanisms:
-                lines.extend(["## Mechanisms", ""])
-                for mechanism in mechanisms:
-                    if not isinstance(mechanism, Mapping):
-                        continue
-                    lines.append(f"- **{mechanism.get('name', 'Unnamed')}**: {mechanism.get('description', '')}")
-                    bindings = mechanism.get("code_bindings", [])
-                    if isinstance(bindings, list):
-                        locations = []
-                        for binding in bindings:
-                            if not isinstance(binding, Mapping):
-                                continue
-                            span = binding.get("lines", [])
-                            if isinstance(span, list) and len(span) == 2:
-                                locations.append(
-                                    f"`{binding.get('file')}:{span[0]}-{span[1]}`"
-                                )
-                        if locations:
-                            lines.append(f"  Code: {', '.join(locations)}")
-                lines.append("")
-            strengths = payload.get("expected_strengths", [])
-            if isinstance(strengths, list) and strengths:
-                lines.extend(["## Expected Strengths", ""])
-                lines.extend(f"- {item}" for item in strengths)
-                lines.append("")
-            limitations = payload.get("known_limitations", [])
-            if isinstance(limitations, list) and limitations:
-                lines.extend(["## Known Limitations", ""])
-                lines.extend(f"- {item}" for item in limitations)
-                lines.append("")
-            consulted = payload.get("evidence_consulted", [])
-            if isinstance(consulted, list) and consulted:
-                lines.extend(["## Evidence Consulted", ""])
-                lines.extend(f"- `{item}`" for item in consulted)
-                lines.append("")
-        else:
-            lines.extend(
-                [
-                    "## Explanation Status",
-                    "",
-                    "The winning candidate has no complete worker-authored explanation. "
-                    "Review the source diff and verified strategy artifacts before reuse.",
-                    "",
-                ]
-            )
-
-        winning_strategy_ids, transferred_strategy_ids = self._winning_strategy_ids(best)
-        strategy_paths = sorted(
-            (self.run_dir / "research" / "analysis").glob("island-*/strategy_cards.json")
-        )
-        supported: list[tuple[int, Mapping[str, object]]] = []
-        for path in strategy_paths:
-            try:
-                strategy_payload = read_json_object(path)
-                source_island = int(strategy_payload.get("island", -1))
-                cards = strategy_payload.get("cards", [])
-            except ValueError:
-                continue
-            if isinstance(cards, list):
-                supported.extend(
-                    (source_island, card)
-                    for card in cards
-                    if isinstance(card, Mapping)
-                    and str(card.get("strategy_id")) in winning_strategy_ids
-                    and isinstance(card.get("ablation"), Mapping)
-                    and card["ablation"].get("conclusion") == "supported"
-                )
-        if supported:
-            lines.extend(["## Strategy Evidence for This Winner", ""])
-            for source_island, card in supported:
-                effect = card.get("ablation", {}).get("mean_effect_when_present")
-                suffix = f" (measured effect `{effect}`)" if effect is not None else ""
-                transfer_note = (
-                    f"; transferred from island {source_island}, where its isolated effect was measured"
-                    if str(card.get("strategy_id")) in transferred_strategy_ids
-                    else "; measured on the winner's source island"
-                )
-                lines.append(
-                    f"- `{card.get('strategy_id')}`: {card.get('claim', '')}"
-                    f"{suffix}{transfer_note}."
-                )
-                mechanism = str(card.get("mechanism", "")).strip()
-                if mechanism:
-                    lines.append(f"  Mechanism: {mechanism}")
-                pseudocode = card.get("pseudocode", [])
-                if isinstance(pseudocode, list) and pseudocode:
-                    lines.append(
-                        "  Pseudocode: "
-                        + " -> ".join(str(step) for step in pseudocode)
-                    )
-                bindings = card.get("code_bindings", [])
-                if isinstance(bindings, list):
-                    locations = []
-                    for binding in bindings:
-                        if not isinstance(binding, Mapping):
-                            continue
-                        span = binding.get("lines", [])
-                        if isinstance(span, list) and len(span) == 2:
-                            locations.append(
-                                f"`{binding.get('file')}:{span[0]}-{span[1]}`"
-                            )
-                    if locations:
-                        lines.append(f"  Code: {', '.join(locations)}")
-            lines.append("")
-
-        destination = self.run_dir / "FINAL_SOLVER_EXPLANATION.md"
-        destination.write_text("\n".join(lines), encoding="utf-8")
-        return destination
-
-    def _winning_strategy_ids(
-        self,
-        best: FinalistResult,
-    ) -> tuple[set[str], set[str]]:
-        """Return only strategies retained or applied on the winning lineage."""
-
-        selected: set[str] = set()
-        transferred: set[str] = set()
-        bundles_path = self.run_dir / "research" / "analysis" / "island_bundles.json"
-        if bundles_path.is_file():
-            try:
-                bundles = read_json_object(bundles_path).get("bundles", [])
-            except ValueError:
-                bundles = []
-            if isinstance(bundles, list):
-                for bundle in bundles:
-                    if not isinstance(bundle, Mapping) or bundle.get("island") != best.island:
-                        continue
-                    kept = bundle.get("kept_strategy_ids", [])
-                    if isinstance(kept, list):
-                        selected.update(str(item) for item in kept)
-
-        transfer_path = self.run_dir / "research" / "strategy_transfer.json"
-        if transfer_path.is_file():
-            try:
-                islands = read_json_object(transfer_path).get("islands", [])
-            except ValueError:
-                islands = []
-            if isinstance(islands, list):
-                for island in islands:
-                    if (
-                        not isinstance(island, Mapping)
-                        or island.get("island") != best.island
-                        or island.get("winner_candidate_id") != best.candidate_id
-                    ):
-                        continue
-                    attempts = island.get("attempts", [])
-                    if not isinstance(attempts, list):
-                        continue
-                    for attempt in attempts:
-                        if (
-                            not isinstance(attempt, Mapping)
-                            or attempt.get("variant_id") != best.candidate_id
-                        ):
-                            continue
-                        manifest = attempt.get("manifest", {})
-                        if not isinstance(manifest, Mapping):
-                            continue
-                        applied = manifest.get("applied_strategy_ids", [])
-                        if isinstance(applied, list):
-                            transferred.update(str(item) for item in applied)
-        selected.update(transferred)
-        return selected, transferred
-
-    def _append_trace_coverage(self, coverage: Mapping[str, object]) -> None:
-        report = self.run_dir / "FINAL_REPORT.md"
-        if not report.is_file():
-            return
-        capture = coverage.get("capture_quality", {})
-        outcomes = coverage.get("outcomes", {})
-        gateway = coverage.get("provider_gateway", {})
-        if not all(
-            isinstance(value, Mapping) for value in (capture, outcomes, gateway)
-        ):
-            raise ValueError("Trace coverage has an invalid shape.")
-        lines = [
-            "",
-            "## Agent trace coverage",
-            "",
-            f"- Total invocations: `{coverage.get('total', 0)}`",
-            f"- Complete captures: `{capture.get('complete', 0)}`",
-            f"- Degraded captures: `{capture.get('degraded', 0)}`",
-            f"- Interrupted captures: `{capture.get('interrupted', 0)}`",
-            f"- Failed worker outcomes: `{outcomes.get('failed', 0)}`",
-            f"- Timed-out worker outcomes: `{outcomes.get('timed_out', 0)}`",
-            f"- Cancelled worker outcomes: `{outcomes.get('cancelled', 0)}`",
-            f"- Gateway invocations: `{gateway.get('total', 0)}`",
-            f"- Completed gateways: `{gateway.get('completed', 0)}`",
-            f"- Failed gateways: `{gateway.get('failed', 0)}`",
-            f"- Interrupted gateways: `{gateway.get('interrupted', 0)}`",
-            "- Private index: `controller/trace_index.jsonl`",
-            "- Private coverage details: `controller/trace_coverage.json`",
-        ]
-        with report.open("a", encoding="utf-8") as handle:
-            handle.write("\n".join(lines) + "\n")
 
     def _emit(
         self,
@@ -2348,6 +2045,8 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
         self._workspace = workspace
         self.changed: tuple[str, ...] = ()
         self.worker_outcome: WorkerOutcome | None = None
+        self.public_evaluation: tuple[str, EvaluationResult] | None = None
+        self._evaluation_counts: dict[str, int] = {}
 
     def run_worker(self) -> WorkerOutcome:
         engine = self._engine
@@ -2469,7 +2168,7 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
         return outcome
 
     def audit_candidate(self) -> tuple[str, ...]:
-        self._ensure_candidate_safe(self._workspace)
+        self._engine._validate_candidate(self._workspace)
         changed = changed_files(self._parent.path, self._workspace)
         if not changed:
             raise ValueError("Worker produced no solver changes.")
@@ -2484,11 +2183,19 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
         if self._engine.evaluator is None:
             raise RuntimeError("Evaluator is unavailable.")
         directory_name = "public" if mode in {"public", "public_score"} else mode
-        return self._engine.evaluator.evaluate(
+        count = self._evaluation_counts.get(directory_name, 0) + 1
+        self._evaluation_counts[directory_name] = count
+        if count > 1:
+            directory_name = f"{directory_name}-{count:03d}"
+        evaluated_hash = tree_hash(self._workspace)
+        result = self._engine.evaluator.evaluate(
             self._workspace,
             mode,
             self._engine.run_dir / "controller" / "evaluations" / self._attempt_id / directory_name,
         )
+        if mode == "public_score":
+            self.public_evaluation = (evaluated_hash, result)
+        return result
 
     def _ensure_candidate_safe(self, root: Path) -> None:
         self._engine._validate_candidate(root)

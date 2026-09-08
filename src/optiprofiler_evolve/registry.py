@@ -14,17 +14,17 @@ from typing import Any
 from .config import ComponentConfig
 
 
-_KINDS = (
-    "phase",
-    "step",
-    "policy",
-    "retention",
-    "sampler",
-    "reviewer",
-    "worker",
-    "evaluator",
-)
-_REGISTRIES: dict[str, dict[str, Callable[..., Any]]] = {kind: {} for kind in _KINDS}
+_OPERATIONS = {
+    "phase": "run",
+    "step": "run",
+    "policy": "propose",
+    "retention": "retain",
+    "sampler": "select",
+    "reviewer": "review",
+    "worker": "run",
+    "evaluator": "evaluate",
+}
+_REGISTRIES: dict[str, dict[str, Callable[..., Any]]] = {kind: {} for kind in _OPERATIONS}
 
 
 def register(kind: str, name: str, factory: Callable[..., Any], *, replace: bool = False) -> None:
@@ -63,14 +63,13 @@ def registered(kind: str) -> Mapping[str, Callable[..., Any]]:
 def build(kind: str, spec: ComponentConfig) -> Any:
     """Instantiate one config reference or return its trusted component object."""
 
-    target = spec._factory or resolve(kind, spec.name)
+    if kind not in _REGISTRIES:
+        raise ValueError(f"Unknown component kind: {kind!r}")
+    target = spec._factory if spec._factory is not None else resolve(kind, spec.name)
     is_instance = (
         spec._factory is not None
         and not inspect.isclass(target)
-        and any(
-            hasattr(target, attribute)
-            for attribute in ("run", "propose", "evaluate", "review")
-        )
+        and callable(getattr(target, _OPERATIONS[kind], None))
     )
     if is_instance:
         if spec.options:

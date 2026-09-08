@@ -383,6 +383,17 @@ def _live_refresh(status: str) -> tuple[str, str]:
     return "", ""
 
 
+_TERMINAL_PAGE_MARKER = "<!-- owner-terminal -->\n"
+
+
+def _has_terminal_page(page: Path) -> bool:
+    try:
+        with page.open(encoding="utf-8") as handle:
+            return handle.readline() == _TERMINAL_PAGE_MARKER
+    except FileNotFoundError:
+        return False
+
+
 def render_owner_views(events_path: Path, run_dir: Path, *, final: bool = False) -> None:
     """Render the owner index, per-attempt and per-role pages, atomically."""
 
@@ -403,11 +414,12 @@ def render_owner_views(events_path: Path, run_dir: Path, *, final: bool = False)
             continue
         page = owner_dir / "phases" / f"{page_name}.html"
         terminal = _safe_status(phase.get("status")) not in {"pending", "running"}
-        if terminal and page.is_file() and not final:
+        if terminal and not final and _has_terminal_page(page):
             continue
         _atomic_write(
             page,
-            _render_phase_page(phase, events, state, details, run_dir, now),
+            (_TERMINAL_PAGE_MARKER if terminal else "")
+            + _render_phase_page(phase, events, state, details, run_dir, now),
         )
 
     for value in _sequence(state.get("attempts")):
@@ -415,11 +427,12 @@ def render_owner_views(events_path: Path, run_dir: Path, *, final: bool = False)
         attempt_id = str(attempt.get("attempt_id"))
         page = owner_dir / "attempts" / f"{attempt_id}.html"
         terminal = _safe_status(attempt.get("status")) not in {"pending", "running"}
-        if terminal and page.is_file() and not final:
+        if terminal and not final and _has_terminal_page(page):
             continue
         _atomic_write(
             page,
-            _render_attempt_page(attempt, details, state, run_dir, now),
+            (_TERMINAL_PAGE_MARKER if terminal else "")
+            + _render_attempt_page(attempt, details, state, run_dir, now),
         )
 
     for value in _sequence(state.get("roles")):
@@ -427,9 +440,13 @@ def render_owner_views(events_path: Path, run_dir: Path, *, final: bool = False)
         job_id = str(role.get("job_id"))
         page = owner_dir / "roles" / f"{job_id}.html"
         terminal = _safe_status(role.get("status")) not in {"pending", "running"}
-        if terminal and page.is_file() and not final:
+        if terminal and not final and _has_terminal_page(page):
             continue
-        _atomic_write(page, _render_role_page(role, details, run_dir, now))
+        _atomic_write(
+            page,
+            (_TERMINAL_PAGE_MARKER if terminal else "")
+            + _render_role_page(role, details, run_dir, now),
+        )
 
     _atomic_write(
         run_dir / "status.html",

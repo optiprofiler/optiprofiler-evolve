@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
-from dataclasses import dataclass, field as dataclass_field, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Mapping
 
@@ -23,25 +23,10 @@ from .traces import (
     run_captured_process,
     trace_paths,
 )
+from .protocols import WorkerOutcome
 from .usage import UsageRecord
 
 
-@dataclass(frozen=True)
-class AgentRunResult:
-    returncode: int
-    transcript: Path
-    timed_out: bool = False
-    native_trace: Path | None = None
-    stderr_trace: Path | None = None
-    trace_chunks: Path | None = None
-    trace_outcome: Path | None = None
-    capture_error: str | None = None
-    cancelled: bool = False
-    termination_reason: str | None = None
-    provider_gateway_outcome: str | None = None
-    provider_gateway_request_count: int | None = None
-    provider_gateway_manifest: Path | None = None
-    usage: UsageRecord = dataclass_field(default_factory=UsageRecord.unavailable)
 
 
 def run_agent(
@@ -57,7 +42,7 @@ def run_agent(
     trace_dir: Path,
     trace_context: Mapping[str, object] | None = None,
     cancellation_event: threading.Event | None = None,
-) -> AgentRunResult:
+) -> WorkerOutcome:
     """Run one coding worker and preserve its complete stdout/stderr transcript."""
 
     transcript.parent.mkdir(parents=True, exist_ok=True)
@@ -168,7 +153,7 @@ def run_agent(
                 f"[controller] readable transcript unavailable: {message}\n",
                 encoding="utf-8",
             )
-        return AgentRunResult(
+        return WorkerOutcome(
             completed.returncode,
             transcript,
             timed_out=completed.timed_out,

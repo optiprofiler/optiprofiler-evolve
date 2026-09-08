@@ -18,10 +18,11 @@ from optiprofiler_evolve.protocols import (
     StepResult,
 )
 from optiprofiler_evolve.registry import build
-from optiprofiler_evolve.sandbox import AgentRunResult
+from optiprofiler_evolve.protocols import WorkerOutcome
 from optiprofiler_evolve.solver import InterfaceSpec
 from optiprofiler_evolve.viewers import materialize_public_bundle, render_status
 
+from worker_helpers import RunnerAdapter
 from test_config import minimal_config
 
 
@@ -43,7 +44,7 @@ def evaluator_factory(**_kwargs: object) -> FakeEvaluator:
     return FakeEvaluator()
 
 
-def agent_runner(**kwargs: object) -> AgentRunResult:
+def agent_runner(**kwargs: object) -> WorkerOutcome:
     workspace = kwargs["workspace"]
     transcript = kwargs["transcript"]
     assert isinstance(workspace, Path)
@@ -52,10 +53,10 @@ def agent_runner(**kwargs: object) -> AgentRunResult:
     solver.write_text(solver.read_text(encoding="utf-8") + "\n# improved\n")
     transcript.parent.mkdir(parents=True, exist_ok=True)
     transcript.write_text("worker", encoding="utf-8")
-    return AgentRunResult(0, transcript)
+    return WorkerOutcome(0, transcript)
 
 
-def out_of_scope_runner(**kwargs: object) -> AgentRunResult:
+def out_of_scope_runner(**kwargs: object) -> WorkerOutcome:
     workspace = kwargs["workspace"]
     transcript = kwargs["transcript"]
     assert isinstance(workspace, Path)
@@ -63,7 +64,7 @@ def out_of_scope_runner(**kwargs: object) -> AgentRunResult:
     (workspace / "locked.txt").write_text("changed", encoding="utf-8")
     transcript.parent.mkdir(parents=True, exist_ok=True)
     transcript.write_text("worker", encoding="utf-8")
-    return AgentRunResult(0, transcript)
+    return WorkerOutcome(0, transcript)
 
 
 class InspectStep:
@@ -145,7 +146,7 @@ class ExtensibilityTests(unittest.TestCase):
                         editable=(".",),
                         config=load_config(minimal_config()),
                         run_dir=root / "run",
-                        agent_runner=agent_runner,
+                        worker_adapter=RunnerAdapter(agent_runner),
                         evaluator_factory=evaluator_factory,
                     ).run()
 
@@ -256,7 +257,7 @@ class ExtensibilityTests(unittest.TestCase):
                 editable=(".",),
                 config=config,
                 run_dir=root / "run",
-                agent_runner=agent_runner,
+                worker_adapter=RunnerAdapter(agent_runner),
                 evaluator_factory=evaluator_factory,
             )
             result = engine.run()
@@ -295,7 +296,7 @@ class ExtensibilityTests(unittest.TestCase):
                 editable=(".",),
                 config=config,
                 run_dir=root / "run",
-                agent_runner=agent_runner,
+                worker_adapter=RunnerAdapter(agent_runner),
                 evaluator_factory=evaluator_factory,
             )
             engine.run()
@@ -412,7 +413,7 @@ class ExtensibilityTests(unittest.TestCase):
                 editable=("solver.py",),
                 config=config,
                 run_dir=root / "run",
-                agent_runner=out_of_scope_runner,
+                worker_adapter=RunnerAdapter(out_of_scope_runner),
                 evaluator_factory=evaluator_factory,
             )
             result = engine.run()
@@ -446,7 +447,7 @@ class ExtensibilityTests(unittest.TestCase):
                     editable=(".",),
                     config=config,
                     run_dir=root / label,
-                    agent_runner=agent_runner,
+                    worker_adapter=RunnerAdapter(agent_runner),
                     evaluator_factory=evaluator_factory,
                 ).run()
                 captured.append(capture.seeds)
@@ -473,7 +474,7 @@ class ExtensibilityTests(unittest.TestCase):
                 editable=(".",),
                 config=config,
                 run_dir=root / "run",
-                agent_runner=agent_runner,
+                worker_adapter=RunnerAdapter(agent_runner),
                 evaluator_factory=evaluator_factory,
             )
             with self.assertRaisesRegex(NotImplementedError, "future scheduler"):
@@ -495,7 +496,7 @@ class ExtensibilityTests(unittest.TestCase):
             editable=(".",),
             config=config,
             run_dir=Path("run"),
-            agent_runner=agent_runner,
+            worker_adapter=RunnerAdapter(agent_runner),
             evaluator_factory=evaluator_factory,
         )
         engine.attempt_history = [
@@ -547,7 +548,7 @@ class ExtensibilityTests(unittest.TestCase):
             editable=(".",),
             config=config,
             run_dir=Path("run"),
-            agent_runner=agent_runner,
+            worker_adapter=RunnerAdapter(agent_runner),
             evaluator_factory=evaluator_factory,
         )
         engine.attempt_history = [

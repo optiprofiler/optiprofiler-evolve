@@ -14,7 +14,7 @@ def minimal_config() -> dict:
             "split": {"smoke_count": 1, "hidden_fraction": 0.25},
         },
         "evaluation": {"backend": "unsafe_local"},
-        "evolution": {"rounds": 1, "islands": 2},
+        "evolution": {"iterations": 1, "islands": 2},
         "workers": {
             "pool": [{"harness": "codex", "model": "test-model"}],
             "max_parallel": 2,
@@ -29,17 +29,27 @@ def minimal_config() -> dict:
 
 class ConfigTests(unittest.TestCase):
 
-    def test_feedback_modes_are_explicit_and_legacy_names_normalize(self) -> None:
+    def test_removed_config_aliases_are_rejected(self) -> None:
+        raw = minimal_config()
+        raw["evolution"]["rounds"] = raw["evolution"].pop("iterations")
+        with self.assertRaisesRegex(ValueError, "Unknown keys"):
+            load_config(raw)
+        raw = minimal_config()
+        raw["evaluation"]["backend"] = "local"
+        with self.assertRaisesRegex(ValueError, "backend"):
+            load_config(raw)
+
+    def test_feedback_modes_are_explicit_and_legacy_names_are_rejected(self) -> None:
         for mode in ("score_only", "structured_numeric", "full_artifacts"):
             raw = minimal_config()
             raw["evaluation"]["feedback_mode"] = mode
             self.assertEqual(load_config(raw).evaluation.feedback_mode, mode)
 
-        aliases = {"summary": "score_only", "agent": "full_artifacts"}
-        for legacy, canonical in aliases.items():
+        for legacy in ("summary", "agent"):
             raw = minimal_config()
             raw["evaluation"]["feedback_mode"] = legacy
-            self.assertEqual(load_config(raw).evaluation.feedback_mode, canonical)
+            with self.assertRaisesRegex(ValueError, "feedback_mode"):
+                load_config(raw)
 
         raw = minimal_config()
         raw["evaluation"]["feedback_mode"] = "everything"

@@ -142,7 +142,10 @@ class SelectionTests(unittest.TestCase):
             self.assertEqual(actual.candidate_id, expected.candidate_id)
 
     def test_single_objective_pareto_delegates_to_scalar_retention(self) -> None:
-        records = [candidate("a", 0.5, 0.8), candidate("b", 0.7, 0.4)]
+        records = [
+            candidate("a", 0.5, 0.8, metrics=MetricBundle.scalar(0.5, invariants_hash="fixed")),
+            candidate("b", 0.7, 0.4, metrics=MetricBundle.scalar(0.7, invariants_hash="fixed")),
+        ]
         scalar = ValidationLexicographicRetention().retain(records, 1)
         pareto = MetricParetoRetention(objectives=("fitness",)).retain(records, 1)
         self.assertEqual(pareto, scalar)

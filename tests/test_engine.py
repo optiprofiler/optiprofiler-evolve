@@ -13,9 +13,10 @@ from optiprofiler_evolve.config import load_config
 from optiprofiler_evolve.engine import EvolutionEngine, _controller_cancellation
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.review import REQUIRED_CHECKS
-from optiprofiler_evolve.sandbox import AgentRunResult
+from optiprofiler_evolve.protocols import WorkerOutcome
 from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
 
+from worker_helpers import RunnerAdapter
 from test_config import minimal_config
 
 
@@ -41,14 +42,14 @@ def fake_evaluator_factory(**_kwargs) -> FakeEvaluator:
     return FakeEvaluator()
 
 
-def fake_agent_runner(**kwargs) -> AgentRunResult:
+def fake_agent_runner(**kwargs) -> WorkerOutcome:
     workspace = kwargs["workspace"]
     transcript = kwargs["transcript"]
     solver = workspace / "solver.py"
     solver.write_text(solver.read_text() + "\n# improved\n")
     transcript.parent.mkdir(parents=True, exist_ok=True)
     transcript.write_text("fake worker\n")
-    return AgentRunResult(0, transcript)
+    return WorkerOutcome(0, transcript)
 
 
 class ReviewingRunner:
@@ -56,7 +57,7 @@ class ReviewingRunner:
         self.mode = mode
         self.review_calls = 0
 
-    def __call__(self, **kwargs) -> AgentRunResult:
+    def __call__(self, **kwargs) -> WorkerOutcome:
         workspace = kwargs["workspace"]
         transcript = kwargs["transcript"]
         prompt = kwargs["prompt"]
@@ -65,15 +66,15 @@ class ReviewingRunner:
             solver = workspace / "solver.py"
             solver.write_text(solver.read_text() + "\n# improved\n")
             transcript.write_text("mutation worker\n")
-            return AgentRunResult(0, transcript)
+            return WorkerOutcome(0, transcript)
 
         self.review_calls += 1
         transcript.write_text(f"review attempt {self.review_calls}\n")
         if self.mode == "unavailable":
-            return AgentRunResult(1, transcript)
+            return WorkerOutcome(1, transcript)
         if self.mode == "malformed_once" and self.review_calls == 1:
             (workspace / "review.json").write_text('{"schema": "wrong"}')
-            return AgentRunResult(0, transcript)
+            return WorkerOutcome(0, transcript)
         findings = []
         verdict = "approve"
         if self.mode == "quarantine":
@@ -103,7 +104,7 @@ class ReviewingRunner:
                 }
             )
         )
-        return AgentRunResult(0, transcript)
+        return WorkerOutcome(0, transcript)
 
 
 def reviewer_config(*, strict: bool = False) -> dict:
@@ -121,7 +122,7 @@ def reviewer_config(*, strict: bool = False) -> dict:
 class EngineTests(unittest.TestCase):
 
     def test_worker_explanation_is_saved_outside_candidate_and_promoted_for_champion(self) -> None:
-        def explanatory_runner(**kwargs) -> AgentRunResult:
+        def explanatory_runner(**kwargs) -> WorkerOutcome:
             workspace = kwargs["workspace"]
             transcript = kwargs["transcript"]
             solver = workspace / "solver.py"
@@ -149,7 +150,7 @@ class EngineTests(unittest.TestCase):
             )
             transcript.parent.mkdir(parents=True, exist_ok=True)
             transcript.write_text("worker\n")
-            return AgentRunResult(0, transcript)
+            return WorkerOutcome(0, transcript)
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -166,7 +167,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(raw),
                 run_dir=root / "run",
-                agent_runner=explanatory_runner,
+                worker_adapter=RunnerAdapter(explanatory_runner),
                 evaluator_factory=fake_evaluator_factory,
             ).run()
 
@@ -219,7 +220,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(raw),
                 run_dir=run_dir,
-                agent_runner=fake_agent_runner,
+                worker_adapter=RunnerAdapter(fake_agent_runner),
                 evaluator_factory=lambda **_kwargs: FailingHiddenEvaluator(),
             )
 
@@ -244,7 +245,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(raw),
                 run_dir=root / "run",
-                agent_runner=fake_agent_runner,
+                worker_adapter=RunnerAdapter(fake_agent_runner),
                 evaluator_factory=fake_evaluator_factory,
             )
 
@@ -260,7 +261,7 @@ class EngineTests(unittest.TestCase):
         captured: dict[str, str] = {}
         state = {"calls": 0}
 
-        def observing_runner(**kwargs) -> AgentRunResult:
+        def observing_runner(**kwargs) -> WorkerOutcome:
             workspace = kwargs["workspace"]
             transcript = kwargs["transcript"]
             transcript.parent.mkdir(parents=True, exist_ok=True)
@@ -274,7 +275,7 @@ class EngineTests(unittest.TestCase):
                 captured["text"] = (
                     page.read_text(encoding="utf-8") if page.is_file() else ""
                 )
-            return AgentRunResult(0, transcript)
+            return WorkerOutcome(0, transcript)
 
         with tempfile.TemporaryDirectory() as directory:
             FakeEvaluator.calls = []
@@ -287,7 +288,7 @@ class EngineTests(unittest.TestCase):
             raw["workers"]["max_parallel"] = 1
             page = root / "run" / "owner" / "phases" / "explore.html"
 
-            def runner(**kwargs) -> AgentRunResult:
+            def runner(**kwargs) -> WorkerOutcome:
                 kwargs["run_page"] = page
                 return observing_runner(**kwargs)
 
@@ -298,7 +299,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(raw),
                 run_dir=root / "run",
-                agent_runner=runner,
+                worker_adapter=RunnerAdapter(runner),
                 evaluator_factory=fake_evaluator_factory,
             )
             engine._refresh_poll_seconds = 0.05
@@ -328,7 +329,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(minimal_config()),
                 run_dir=root / "run",
-                agent_runner=fake_agent_runner,
+                worker_adapter=RunnerAdapter(fake_agent_runner),
                 evaluator_factory=fake_evaluator_factory,
             )
             calls: list[int] = []
@@ -346,14 +347,14 @@ class EngineTests(unittest.TestCase):
 
 
     def test_nonzero_worker_exit_salvages_candidate_that_passes_all_gates(self) -> None:
-        def budget_exhausted_runner(**kwargs) -> AgentRunResult:
+        def budget_exhausted_runner(**kwargs) -> WorkerOutcome:
             workspace = kwargs["workspace"]
             transcript = kwargs["transcript"]
             solver = workspace / "solver.py"
             solver.write_text(solver.read_text() + "\n# improved but unfinished\n")
             transcript.parent.mkdir(parents=True, exist_ok=True)
             transcript.write_text("ran out of budget mid-edit\n")
-            return AgentRunResult(
+            return WorkerOutcome(
                 1, transcript, termination_reason="error_max_budget_usd"
             )
 
@@ -371,7 +372,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=config,
                 run_dir=root / "run",
-                agent_runner=budget_exhausted_runner,
+                worker_adapter=RunnerAdapter(budget_exhausted_runner),
                 evaluator_factory=fake_evaluator_factory,
             )
             result = engine.run()
@@ -434,13 +435,13 @@ class EngineTests(unittest.TestCase):
             self.assertIn("ran out of budget", transcript.read_text())
 
     def test_nonzero_worker_exit_still_rejects_an_invalid_snapshot(self) -> None:
-        def broken_runner(**kwargs) -> AgentRunResult:
+        def broken_runner(**kwargs) -> WorkerOutcome:
             workspace = kwargs["workspace"]
             transcript = kwargs["transcript"]
             (workspace / "solver.py").write_text("def solver(:\n")
             transcript.parent.mkdir(parents=True, exist_ok=True)
             transcript.write_text("budget ended during a broken edit\n")
-            return AgentRunResult(1, transcript, termination_reason="error_max_budget_usd")
+            return WorkerOutcome(1, transcript, termination_reason="error_max_budget_usd")
 
         with tempfile.TemporaryDirectory() as directory:
             FakeEvaluator.calls = []
@@ -455,7 +456,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(minimal_config()),
                 run_dir=root / "run",
-                agent_runner=broken_runner,
+                worker_adapter=RunnerAdapter(broken_runner),
                 evaluator_factory=fake_evaluator_factory,
             )
             result = engine.run()
@@ -473,14 +474,14 @@ class EngineTests(unittest.TestCase):
             )
 
     def test_timed_out_worker_snapshot_is_graded_if_valid(self) -> None:
-        def timed_out_runner(**kwargs) -> AgentRunResult:
+        def timed_out_runner(**kwargs) -> WorkerOutcome:
             workspace = kwargs["workspace"]
             transcript = kwargs["transcript"]
             solver = workspace / "solver.py"
             solver.write_text(solver.read_text() + "\n# improved and complete before timeout\n")
             transcript.parent.mkdir(parents=True, exist_ok=True)
             transcript.write_text("worker timed out after writing solver\n")
-            return AgentRunResult(
+            return WorkerOutcome(
                 124,
                 transcript,
                 timed_out=True,
@@ -500,7 +501,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(minimal_config()),
                 run_dir=root / "run",
-                agent_runner=timed_out_runner,
+                worker_adapter=RunnerAdapter(timed_out_runner),
                 evaluator_factory=fake_evaluator_factory,
             ).run()
 
@@ -539,7 +540,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=config,
                 run_dir=root / "run",
-                agent_runner=fake_agent_runner,
+                worker_adapter=RunnerAdapter(fake_agent_runner),
                 evaluator_factory=fake_evaluator_factory,
             )
             result = engine.run()
@@ -609,7 +610,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(reviewer_config()),
                 run_dir=root / "run",
-                agent_runner=runner,
+                worker_adapter=RunnerAdapter(runner),
                 evaluator_factory=fake_evaluator_factory,
             ).run()
             self.assertEqual(runner.review_calls, 1)
@@ -677,7 +678,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(reviewer_config()),
                 run_dir=root / "run",
-                agent_runner=runner,
+                worker_adapter=RunnerAdapter(runner),
                 evaluator_factory=fake_evaluator_factory,
             ).run()
             self.assertEqual(FakeEvaluator.calls.count("validation"), 1)
@@ -703,7 +704,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(reviewer_config()),
                 run_dir=root / "run",
-                agent_runner=runner,
+                worker_adapter=RunnerAdapter(runner),
                 evaluator_factory=fake_evaluator_factory,
             ).run()
             self.assertEqual(runner.review_calls, 2)
@@ -723,7 +724,7 @@ class EngineTests(unittest.TestCase):
                     editable=(".",),
                     config=load_config(reviewer_config(strict=True)),
                     run_dir=root / "run",
-                    agent_runner=ReviewingRunner("unavailable"),
+                    worker_adapter=RunnerAdapter(ReviewingRunner("unavailable")),
                     evaluator_factory=fake_evaluator_factory,
                 ).run()
 
@@ -742,7 +743,7 @@ class EngineTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(reviewer_config(strict=False)),
                 run_dir=root / "run",
-                agent_runner=runner,
+                worker_adapter=RunnerAdapter(runner),
                 evaluator_factory=fake_evaluator_factory,
             ).run()
             self.assertEqual(runner.review_calls, 2)

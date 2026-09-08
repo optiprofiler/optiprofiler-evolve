@@ -15,9 +15,10 @@ from optiprofiler_evolve.phases.research import (
     StrategyAnalysisPhase,
 )
 from optiprofiler_evolve.protocols import PhaseContext, VariantRequest
-from optiprofiler_evolve.sandbox import AgentRunResult
+from optiprofiler_evolve.protocols import WorkerOutcome
 from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
 
+from worker_helpers import RunnerAdapter
 from test_config import minimal_config
 
 
@@ -53,7 +54,7 @@ def research_evaluator_factory(**_kwargs: object) -> ResearchEvaluator:
 class ScriptedResearchRunner:
     prompts: list[str] = []
 
-    def __call__(self, **kwargs: object) -> AgentRunResult:
+    def __call__(self, **kwargs: object) -> WorkerOutcome:
         workspace = kwargs["workspace"]
         prompt = str(kwargs["prompt"])
         transcript = kwargs["transcript"]
@@ -129,7 +130,7 @@ class ScriptedResearchRunner:
             )
         transcript.parent.mkdir(parents=True, exist_ok=True)
         transcript.write_text("scripted worker", encoding="utf-8")
-        return AgentRunResult(0, transcript)
+        return WorkerOutcome(0, transcript)
 
 
 def _write_solver_patch(path: Path, before: str, after: str) -> None:
@@ -150,7 +151,7 @@ def _write_solver_patch(path: Path, before: str, after: str) -> None:
 class FullResearchPathRunner:
     """Exercise pruning, portable recombination, and champion registration."""
 
-    def __call__(self, **kwargs: object) -> AgentRunResult:
+    def __call__(self, **kwargs: object) -> WorkerOutcome:
         workspace = kwargs["workspace"]
         prompt = str(kwargs["prompt"])
         transcript = kwargs["transcript"]
@@ -289,16 +290,16 @@ class FullResearchPathRunner:
             solver.write_text(text)
         transcript.parent.mkdir(parents=True, exist_ok=True)
         transcript.write_text("scripted full research path", encoding="utf-8")
-        return AgentRunResult(0, transcript)
+        return WorkerOutcome(0, transcript)
 
 
 class NonzeroAfterOutputResearchRunner(FullResearchPathRunner):
     """Model a candidate-producing CLI that exits after writing its solver."""
 
-    def __call__(self, **kwargs: object) -> AgentRunResult:
+    def __call__(self, **kwargs: object) -> WorkerOutcome:
         result = super().__call__(**kwargs)
         if "ROLE: strategy-integrator" in str(kwargs["prompt"]):
-            return AgentRunResult(17, result.transcript)
+            return WorkerOutcome(17, result.transcript)
         return result
 
 
@@ -369,7 +370,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 editable=("solver.py",),
                 config=load_config(raw),
                 run_dir=root / "run",
-                agent_runner=NonzeroAfterOutputResearchRunner(),
+                worker_adapter=RunnerAdapter(NonzeroAfterOutputResearchRunner()),
                 evaluator_factory=research_evaluator_factory,
             )
 
@@ -407,7 +408,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 editable=("solver.py",),
                 config=load_config(raw),
                 run_dir=root / "run",
-                agent_runner=FullResearchPathRunner(),
+                worker_adapter=RunnerAdapter(FullResearchPathRunner()),
                 evaluator_factory=research_evaluator_factory,
             )
 
@@ -476,7 +477,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 editable=("solver.py",),
                 config=load_config(raw),
                 run_dir=root / "run",
-                agent_runner=FullResearchPathRunner(),
+                worker_adapter=RunnerAdapter(FullResearchPathRunner()),
                 evaluator_factory=research_evaluator_factory,
             ).run()
 
@@ -505,7 +506,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(research_config()),
                 run_dir=root / "run",
-                agent_runner=runner,
+                worker_adapter=RunnerAdapter(runner),
                 evaluator_factory=research_evaluator_factory,
             )
             result = engine.run()
@@ -645,7 +646,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 editable=("solver.py",),
                 config=load_config(research_config()),
                 run_dir=root / "run",
-                agent_runner=FullResearchPathRunner(),
+                worker_adapter=RunnerAdapter(FullResearchPathRunner()),
                 evaluator_factory=research_evaluator_factory,
             )
 
@@ -711,7 +712,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 editable=("solver.py",),
                 config=load_config(minimal_config()),
                 run_dir=root / "run",
-                agent_runner=ScriptedResearchRunner(),
+                worker_adapter=RunnerAdapter(ScriptedResearchRunner()),
                 evaluator_factory=research_evaluator_factory,
             )
             patch_root = root / "run" / "research" / "test-patches"
@@ -744,7 +745,7 @@ class ResearchHarnessTests(unittest.TestCase):
             self.assertFalse((root / "run" / "research" / "variants" / "conflict").exists())
 
     def test_scout_and_analyst_failures_fall_back_without_stopping_search(self) -> None:
-        def failing_roles(**kwargs: object) -> AgentRunResult:
+        def failing_roles(**kwargs: object) -> WorkerOutcome:
             workspace = kwargs["workspace"]
             prompt = str(kwargs["prompt"])
             transcript = kwargs["transcript"]
@@ -772,7 +773,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 code = 1
             transcript.parent.mkdir(parents=True, exist_ok=True)
             transcript.write_text("scripted failure", encoding="utf-8")
-            return AgentRunResult(code, transcript)
+            return WorkerOutcome(code, transcript)
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -786,7 +787,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(research_config()),
                 run_dir=root / "run",
-                agent_runner=failing_roles,
+                worker_adapter=RunnerAdapter(failing_roles),
                 evaluator_factory=research_evaluator_factory,
             ).run()
             self.assertEqual(result.public_score, 0.7)
@@ -816,7 +817,7 @@ class ResearchHarnessTests(unittest.TestCase):
 
 
     def test_declared_not_decomposable_is_structured_never_silent(self) -> None:
-        def declaring_roles(**kwargs: object) -> AgentRunResult:
+        def declaring_roles(**kwargs: object) -> WorkerOutcome:
             workspace = kwargs["workspace"]
             prompt = str(kwargs["prompt"])
             transcript = kwargs["transcript"]
@@ -842,7 +843,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 )
             transcript.parent.mkdir(parents=True, exist_ok=True)
             transcript.write_text("scripted", encoding="utf-8")
-            return AgentRunResult(0, transcript)
+            return WorkerOutcome(0, transcript)
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -856,7 +857,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(research_config()),
                 run_dir=root / "run",
-                agent_runner=declaring_roles,
+                worker_adapter=RunnerAdapter(declaring_roles),
                 evaluator_factory=research_evaluator_factory,
             ).run()
             self.assertEqual(result.public_score, 0.7)
@@ -885,7 +886,7 @@ class ResearchHarnessTests(unittest.TestCase):
 
 
     def test_capped_ablation_reason_states_evaluated_supported_untested(self) -> None:
-        def capped_runner(**kwargs: object) -> AgentRunResult:
+        def capped_runner(**kwargs: object) -> WorkerOutcome:
             workspace = kwargs["workspace"]
             prompt = str(kwargs["prompt"])
             transcript = kwargs["transcript"]
@@ -928,7 +929,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 )
             transcript.parent.mkdir(parents=True, exist_ok=True)
             transcript.write_text("scripted", encoding="utf-8")
-            return AgentRunResult(0, transcript)
+            return WorkerOutcome(0, transcript)
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -946,7 +947,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 editable=(".",),
                 config=load_config(raw),
                 run_dir=root / "run",
-                agent_runner=capped_runner,
+                worker_adapter=RunnerAdapter(capped_runner),
                 evaluator_factory=research_evaluator_factory,
             ).run()
 
@@ -983,7 +984,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 editable=("solver.py",),
                 config=load_config(minimal_config()),
                 run_dir=root / "run",
-                agent_runner=ScriptedResearchRunner(),
+                worker_adapter=RunnerAdapter(ScriptedResearchRunner()),
                 evaluator_factory=research_evaluator_factory,
             )
             engine._initialize_run_directory()
@@ -1079,7 +1080,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 editable=("solver.py",),
                 config=load_config(minimal_config()),
                 run_dir=root / "run",
-                agent_runner=ScriptedResearchRunner(),
+                worker_adapter=RunnerAdapter(ScriptedResearchRunner()),
                 evaluator_factory=research_evaluator_factory,
             )
             engine._initialize_run_directory()
