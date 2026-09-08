@@ -43,6 +43,7 @@ from .viewers import (
     _atomic_write,
     _parse_ts,
     _render_coverage,
+    _render_complexity,
     _render_iterations,
     _render_matrix,
     _safe_status,
@@ -558,7 +559,7 @@ def _render_owner_index(
   <div class="layout" data-live-root>
     <aside><h2>Run details</h2><nav><a href="#summary">Summary</a><a href="#workflow">Workflow</a><a href="#matrix">Island matrix</a><a href="#population-policy">Population policy</a><a href="#score-timeline">Evolution metrics</a><a href="#lineage">Lineage</a><a href="#attempts">Attempts</a><a href="#roles">Agent jobs</a><a href="#coverage">Trace coverage</a></nav></aside>
     <main>
-      <section id="summary">{head}</section>
+      <section id="summary">{head}{_render_complexity(run.get('complexity'))}</section>
       <section id="workflow"><h2>Workflow</h2>{phases}{iterations}</section>
       <section id="matrix"><h2>Island matrix</h2>{matrix}</section>
       <section id="population-policy"><h2>Population policy</h2>{population_policy}</section>

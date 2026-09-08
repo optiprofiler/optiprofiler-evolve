@@ -201,7 +201,7 @@ def render_status(events_path: Path, destination: Path) -> dict[str, Any]:
   <div class="layout">
     <aside><h2>Run details</h2><nav><a href="#summary">Summary</a><a href="#workflow">Workflow</a><a href="#matrix">Island matrix</a><a href="#attempts">Attempts</a><a href="#roles">Research roles</a><a href="#coverage">Trace coverage</a></nav></aside>
     <main>
-      <section id="summary">{head}{metrics}</section>
+      <section id="summary">{head}{metrics}{_render_complexity(run.get('complexity'))}</section>
       <section id="workflow"><h2>Workflow</h2>{phases}{iterations}</section>
       <section id="matrix"><h2>Island matrix</h2>{matrix}</section>
       <section id="attempts"><h2>Attempt pipelines</h2>{attempts}</section>
@@ -234,6 +234,13 @@ def render_public_report(state: Mapping[str, Any], destination: Path) -> None:
         "| Phase | Status |",
         "|---|---|",
     ]
+    complexity = _mapping(run.get("complexity"))
+    if complexity:
+        lines[7:7] = [
+            f"- Latest source complexity: `{_md(complexity.get('score'))}` / "
+            f"ratio limit `{_md(complexity.get('max_ratio'))}`; "
+            f"`{_md(complexity.get('mode'))}: {_md(complexity.get('status'))}`",
+        ]
     phases = _sequence(state.get("phases"))
     if phases:
         for value in phases:
@@ -611,6 +618,18 @@ def _render_roles(values: object, now: datetime | None) -> str:
         '<div class="table-wrap"><table><thead><tr><th>Job</th><th>Role</th><th>Phase</th><th>Island</th><th>Status</th><th>Duration</th></tr></thead><tbody>'
         + "".join(rows)
         + "</tbody></table></div>"
+    )
+
+
+def _render_complexity(value: object) -> str:
+    data = _mapping(value)
+    if not data:
+        return ""
+    return (
+        '<section id="complexity"><h2>Latest source complexity</h2><p>'
+        f"Score: {_h(data.get('score'))}; ratio limit: {_h(data.get('max_ratio'))}; "
+        f"branches: {_h(data.get('branch_ratio'))}; size: {_h(data.get('size_ratio'))}; "
+        f"{_h(data.get('mode'))}: {_h(data.get('status'))}</p></section>"
     )
 
 

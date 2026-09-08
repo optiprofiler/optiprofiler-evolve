@@ -9,7 +9,7 @@ from .data import DataPlan
 from .solver import InterfaceSpec
 
 
-WORKER_PROMPT_VERSION = "solver-worker/2"
+WORKER_PROMPT_VERSION = "solver-worker/3"
 
 
 def build_worker_prompt(
@@ -28,6 +28,7 @@ def build_worker_prompt(
     forbidden_candidate_imports: Sequence[str],
     direction: dict[str, object] | None = None,
     prompt_note: str | None = None,
+    complexity_note: str | None = None,
 ) -> str:
     """Describe one bounded mutation job without exposing hidden data."""
 
@@ -78,6 +79,7 @@ Contract
 - Parent public fitness: {parent_score:.6f}; higher is better
 - Advisory token budget: {budget}
 {dependency_policy}
+{complexity_note or ''}
 
 Evaluation tools
 - Run `smoke_test` for rapid checks on a small public subset (at most

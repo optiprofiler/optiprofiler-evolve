@@ -35,6 +35,40 @@ Workers receive only the two evaluation capabilities and an anonymous count/hash
 manifest; names, aliases, validation results, and hidden results remain in the
 controller directory.
 
+## Complexity
+
+Omit `complexity` or set it to `null` to disable source complexity checks.
+An empty mapping enables the defaults below. These checks do not alter fitness.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `complexity.mode` | `warn` or `enforce` | `warn` | Advise simplification, or block over-budget/unavailable candidates before evaluation and admission. |
+| `complexity.max_ratio` | finite positive number | `1.2` | Maximum candidate-to-initial ratio for both decision complexity and logical code lines. Equality passes. |
+
+The baseline is the frozen initial solver, never the current parent or benchmark
+reference. Radon 6.0.1 counts decisions across all candidate Python files and
+lexical scopes, with one base point for the complete tree. Logical lines exclude
+comments, blanks and actual docstrings. Existing snapshot exclusions apply;
+test-named directories are not specially excluded. Installed dependencies are
+outside this source budget. The displayed score is 100 times the larger ratio;
+the branch denominator is the initial decision complexity and the size
+denominator is `max(initial logical lines, 1)`.
+
+Both worker tools return complexity diagnostics in every feedback mode. Enforced
+rejections consume the normal call quota and return no invented fitness score.
+The worker may edit and resubmit. Analysis is static, cached by source hash and
+run-fixed metric/analyzer versions, and limited to 30 seconds per subprocess.
+Candidate analysis failures warn or block according to mode; baseline failures
+abort preparation. Source changes invalidate previous results. Research variants
+and final selection use the same controller check. For ratios below one, the
+initial solver is allowed as a search seed but cannot be the enforced final
+winner; a run with no eligible winner fails before hidden evaluation.
+
+Detailed reports remain under `controller/complexity/`; worker feedback contains
+only numeric baseline totals and candidate diagnostics. Public events expose
+summary numbers and statuses only. These are source complexity heuristics, not
+algorithmic runtime complexity or proof against dynamically generated code.
+
 ## Evaluation
 
 | Field | Type | Default | Meaning |

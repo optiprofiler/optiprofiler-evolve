@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 import os
 import re
 import types
@@ -605,6 +606,25 @@ class SandboxConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class ComplexityConfig:
+    """Seed-relative source complexity budget, separate from fitness."""
+
+    mode: str = "warn"
+    max_ratio: float = 1.2
+
+    def validate(self) -> None:
+        if self.mode not in {"warn", "enforce"}:
+            raise ValueError("complexity.mode must be 'warn' or 'enforce'.")
+        if (
+            isinstance(self.max_ratio, bool)
+            or not isinstance(self.max_ratio, (int, float))
+            or not math.isfinite(self.max_ratio)
+            or self.max_ratio <= 0
+        ):
+            raise ValueError("complexity.max_ratio must be a finite positive number.")
+
+
+@dataclasses.dataclass(frozen=True)
 class EvolveConfig:
     """Complete experiment configuration."""
 
@@ -617,6 +637,7 @@ class EvolveConfig:
     )
     sandbox: SandboxConfig = dataclasses.field(default_factory=SandboxConfig)
     workflow: WorkflowConfig = dataclasses.field(default_factory=WorkflowConfig)
+    complexity: ComplexityConfig | None = None
 
     def __post_init__(self) -> None:
         policies = tuple(
@@ -643,6 +664,8 @@ class EvolveConfig:
         self.integrity_review.validate(self.workers)
         self.sandbox.validate()
         self.workflow.validate()
+        if self.complexity is not None:
+            self.complexity.validate()
         workers = list(self.workers.pool)
         reviewer = self.integrity_review.resolved_worker(self.workers)
         if reviewer is not None:

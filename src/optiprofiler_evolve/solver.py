@@ -266,11 +266,17 @@ def tree_hash(root: Path) -> str:
 
 def _file_hashes(root: Path) -> dict[str, str]:
     hashes: dict[str, str] = {}
-    for path in sorted(root.rglob("*")):
-        if not path.is_file() or _ignored_relative(path.relative_to(root)):
-            continue
+    for path in source_files(root):
         hashes[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     return hashes
+
+
+def source_files(root: Path) -> Iterable[Path]:
+    """Enumerate exactly the files included in a solver snapshot hash."""
+    return (
+        path for path in sorted(root.rglob("*"))
+        if path.is_file() and not _ignored_relative(path.relative_to(root))
+    )
 
 
 def _matches_any(path: str, patterns: tuple[str, ...]) -> bool:

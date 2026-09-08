@@ -67,6 +67,20 @@ def write_final_report(
             f"- [`{path.relative_to(run_dir).as_posix()}`]({path.relative_to(run_dir).as_posix()})"
             for path in research_artifacts
         )
+    complexity_path = run_dir / "controller" / "complexity" / "final.json"
+    if complexity_path.is_file():
+        complexity = read_json_object(complexity_path)
+        lines.extend([
+            "", "## Source complexity", "",
+            f"- Score: `{complexity['score']}` (initial: 100)",
+            f"- Limit ratio: `{complexity['max_ratio']}`",
+            f"- Mode/status: `{complexity['mode']}` / `{complexity['status']}`",
+            "- [Detailed source diagnostics](controller/complexity/final.json)",
+        ])
+        candidate = complexity.get("candidate")
+        if isinstance(candidate, Mapping):
+            for item in candidate.get("hotspots", []):
+                lines.append(f"- `{item['path']}:{item['line']}` {item['name']}: CC {item['cc']}")
     (run_dir / "FINAL_REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

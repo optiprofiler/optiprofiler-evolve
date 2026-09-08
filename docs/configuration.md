@@ -1,5 +1,10 @@
 # Configuration
 
+To request simpler Python candidates, add `complexity: {mode: warn, max_ratio: 1.2}`.
+Use `enforce` to reject candidates exceeding either initial-source budget before
+performance evaluation. Omit the block to retain the existing behavior. See the
+[complexity reference](config-reference.md#complexity) for metrics and failure semantics.
+
 The config is strict: misspelled or unknown keys fail before a run starts.
 `${ENV_NAME}` references are resolved from the environment, either as a complete
 value or inside a non-secret CLI argument. Credential values belong under a

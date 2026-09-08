@@ -102,6 +102,13 @@ requested.
 
 ## State ownership
 
+Optional source complexity budgets are computed by `complexity.py` in a bounded
+static-analysis subprocess. The initial solver snapshot fixes the baseline.
+The controller enforces the same budget for attempts, research variants and
+final selection; an optional attempt step cannot disable it. Worker tool calls
+use one private snapshot for both complexity and performance analysis and expose
+only the sanitized complexity report. Complexity never modifies benchmark fitness.
+
 `engine.py` is the only authoritative writer for population state, candidate
 acceptance, checkpoints, and the event ledger. Attempt steps return immutable
 `StepResult` values. Policies return immutable `PopulationEdit` proposals.

@@ -1,5 +1,9 @@
 # yaml-language-server: $schema=../config.schema.json
 
+complexity:
+  mode: warn
+  max_ratio: 1.2
+
 data:
   library: s2mpj
   problem_names: [BEALE, CUBE, HIMMELBB, JENSMP, ROSENBR]

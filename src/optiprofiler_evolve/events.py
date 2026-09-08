@@ -190,6 +190,8 @@ def rebuild_run_state(path: Path) -> dict[str, Any]:
 
         if kind == "run_started":
             _start_lifecycle(run, status, boundary)
+        elif kind == "complexity_checked":
+            run["complexity"] = dict(data)
         elif kind == "run_finished":
             _finish_lifecycle(run, status, boundary)
             candidate_id = data.get("best_candidate_id")

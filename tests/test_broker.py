@@ -134,10 +134,12 @@ class BrokerTests(unittest.TestCase):
             request_id = uuid.uuid4().hex
             request = broker.exchange / "requests" / f"{request_id}.json"
             response = broker.exchange / "responses" / f"{request_id}.json"
-            request.write_text(
+            temporary = request.with_suffix(".tmp")
+            temporary.write_text(
                 json.dumps({"id": request_id, "token": connection.token, "mode": "smoke"}),
                 encoding="utf-8",
             )
+            temporary.replace(request)
             self.assertTrue(ready.wait(timeout=2))
             published = broker.artifacts / "evaluations" / "smoke" / "001"
             self.assertFalse(published.exists())

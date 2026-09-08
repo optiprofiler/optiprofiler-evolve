@@ -28,6 +28,10 @@ _PUBLIC_SCOPE_KEYS = frozenset(
 # fields stay controller-private, including errors, artifact paths, model names,
 # validation scores, prompts, transcripts, and native traces.
 _PUBLIC_DATA_KEYS: Mapping[str, frozenset[str]] = {
+    "complexity_checked": frozenset({
+        "mode", "status", "max_ratio", "branch_ratio", "size_ratio",
+        "complexity_ratio", "score", "blocked",
+    }),
     "run_started": frozenset(),
     "run_finished": frozenset({"best_candidate_id"}),
     "phase_started": frozenset(),

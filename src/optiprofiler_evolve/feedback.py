@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import EvaluationResult
+from .complexity import ComplexityReport
 
 
 AgentReportValidator = Callable[[Mapping[str, object]], None]
@@ -45,6 +46,7 @@ def project_feedback(
     *,
     mode: str,
     validate_agent_report: AgentReportValidator | None = None,
+    complexity: ComplexityReport | None = None,
 ) -> None:
     """Publish exactly the evidence permitted by one feedback mode.
 
@@ -70,6 +72,8 @@ def project_feedback(
 
     _write_worker_result(destination / "result.json", result)
     _write_feedback(destination / "feedback.md", result, mode)
+    if complexity is not None:
+        publish_complexity(destination, complexity)
     if mode == "score_only":
         return
     if mode == "structured_numeric":
@@ -78,7 +82,18 @@ def project_feedback(
         return
 
     copied = _copy_full_artifacts(source, destination)
+    if complexity is not None:
+        copied.append(destination / "complexity.json")
     _write_artifact_index(destination, copied)
+
+
+def publish_complexity(destination: Path, report: ComplexityReport) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / "complexity.json").write_text(
+        json.dumps(report.worker_dict(), indent=2) + "\n", encoding="utf-8",
+    )
+    with (destination / "feedback.md").open("a", encoding="utf-8") as handle:
+        handle.write("\n" + report.feedback())
 
 
 def _validated_agent_report(

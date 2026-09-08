@@ -24,6 +24,7 @@ from typing import Any, Iterator
 from .broker import BrokerConnection, EvaluationBroker
 from .builtins import register_builtin_components
 from .config import EvolveConfig, ToolConfig, WorkerConfig
+from .complexity import ComplexityChecker, ComplexityLimitExceeded, ComplexityReport
 from .data import DataPlan, resolve_data_plan, write_data_manifests
 from .docker_runtime import cleanup_managed_resources, read_gateway_outcome
 from .events import EventWriter
@@ -172,6 +173,7 @@ class EvolutionEngine:
         self.data: DataPlan | None = None
         self.evaluator: Evaluator | None = None
         self.reference: Path | None = None
+        self.complexity: ComplexityChecker | None = None
         self.champion: tuple[int, CandidateRecord] | None = None
         self.final_result: FinalistResult | None = None
         self.final_solver: Path | None = None
@@ -648,6 +650,13 @@ class EvolutionEngine:
         seed_path = self.run_dir / "candidates" / "seed"
         copy_initial_source(self.initial, seed_path)
         self._validate_candidate(seed_path)
+        if self.config.complexity is not None:
+            if self.runtime != "python":
+                raise ValueError("Complexity checks support Python solvers only.")
+            self.complexity = ComplexityChecker(
+                seed_path, self.config.complexity, self.config.sandbox,
+                self.run_dir / "controller" / "complexity",
+            )
         write_data_manifests(self.data, self.run_dir)
         fingerprints = build_experiment_fingerprints(
             config=self.config,
@@ -864,11 +873,19 @@ class EvolutionEngine:
         return {"populations": tuple(tuple(pop) for pop in self.populations)}
 
     def _phase_validate(self) -> Mapping[str, object]:
-        finalists = self._fixed_finalists(self.populations)
+        def eligible(record: CandidateRecord) -> bool:
+            report = self._assess_complexity(record.path, {"candidate_id": record.candidate_id})
+            return report is None or not report.blocked
+
+        populations = [
+            [record for record in population if eligible(record)]
+            for population in self.populations
+        ]
+        finalists = self._fixed_finalists(populations)
         finalists.extend(
             (record.island, record)
             for record in self.research_finalists.values()
-            if record.valid
+            if record.valid and eligible(record)
         )
         finalists = list(
             {
@@ -877,7 +894,7 @@ class EvolutionEngine:
             }.values()
         )
         if not finalists:
-            raise RuntimeError("No valid finalists were produced.")
+            raise RuntimeError("No valid finalists meet the configured acceptance requirements.")
         self.champion = max(
             finalists,
             key=lambda item: (
@@ -900,6 +917,7 @@ class EvolutionEngine:
         if self.champion is None or self.evaluator is None or self.data is None:
             raise RuntimeError("Hidden phase requires a validation-selected champion.")
         island, champion = self.champion
+        self._check_complexity(champion.path, {"candidate_id": champion.candidate_id})
         self.final_result = self._evaluate_hidden_champion(
             island, champion, self.evaluator, self.data
         )
@@ -914,6 +932,12 @@ class EvolutionEngine:
     def _phase_report(self) -> Mapping[str, object]:
         if self.final_result is None or self.final_solver is None:
             raise RuntimeError("Report phase requires a hidden evaluation result.")
+        complexity = self._check_complexity(
+            self.final_solver, {"candidate_id": self.final_result.candidate_id},
+        )
+        if complexity is not None:
+            _write_json(self.run_dir / "controller" / "complexity" / "final.json",
+                        complexity.as_dict())
         _write_json(self.run_dir / "final_ranking.json", [self.final_result.as_dict()])
         explanation = write_final_solver_explanation(
             self.run_dir,
@@ -1045,6 +1069,7 @@ class EvolutionEngine:
                 raise RuntimeError(error or "attempt pipeline rejected candidate")
             # Non-removable safety and controller-only validation gate.
             changed = capabilities.audit_candidate()
+            self._check_complexity(workspace, scope)
             public = capabilities.public_evaluation
             if public is None or public[0] != tree_hash(workspace):
                 public_result = capabilities.evaluate_public("public_score")
@@ -1275,6 +1300,25 @@ class EvolutionEngine:
             runtime=self.runtime,
             forbidden=self.config.evaluation.forbidden_candidate_imports,
         )
+
+    def _assess_complexity(
+        self, root: Path, scope: Mapping[str, object] | None = None,
+    ) -> ComplexityReport | None:
+        if self.complexity is None:
+            return None
+        self._validate_candidate(root)
+        report = self.complexity.assess(root)
+        self._emit("complexity_checked", "failed" if report.blocked else "succeeded",
+                   scope=scope, data=report.summary())
+        return report
+
+    def _check_complexity(
+        self, root: Path, scope: Mapping[str, object] | None = None,
+    ) -> ComplexityReport | None:
+        report = self._assess_complexity(root, scope)
+        if report is not None and report.blocked:
+            raise ComplexityLimitExceeded(report)
+        return report
 
     def _select_parent(
         self, population: list[CandidateRecord], rng: random.Random
@@ -1514,6 +1558,8 @@ class _EngineControllerServices:
             max_bytes=engine.config.sandbox.max_candidate_bytes * 8,
         )
 
+        if engine.complexity is not None:
+            job = replace(job, prompt=job.prompt + "\n\n" + engine.complexity.prompt())
         tools = job.tools or ToolConfig(
             preset="minimal",
             web_search=False,
@@ -1737,6 +1783,7 @@ class _EngineControllerServices:
                     _apply_patch(staging, patch)
                     change_hashes.append(file_hash(patch))
             engine._validate_candidate(staging)
+            engine._check_complexity(staging, {"variant_id": variant_id})
             changed = changed_files(base, staging)
             if not changed:
                 raise ValueError("Executable variant produced no solver-tree change.")
@@ -1798,6 +1845,7 @@ class _EngineControllerServices:
         label = _safe_identifier(label, "evaluation label")
         if tree_hash(handle.path) != handle.tree_hash:
             raise ValueError(f"Variant tree changed after materialization: {handle.variant_id}")
+        engine._check_complexity(handle.path, {"variant_id": handle.variant_id})
         if engine.evaluator is None or engine.data is None:
             raise RuntimeError("Public variant evaluation requires a prepared evaluator.")
         evaluator = engine.evaluator
@@ -1872,6 +1920,9 @@ class _EngineControllerServices:
             if record is not None:
                 if not record.valid:
                     continue
+                report = engine._assess_complexity(record.path, {"variant_id": candidate_id})
+                if report is not None and report.blocked:
+                    continue
                 if record.candidate_id != "seed" and record.review_verdict != "approve":
                     continue
                 ranked.append((record.validation_score, record.public_score, candidate_id))
@@ -1886,6 +1937,7 @@ class _EngineControllerServices:
                     "before integrity review and validation selection."
                 )
             base = engine.variant_bases.get(candidate_id)
+            engine._check_complexity(handle.path, {"variant_id": candidate_id})
             if base is None:
                 raise RuntimeError(f"Research variant {candidate_id!r} has no recorded base tree.")
             decision, _report = engine._review_candidate(
@@ -1960,6 +2012,7 @@ class _EngineControllerServices:
         engine = self.engine
         if handle.variant_id not in engine.variant_handles:
             raise ValueError("Only a gated controller variant can be registered as a finalist.")
+        engine._check_complexity(handle.path, {"variant_id": handle.variant_id})
         validation = engine.variant_validation.get(handle.variant_id)
         if validation is None or not validation.success:
             raise ValueError("A research finalist must pass controller validation first.")
@@ -2062,6 +2115,9 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
             max_public_calls=engine.config.evaluation.max_public_calls_per_worker,
             candidate_validator=self._ensure_candidate_safe,
             feedback_mode=engine.config.evaluation.feedback_mode,
+            complexity_checker=(
+                lambda root: engine._assess_complexity(root, self._scope())
+            ) if engine.complexity is not None else None,
         )
         broker.install_tools(tools_dir)
         connection = broker.start(docker=engine.config.sandbox.backend == "docker")
@@ -2080,6 +2136,10 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
             forbidden_candidate_imports=engine.config.evaluation.forbidden_candidate_imports,
             direction=engine.direction_assignments.get(self._island),
             prompt_note=engine.config.workers.prompt_note,
+            complexity_note=(
+                engine.complexity.prompt() + "\nCurrent parent: "
+                + engine.complexity.assess(self._parent.path).feedback()
+            ) if engine.complexity else None,
         )
         try:
             engine._emit(
@@ -2180,6 +2240,7 @@ class _EngineAttemptCapabilities(AttemptCapabilities):
         if mode not in {"smoke", "public", "public_score"}:
             raise ValueError(f"Attempt steps cannot evaluate controller-only mode {mode!r}.")
         self.audit_candidate()
+        self._engine._check_complexity(self._workspace, self._scope())
         if self._engine.evaluator is None:
             raise RuntimeError("Evaluator is unavailable.")
         directory_name = "public" if mode in {"public", "public_score"} else mode

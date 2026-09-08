@@ -6,6 +6,10 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "complexity": {
+      "oneOf": [{"$ref": "#/$defs/ComplexityConfig"}, {"type": "null"}],
+      "default": null
+    },
     "data": {
       "$ref": "#/$defs/DataConfig"
     },
@@ -34,6 +38,14 @@
     "integrity_review"
   ],
   "$defs": {
+    "ComplexityConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"type": "string", "enum": ["warn", "enforce"], "default": "warn"},
+        "max_ratio": {"type": "number", "exclusiveMinimum": 0, "default": 1.2}
+      }
+    },
     "DataConfig": {
       "type": "object",
       "additionalProperties": false,

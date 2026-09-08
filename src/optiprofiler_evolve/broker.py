@@ -14,8 +14,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .evaluation import Evaluator
-from .feedback import AgentReportValidator, project_feedback
+from .feedback import AgentReportValidator, project_feedback, publish_complexity
+from .complexity import ComplexityReport
 from .models import EvaluationResult
+from .solver import copy_solver_tree
 
 
 _TOOL_CLIENT = """#!/usr/bin/env python3
@@ -80,6 +82,7 @@ class EvaluationBroker:
         candidate_validator: Callable[[Path], None] | None = None,
         feedback_mode: str = "full_artifacts",
         agent_report_validator: AgentReportValidator | None = None,
+        complexity_checker: Callable[[Path], ComplexityReport | None] | None = None,
     ) -> None:
         self.workspace = workspace.resolve()
         self.evaluator = evaluator
@@ -89,6 +92,7 @@ class EvaluationBroker:
         self.candidate_validator = candidate_validator
         self.feedback_mode = feedback_mode
         self.agent_report_validator = agent_report_validator
+        self.complexity_checker = complexity_checker
         self.quotas = {"smoke": max_smoke_calls, "public": max_public_calls}
         self.counts = {"smoke": 0, "public": 0}
         self.token = secrets.token_urlsafe(32)
@@ -183,7 +187,13 @@ class EvaluationBroker:
                 self.candidate_validator(self.workspace)
             output = self.artifacts / "evaluations" / mode / f"{call:03d}"
             result = self._evaluate_and_publish(mode, output)
-            payload = _worker_result_payload(result)
+            payload = _worker_result_payload(result) if result is not None else {
+                "mode": mode, "success": False, "evaluated": False,
+                "error": "complexity_limit_exceeded", "retryable": True,
+            }
+            complexity_path = output / "complexity.json"
+            if complexity_path.is_file():
+                payload["complexity"] = json.loads(complexity_path.read_text(encoding="utf-8"))
             relative = Path(".optiprofiler_evolve") / "evaluations" / mode / f"{call:03d}"
             feedback = output / "feedback.md"
             payload.update(
@@ -204,13 +214,14 @@ class EvaluationBroker:
         finally:
             request_path.unlink(missing_ok=True)
 
-    def _evaluate_and_publish(self, mode: str, output: Path) -> EvaluationResult:
+    def _evaluate_and_publish(self, mode: str, output: Path) -> EvaluationResult | None:
         """Retain trusted evidence privately and atomically publish its projection."""
 
         staging_root = self.control_dir / "staging"
         staging_root.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix="private-evaluation-", dir=staging_root))
         publication = Path(tempfile.mkdtemp(prefix="worker-feedback-", dir=staging_root))
+        snapshot = Path(tempfile.mkdtemp(prefix="candidate-snapshot-", dir=staging_root))
         private_output = self.control_dir / "private_evaluations" / mode / output.name
         try:
             if output.exists():
@@ -219,7 +230,25 @@ class EvaluationBroker:
                 raise FileExistsError(
                     f"Private evaluation output already exists: {private_output}"
                 )
-            result = self.evaluator.evaluate(self.workspace, mode, staging)
+            candidate = self.workspace
+            complexity = None
+            if self.complexity_checker is not None:
+                candidate = snapshot / "candidate"
+                copy_solver_tree(self.workspace, candidate)
+                if self.candidate_validator is not None:
+                    self.candidate_validator(candidate)
+                complexity = self.complexity_checker(candidate)
+            if complexity is not None and complexity.blocked:
+                publish_complexity(publication, complexity)
+                (publication / "result.json").write_text(json.dumps({
+                    "mode": mode, "success": False, "evaluated": False,
+                    "error": "complexity_limit_exceeded", "retryable": True,
+                    "complexity": complexity.worker_dict(),
+                }) + "\n", encoding="utf-8")
+                output.parent.mkdir(parents=True, exist_ok=True)
+                publication.replace(output)
+                return None
+            result = self.evaluator.evaluate(candidate, mode, staging)
             private_output.parent.mkdir(parents=True, exist_ok=True)
             staging.replace(private_output)
             project_feedback(
@@ -228,6 +257,7 @@ class EvaluationBroker:
                 result,
                 mode=self.feedback_mode,
                 validate_agent_report=self.agent_report_validator,
+                complexity=complexity,
             )
             output.parent.mkdir(parents=True, exist_ok=True)
             publication.replace(output)
@@ -238,6 +268,7 @@ class EvaluationBroker:
                 shutil.rmtree(staging)
             if publication.exists():
                 shutil.rmtree(publication)
+            shutil.rmtree(snapshot)
 
     def _respond(self, request_id: str, status: int, payload: dict[str, Any]) -> None:
         responses = self.exchange / "responses"
