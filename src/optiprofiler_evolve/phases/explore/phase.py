@@ -1,0 +1,191 @@
+"""The explore workflow stage."""
+
+from __future__ import annotations
+
+import concurrent.futures
+import random
+from collections.abc import Mapping
+from pathlib import Path
+
+from optiprofiler_evolve.shared.models import Attempt
+from optiprofiler_evolve.observability.provenance import coordinate_seed
+from optiprofiler_evolve.shared.config import WorkerConfig
+from optiprofiler_evolve.shared.errors import (
+    IntegrityReviewerUnavailable as _IntegrityReviewerUnavailable,
+)
+from optiprofiler_evolve.shared.errors import RunCancelled as _RunCancelled
+from optiprofiler_evolve.shared.models import CandidateRecord
+from optiprofiler_evolve.shared.protocols import (
+    IterationView,
+    PhaseResult,
+)
+from optiprofiler_evolve.shared.research import read_json_object
+
+from .context import ExploreContext
+
+
+class ExplorePhase:
+    """Execute the explore stage through its bounded controller context."""
+
+    name = "explore"
+    requires = frozenset(["prepared"])
+    provides = frozenset(["populations"])
+
+    def run(self, context: ExploreContext) -> PhaseResult:
+        context.set_directions(_direction_assignments(context.artifacts.get("directions")))
+        should_stop = False
+        for iteration in range(1, context.evolution.iterations + 1):
+            context.raise_if_cancelled()
+            iteration_scope = {"phase": "explore", "iteration": iteration}
+            context.emit_scoped("iteration_started", "running", scope=iteration_scope)
+            context.refresh_status()
+            jobs: list[tuple[int, int, CandidateRecord, WorkerConfig]] = []
+            for island, population in enumerate(context.populations()):
+                for attempt_index in range(context.evolution.attempts_per_island):
+                    parent_rng = random.Random(
+                        coordinate_seed(
+                            context.evolution.random_seed,
+                            "explore",
+                            iteration,
+                            island,
+                            attempt_index,
+                            "parent",
+                        )
+                    )
+                    worker_rng = random.Random(
+                        coordinate_seed(
+                            context.evolution.random_seed,
+                            "explore",
+                            iteration,
+                            island,
+                            attempt_index,
+                            "worker",
+                        )
+                    )
+                    jobs.append(
+                        (
+                            island,
+                            attempt_index,
+                            context.select_parent(population, parent_rng),
+                            context.select_worker(worker_rng),
+                        )
+                    )
+
+            attempts: list[Attempt] = []
+            max_workers = min(context.workers.max_parallel, len(jobs))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {
+                    pool.submit(
+                        context.run_attempt,
+                        iteration=iteration,
+                        island=island,
+                        attempt_index=attempt_index,
+                        parent=parent,
+                        worker=worker,
+                    ): (island, attempt_index, parent, worker)
+                    for island, attempt_index, parent, worker in jobs
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    island, attempt_index, parent, worker = futures[future]
+                    try:
+                        attempts.append(future.result())
+                    except (_RunCancelled, _IntegrityReviewerUnavailable):
+                        raise
+                    except Exception as exc:
+                        attempts.append(
+                            context.failed_attempt(
+                                iteration,
+                                island,
+                                attempt_index,
+                                parent,
+                                worker,
+                                exc,
+                            )
+                        )
+                    context.refresh_status_if_due()
+
+            context.raise_if_cancelled()
+            # Explicit iteration barrier: only the engine accepts and records.
+            for attempt in sorted(
+                attempts,
+                key=lambda item: (item.record.island, item.record.attempt_index),
+            ):
+                context.accept_attempt(attempt)
+
+            view = IterationView(
+                iteration=iteration,
+                populations=tuple(
+                    tuple(context.trim_population(pop)) for pop in context.populations()
+                ),
+                attempt_ids=tuple(item.record.attempt_id for item in attempts),
+                rng_seed=coordinate_seed(
+                    context.evolution.random_seed, "explore", iteration, "after_iteration"
+                ),
+            )
+            for index, policy in enumerate(context.after_iteration):
+                policy_scope = {
+                    "phase": "explore",
+                    "iteration": iteration,
+                    "step": policy.name,
+                    "step_idx": index,
+                }
+                context.emit_scoped("policy_started", "running", scope=policy_scope)
+                try:
+                    edit = policy.propose(view)
+                    context.apply_population_edit(edit)
+                except Exception as exc:
+                    context.emit_scoped(
+                        "policy_finished",
+                        "failed",
+                        scope=policy_scope,
+                        data={"error": f"{type(exc).__name__}: {exc}"},
+                    )
+                    raise
+                else:
+                    context.emit_scoped(
+                        "policy_finished",
+                        "succeeded",
+                        scope=policy_scope,
+                        data={
+                            "kill": list(edit.kill),
+                            "migrate": [list(item) for item in edit.migrate],
+                            "budget": dict(edit.budget),
+                            "stop": edit.stop,
+                            "reason": edit.reason,
+                        },
+                    )
+                should_stop = should_stop or edit.stop
+            context.write_checkpoint(iteration)
+            context.emit_scoped(
+                "iteration_finished",
+                "succeeded",
+                scope=iteration_scope,
+                data={"stop": should_stop, "attempt_count": len(attempts)},
+            )
+            context.refresh_status()
+            if should_stop:
+                break
+        return PhaseResult(artifacts={"populations": context.populations()})
+
+
+def _direction_assignments(artifact: object) -> dict[int, dict[str, object]]:
+    if artifact is None:
+        return {}
+    path = Path(str(artifact))
+    if not path.is_file():
+        return {}
+    payload = read_json_object(path)
+    cards = {
+        str(card.get("card_id")): dict(card)
+        for card in payload.get("cards", [])
+        if isinstance(card, Mapping) and card.get("card_id")
+    }
+    assignments: dict[int, dict[str, object]] = {}
+    raw_assignment = payload.get("assignment", {})
+    if not isinstance(raw_assignment, Mapping):
+        return assignments
+    for island, card_id in raw_assignment.items():
+        if card_id is None or str(card_id) not in cards:
+            continue
+        assignments[int(island)] = cards[str(card_id)]
+    return assignments

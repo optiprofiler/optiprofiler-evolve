@@ -45,14 +45,16 @@ agent, or problem libraries while working here. They are independent packages.
 | Concern | Module or document |
 |---|---|
 | Public call | `src/optiprofiler_evolve/api.py` |
-| Typed config | `config.py`, `config.schema.json`, `docs/config-reference.md` |
-| Workflow contracts | `protocols.py`, `registry.py`, `phases/`, `steps/`, `policies/` |
-| Population and selection | `engine.py` |
-| CLI agents and isolation | `workers.py`, `harness.py`, `sandbox.py` |
-| OptiProfiler calls and public broker | `evaluation.py`, `broker.py` |
-| Solver/data boundaries | `solver.py`, `data.py` |
-| Research evidence | `research.py`, `phases/research.py` |
-| Events and local views | `events.py`, `provenance.py`, `viewers.py` |
+| Typed config | `shared/config.py`, `config.schema.json`, `docs/config-reference.md` |
+| Workflow contracts | `shared/protocols.py`, `controller/registry.py`, `phases/*/phase.py` |
+| Population and selection | `controller/engine.py`, `controller/selection.py`, `controller/phase_contexts.py` |
+| Attempts and policies | `controller/attempts.py`, `phases/explore/steps/`, `phases/explore/policies/` |
+| Unified LLM entry and isolation | `agents/llm.py`, `agents/workers.py`, `agents/harness.py`, `agents/sandbox.py` |
+| OptiProfiler calls and public broker | `evaluation/evaluation.py`, `evaluation/broker.py` |
+| Solver/data boundaries | `shared/solver.py`, `shared/data.py` |
+| Research evidence | `shared/research.py`, optional stage directories under `phases/` |
+| Complexity and integrity gates | `quality/complexity.py`, `quality/review.py` |
+| Events and local views | `observability/`, `phases/report/` |
 
 When adding a config field, update the dataclass, JSON Schema, configuration
 reference, a checked-in example when relevant, and tests. Documentation tests

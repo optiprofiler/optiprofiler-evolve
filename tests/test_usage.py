@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from optiprofiler_evolve.usage import UsageRecord, aggregate_usage
+from optiprofiler_evolve.observability.usage import UsageRecord, aggregate_usage
 
 
 class UsageAccountingTests(unittest.TestCase):

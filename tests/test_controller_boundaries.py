@@ -7,19 +7,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from optiprofiler_evolve.config import ComponentConfig, WorkerConfig, load_config
-from optiprofiler_evolve.engine import EvolutionEngine
-from optiprofiler_evolve.models import MetricBundle, MetricValue
-from optiprofiler_evolve.owner_views import render_owner_views
-from optiprofiler_evolve.protocols import PopulationEdit, StepResult
-from optiprofiler_evolve.registry import build
-from optiprofiler_evolve.selection import (
+from optiprofiler_evolve.shared.config import ComponentConfig, WorkerConfig, load_config
+from optiprofiler_evolve.controller.engine import EvolutionEngine
+from optiprofiler_evolve.shared.models import MetricBundle, MetricValue
+from optiprofiler_evolve.phases.report.owner_views import render_owner_views
+from optiprofiler_evolve.shared.protocols import PopulationEdit, StepResult
+from optiprofiler_evolve.controller.registry import build
+from optiprofiler_evolve.controller.selection import (
     MetricParetoRetention,
     MetricSelectionError,
     TopBiasedValidationWeightedSampler,
     ValidationLexicographicRetention,
 )
-from optiprofiler_evolve.solver import InterfaceSpec
+from optiprofiler_evolve.shared.solver import InterfaceSpec
 
 from worker_helpers import RunnerAdapter
 from test_config import minimal_config
@@ -113,13 +113,13 @@ class ControllerBoundaryTests(unittest.TestCase):
         self.assertEqual(self.engine.populations, [[b, a]])
 
     def test_core_phase_preserves_internal_key_error(self) -> None:
+        from optiprofiler_evolve.phases.prepare.phase import PreparePhase
+
         with patch.object(
-            self.engine, "_phase_prepare", side_effect=KeyError("missing_field")
+            PreparePhase, "run", side_effect=KeyError("missing_field")
         ):
             with self.assertRaisesRegex(KeyError, "missing_field"):
-                self.engine._invoke_core_phase("prepare")
-        with self.assertRaisesRegex(ValueError, "Unknown core phase"):
-            self.engine._invoke_core_phase("unknown")
+                self.engine._run_phase(PreparePhase(), {})
 
     def test_weighted_worker_selection_preserves_seeded_choices(self) -> None:
         pool = tuple(

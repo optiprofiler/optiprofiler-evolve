@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.events import EventWriter
-from optiprofiler_evolve.projections import project_public_events
-from optiprofiler_evolve.viewers import (
+from optiprofiler_evolve.observability.events import EventWriter
+from optiprofiler_evolve.observability.projections import project_public_events
+from optiprofiler_evolve.phases.report.viewers import (
     PUBLIC_BUNDLE_FILES,
     materialize_public_bundle,
     render_final_report,

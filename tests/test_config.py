@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from optiprofiler_evolve.config import load_config
+from optiprofiler_evolve.shared.config import load_config
 
 
 def minimal_config() -> dict:

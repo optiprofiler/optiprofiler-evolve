@@ -5,13 +5,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.models import (
+from optiprofiler_evolve.shared.models import (
     CandidateRecord,
     EvaluationResult,
     MetricBundle,
     MetricValue,
 )
-from optiprofiler_evolve.selection import (
+from optiprofiler_evolve.controller.selection import (
     MetricParetoRetention,
     MetricSelectionError,
     TopBiasedValidationWeightedSampler,

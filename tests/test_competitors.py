@@ -12,12 +12,12 @@ from unittest.mock import patch
 
 import numpy as np
 
-from optiprofiler_evolve.competitors import (
+from optiprofiler_evolve.shared.competitors import (
     competitor_names,
     get_competitor,
     materialize_competitor,
 )
-from optiprofiler_evolve.solver import InterfaceSpec
+from optiprofiler_evolve.shared.solver import InterfaceSpec
 
 
 class CompetitorRegistryTests(unittest.TestCase):

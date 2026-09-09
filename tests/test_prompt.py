@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from optiprofiler_evolve.data import DataPlan
-from optiprofiler_evolve.prompt import build_worker_prompt
-from optiprofiler_evolve.solver import InterfaceSpec
+from optiprofiler_evolve.shared.data import DataPlan
+from optiprofiler_evolve.phases.explore.prompt import build_worker_prompt
+from optiprofiler_evolve.shared.solver import InterfaceSpec
 
 
 def _prompt_kwargs() -> dict:

@@ -7,11 +7,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .config import EvolveConfig, load_config
-from .engine import EvolutionEngine
-from .models import EvolveResult
-from .presets import dfo_default
-from .solver import InterfaceSpec
+from optiprofiler_evolve.shared.config import EvolveConfig, load_config
+from optiprofiler_evolve.controller.engine import EvolutionEngine
+from optiprofiler_evolve.shared.models import EvolveResult
+from optiprofiler_evolve.shared.presets import dfo_default
+from optiprofiler_evolve.shared.solver import InterfaceSpec
 
 
 def evolve(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from optiprofiler_evolve.phases.prepare.phase import PreparePhase
+
 import json
 import math
 import subprocess
@@ -10,23 +12,23 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from optiprofiler_evolve.broker import EvaluationBroker
-from optiprofiler_evolve.complexity import (
+from optiprofiler_evolve.evaluation.broker import EvaluationBroker
+from optiprofiler_evolve.quality.complexity import (
     ComplexityChecker,
     ComplexityConfig,
     ComplexityLimitExceeded,
     analyze_source,
 )
-from optiprofiler_evolve.config import SandboxConfig, load_config
-from optiprofiler_evolve.engine import EvolutionEngine
-from optiprofiler_evolve.feedback import project_feedback
-from optiprofiler_evolve.models import EvaluationResult
-from optiprofiler_evolve.events import EventWriter, rebuild_run_state
-from optiprofiler_evolve.projections import project_public_events
-from optiprofiler_evolve.viewers import render_status, render_public_report
-from optiprofiler_evolve.protocols import AgentJob, StepResult, VariantRequest, WorkerOutcome
-from optiprofiler_evolve.solver import InterfaceSpec
-from optiprofiler_evolve.trace_ledger import TraceLedger
+from optiprofiler_evolve.shared.config import SandboxConfig, load_config
+from optiprofiler_evolve.controller.engine import EvolutionEngine
+from optiprofiler_evolve.evaluation.feedback import project_feedback
+from optiprofiler_evolve.shared.models import EvaluationResult
+from optiprofiler_evolve.observability.events import EventWriter, rebuild_run_state
+from optiprofiler_evolve.observability.projections import project_public_events
+from optiprofiler_evolve.phases.report.viewers import render_status, render_public_report
+from optiprofiler_evolve.shared.protocols import AgentJob, StepResult, VariantRequest, WorkerOutcome
+from optiprofiler_evolve.shared.solver import InterfaceSpec
+from optiprofiler_evolve.observability.trace_ledger import TraceLedger
 
 from test_config import minimal_config
 from test_extensibility import evaluator_factory
@@ -197,7 +199,7 @@ class ComplexityTests(unittest.TestCase):
             self.assertEqual(report.blocked, mode == "enforce")
             self.assertIsNone(report.summary()["score"])
         with patch(
-            "optiprofiler_evolve.complexity.subprocess.run",
+            "optiprofiler_evolve.quality.complexity.subprocess.run",
             side_effect=subprocess.TimeoutExpired("analyze", 30),
         ):
             with self.assertRaisesRegex(ValueError, "timed out"):
@@ -364,7 +366,7 @@ class ComplexityTests(unittest.TestCase):
                     engine.run_dir, run_id="prompt-test", config_hash="test",
                     adapter_name=engine.worker_adapter.name,
                 )
-                engine._phase_prepare()
+                engine._run_phase(PreparePhase(), {})
                 job = AgentJob(
                     role="strategy-integrator", job_id="prompt-test", prompt="Integrate strategies."
                 )
@@ -437,7 +439,7 @@ class ComplexityTests(unittest.TestCase):
     def test_research_variant_uses_same_limit(self):
         engine = self.engine("enforce")
         engine._initialize_run_directory()
-        engine._phase_prepare()
+        engine._run_phase(PreparePhase(), {})
         variant = self.source("run/research/proposed", LARGE)
         with self.assertRaises(ComplexityLimitExceeded):
             engine.controller_services.materialize_variant(

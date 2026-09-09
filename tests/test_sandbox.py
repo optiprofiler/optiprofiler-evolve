@@ -8,19 +8,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from optiprofiler_evolve.broker import BrokerConnection
-from optiprofiler_evolve.config import (
+from optiprofiler_evolve.evaluation.broker import BrokerConnection
+from optiprofiler_evolve.shared.config import (
     SandboxConfig,
     ToolConfig,
     WorkerConfig,
     WorkersConfig,
 )
-from optiprofiler_evolve.docker_runtime import (
+from optiprofiler_evolve.agents.docker_runtime import (
     GatewayRuntimeOutcome,
     build_worker_container_command,
 )
-from optiprofiler_evolve.sandbox import run_agent
-from optiprofiler_evolve.traces import CapturedProcess
+from optiprofiler_evolve.agents.sandbox import run_agent
+from optiprofiler_evolve.observability.traces import CapturedProcess
 
 
 class SandboxCommandTests(unittest.TestCase):
@@ -44,7 +44,7 @@ class SandboxCommandTests(unittest.TestCase):
             runtime.cleanup.side_effect = assert_trace_flushed
             with (
                 patch(
-                    "optiprofiler_evolve.sandbox.DockerInvocationRuntime",
+                    "optiprofiler_evolve.agents.sandbox.DockerInvocationRuntime",
                     return_value=runtime,
                 ),
                 self.assertRaisesRegex(RuntimeError, "gateway launch failed"),
@@ -73,7 +73,7 @@ class SandboxCommandTests(unittest.TestCase):
         worker = WorkerConfig(harness="codex", model="test")
         workers = WorkersConfig(pool=(worker,), timeout_seconds=5)
         with tempfile.TemporaryDirectory() as directory, patch(
-            "optiprofiler_evolve.sandbox.build_harness_command",
+            "optiprofiler_evolve.agents.sandbox.build_harness_command",
             return_value=[str(Path(directory) / "missing-command")],
         ):
             root = Path(directory)
@@ -126,7 +126,7 @@ class SandboxCommandTests(unittest.TestCase):
                 manifest=manifest,
             )
             with patch(
-                "optiprofiler_evolve.sandbox.DockerInvocationRuntime",
+                "optiprofiler_evolve.agents.sandbox.DockerInvocationRuntime",
                 return_value=runtime,
             ):
                 result = run_agent(
@@ -177,7 +177,7 @@ class SandboxCommandTests(unittest.TestCase):
             (root / "workspace").mkdir()
             with (
                 patch(
-                    "optiprofiler_evolve.sandbox.DockerInvocationRuntime",
+                    "optiprofiler_evolve.agents.sandbox.DockerInvocationRuntime",
                     return_value=runtime,
                 ),
                 self.assertRaisesRegex(RuntimeError, "gateway outcome unavailable"),
@@ -219,7 +219,7 @@ class SandboxCommandTests(unittest.TestCase):
             "sys.stderr.write('diagnostic\\n')",
         ]
         with tempfile.TemporaryDirectory() as directory, patch(
-            "optiprofiler_evolve.sandbox.build_harness_command", return_value=command
+            "optiprofiler_evolve.agents.sandbox.build_harness_command", return_value=command
         ):
             root = Path(directory)
             (root / "workspace").mkdir()
@@ -303,9 +303,9 @@ class SandboxCommandTests(unittest.TestCase):
 
         with (
             tempfile.TemporaryDirectory() as directory,
-            patch("optiprofiler_evolve.docker_runtime._docker_run", side_effect=fake_run),
-            patch("optiprofiler_evolve.sandbox.run_captured_process", side_effect=fake_capture),
-            patch("optiprofiler_evolve.sandbox.render_transcript"),
+            patch("optiprofiler_evolve.agents.docker_runtime._docker_run", side_effect=fake_run),
+            patch("optiprofiler_evolve.agents.sandbox.run_captured_process", side_effect=fake_capture),
+            patch("optiprofiler_evolve.agents.sandbox.render_transcript"),
         ):
             root = Path(directory)
             result = run_agent(

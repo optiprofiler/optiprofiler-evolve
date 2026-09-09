@@ -5,6 +5,12 @@ CLI owns the model conversation and tool loop. The controller owns the private
 workspace, provider route, evaluation capabilities, timeout, raw trace, and
 acceptance gates.
 
+All model-using stages and the integrity reviewer share the internal
+`LLMClient.run(AgentJob)` interface. The controller binds each invocation's
+workspace and capabilities; the client executes the configured worker adapter
+and retains its lifecycle evidence. This abstraction does not replace the CLI
+with a raw completion request or add model calls to deterministic stages.
+
 In the Docker backend, every agent invocation uses a short-lived provider
 gateway. This applies to explorer workers, integrity reviewers, and research
 roles. The gateway is model transport, not a general HTTP proxy.

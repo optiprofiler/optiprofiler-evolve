@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from optiprofiler_evolve.phases.prepare.phase import PreparePhase
+
 import json
 import os
 import signal
@@ -9,12 +11,12 @@ import time
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.config import load_config
-from optiprofiler_evolve.engine import EvolutionEngine, _controller_cancellation
-from optiprofiler_evolve.models import EvaluationResult
-from optiprofiler_evolve.review import REQUIRED_CHECKS
-from optiprofiler_evolve.protocols import WorkerOutcome
-from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
+from optiprofiler_evolve.shared.config import load_config
+from optiprofiler_evolve.controller.engine import EvolutionEngine, _controller_cancellation
+from optiprofiler_evolve.shared.models import EvaluationResult
+from optiprofiler_evolve.quality.review import REQUIRED_CHECKS
+from optiprofiler_evolve.shared.protocols import WorkerOutcome
+from optiprofiler_evolve.shared.solver import InterfaceSpec, tree_hash
 
 from worker_helpers import RunnerAdapter
 from test_config import minimal_config
@@ -249,7 +251,7 @@ class EngineTests(unittest.TestCase):
                 evaluator_factory=fake_evaluator_factory,
             )
 
-            engine._phase_prepare()
+            engine._run_phase(PreparePhase(), {})
 
             contract = json.loads((root / "run" / "solver_contract.json").read_text())
             self.assertEqual(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from optiprofiler_evolve.phases.prepare.phase import PreparePhase
+
 import difflib
 import json
 import shutil
@@ -7,16 +9,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.config import load_config
-from optiprofiler_evolve.engine import EvolutionEngine
-from optiprofiler_evolve.models import EvaluationResult
-from optiprofiler_evolve.phases.research import (
-    RecombinePhase,
-    StrategyAnalysisPhase,
-)
-from optiprofiler_evolve.protocols import PhaseContext, VariantRequest
-from optiprofiler_evolve.protocols import WorkerOutcome
-from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
+from optiprofiler_evolve.shared.config import load_config
+from optiprofiler_evolve.controller.engine import EvolutionEngine
+from optiprofiler_evolve.shared.models import EvaluationResult
+from optiprofiler_evolve.phases.recombine.phase import RecombinePhase
+from optiprofiler_evolve.phases.strategy_analysis.phase import StrategyAnalysisPhase
+from optiprofiler_evolve.shared.protocols import PhaseContext, VariantRequest
+from optiprofiler_evolve.shared.protocols import WorkerOutcome
+from optiprofiler_evolve.shared.solver import InterfaceSpec, tree_hash
 
 from worker_helpers import RunnerAdapter
 from test_config import minimal_config
@@ -988,7 +988,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 evaluator_factory=research_evaluator_factory,
             )
             engine._initialize_run_directory()
-            prepared = engine._phase_prepare()["prepared"]
+            prepared = engine._run_phase(PreparePhase(), {})["prepared"]
             seed = Path(str(prepared["seed"]))
             portable = root / "run" / "research" / "analysis" / "island-1" / "portable"
             portable.mkdir(parents=True)
@@ -1056,7 +1056,6 @@ class ResearchHarnessTests(unittest.TestCase):
                         "island_bundles": bundles,
                         "strategy_cards": (cards,),
                     },
-                    invoke=lambda _name: {},
                     emit=lambda _kind, _status, _data=None: None,
                     services=engine.controller_services,
                 )
@@ -1084,7 +1083,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 evaluator_factory=research_evaluator_factory,
             )
             engine._initialize_run_directory()
-            prepared = engine._phase_prepare()["prepared"]
+            prepared = engine._run_phase(PreparePhase(), {})["prepared"]
             seed = Path(str(prepared["seed"]))
             bundles = root / "run" / "research" / "analysis" / "island_bundles.json"
             bundles.parent.mkdir(parents=True)
@@ -1119,7 +1118,6 @@ class ResearchHarnessTests(unittest.TestCase):
                         "island_bundles": bundles,
                         "strategy_cards": (cards,),
                     },
-                    invoke=lambda _name: {},
                     emit=lambda _kind, _status, _data=None: None,
                     services=engine.controller_services,
                 )

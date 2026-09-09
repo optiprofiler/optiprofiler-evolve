@@ -3,8 +3,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.config import ToolConfig, WorkerConfig, WorkersConfig
-from optiprofiler_evolve.harness import build_harness_command
+from optiprofiler_evolve.shared.config import ToolConfig, WorkerConfig, WorkersConfig
+from optiprofiler_evolve.agents.harness import build_harness_command
 
 
 class HarnessCommandTests(unittest.TestCase):

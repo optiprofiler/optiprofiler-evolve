@@ -10,8 +10,8 @@ import unittest
 import uuid
 from pathlib import Path
 
-from optiprofiler_evolve.broker import EvaluationBroker
-from optiprofiler_evolve.models import EvaluationResult
+from optiprofiler_evolve.evaluation.broker import EvaluationBroker
+from optiprofiler_evolve.shared.models import EvaluationResult
 
 
 class FakeEvaluator:

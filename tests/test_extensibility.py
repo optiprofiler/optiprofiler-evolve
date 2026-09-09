@@ -7,20 +7,20 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from optiprofiler_evolve.config import ComponentConfig, load_config
-from optiprofiler_evolve.engine import EvolutionEngine
-from optiprofiler_evolve.models import CandidateRecord, EvaluationResult
-from optiprofiler_evolve.policies.builtin import MigrationPolicy
-from optiprofiler_evolve.protocols import (
+from optiprofiler_evolve.shared.config import ComponentConfig, load_config
+from optiprofiler_evolve.controller.engine import EvolutionEngine
+from optiprofiler_evolve.shared.models import CandidateRecord, EvaluationResult
+from optiprofiler_evolve.phases.explore.policies.builtin import MigrationPolicy
+from optiprofiler_evolve.shared.protocols import (
     ControllerServices,
     IterationView,
     PopulationEdit,
     StepResult,
 )
-from optiprofiler_evolve.registry import build
-from optiprofiler_evolve.protocols import WorkerOutcome
-from optiprofiler_evolve.solver import InterfaceSpec
-from optiprofiler_evolve.viewers import materialize_public_bundle, render_status
+from optiprofiler_evolve.controller.registry import build
+from optiprofiler_evolve.shared.protocols import WorkerOutcome
+from optiprofiler_evolve.shared.solver import InterfaceSpec
+from optiprofiler_evolve.phases.report.viewers import materialize_public_bundle, render_status
 
 from worker_helpers import RunnerAdapter
 from test_config import minimal_config
@@ -136,7 +136,7 @@ class ExtensibilityTests(unittest.TestCase):
                     return function(*args, **kwargs)
 
                 with patch(
-                    f"optiprofiler_evolve.engine.{name}",
+                    f"optiprofiler_evolve.controller.engine.{name}",
                     side_effect=fail_after_first,
                 ):
                     result = EvolutionEngine(

@@ -4,9 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.config import ComponentConfig, load_config
-from optiprofiler_evolve.experiments import run_matrix
-from optiprofiler_evolve.models import EvolveResult
+from optiprofiler_evolve.shared.config import ComponentConfig, load_config
+from optiprofiler_evolve.controller.experiments import run_matrix
+from optiprofiler_evolve.shared.models import EvolveResult
 
 from test_config import minimal_config
 

@@ -13,10 +13,10 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from optiprofiler_evolve.config import ProviderGatewayConfig, ToolConfig, WorkerConfig, WorkersConfig
-from optiprofiler_evolve.harness import build_harness_command
-from optiprofiler_evolve.provider_gateway import GatewayRoute, ProviderGatewayServer
-from optiprofiler_evolve.provider_transport import prepare_provider_transport
+from optiprofiler_evolve.shared.config import ProviderGatewayConfig, ToolConfig, WorkerConfig, WorkersConfig
+from optiprofiler_evolve.agents.harness import build_harness_command
+from optiprofiler_evolve.agents.provider_gateway import GatewayRoute, ProviderGatewayServer
+from optiprofiler_evolve.agents.provider_transport import prepare_provider_transport
 
 
 def main() -> int:

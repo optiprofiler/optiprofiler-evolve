@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.solver import (
+from optiprofiler_evolve.shared.solver import (
     InterfaceSpec,
     changed_files,
     copy_initial_source,

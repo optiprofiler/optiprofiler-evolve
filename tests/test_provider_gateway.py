@@ -17,10 +17,10 @@ from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-import optiprofiler_evolve.provider_gateway as provider_gateway_module
-from optiprofiler_evolve.config import ProviderGatewayConfig, WorkerConfig
-from optiprofiler_evolve.provider_gateway import GatewayRoute, ProviderGatewayServer
-from optiprofiler_evolve.provider_transport import prepare_provider_transport
+import optiprofiler_evolve.agents.provider_gateway as provider_gateway_module
+from optiprofiler_evolve.shared.config import ProviderGatewayConfig, WorkerConfig
+from optiprofiler_evolve.agents.provider_gateway import GatewayRoute, ProviderGatewayServer
+from optiprofiler_evolve.agents.provider_transport import prepare_provider_transport
 
 
 class _FakeUpstream:

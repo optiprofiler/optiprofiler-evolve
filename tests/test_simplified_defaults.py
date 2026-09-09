@@ -4,8 +4,8 @@ import inspect
 import unittest
 
 from optiprofiler_evolve import evolve
-from optiprofiler_evolve.config import EvolutionConfig, ToolConfig, WorkflowConfig
-from optiprofiler_evolve.presets import dfo_default
+from optiprofiler_evolve.shared.config import EvolutionConfig, ToolConfig, WorkflowConfig
+from optiprofiler_evolve.shared.presets import dfo_default
 
 
 class SimplifiedDefaultTests(unittest.TestCase):

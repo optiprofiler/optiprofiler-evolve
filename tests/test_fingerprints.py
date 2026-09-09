@@ -4,10 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.config import load_config
-from optiprofiler_evolve.data import resolve_data_plan
-from optiprofiler_evolve.fingerprints import build_experiment_fingerprints
-from optiprofiler_evolve.solver import InterfaceSpec
+from optiprofiler_evolve.shared.config import load_config
+from optiprofiler_evolve.shared.data import resolve_data_plan
+from optiprofiler_evolve.observability.fingerprints import build_experiment_fingerprints
+from optiprofiler_evolve.shared.solver import InterfaceSpec
 
 
 def minimal_config() -> dict:

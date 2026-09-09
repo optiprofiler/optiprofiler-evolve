@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.owner_views import render_owner_views
+from optiprofiler_evolve.phases.report.owner_views import render_owner_views
 
 from test_owner_views import ATTEMPT, REVIEW_JOB, _build_run_dir
 

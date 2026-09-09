@@ -270,10 +270,10 @@ class DockerEvaluatorIntegrationTests(unittest.TestCase):
     """Deterministic in-container scoring smoke: no model, no secrets."""
 
     def test_evaluator_scores_a_seed_candidate_in_container(self) -> None:
-        from optiprofiler_evolve.config import EvaluationConfig
-        from optiprofiler_evolve.data import DataPlan
-        from optiprofiler_evolve.evaluation import DockerOptiProfilerEvaluator
-        from optiprofiler_evolve.solver import InterfaceSpec
+        from optiprofiler_evolve.shared.config import EvaluationConfig
+        from optiprofiler_evolve.shared.data import DataPlan
+        from optiprofiler_evolve.evaluation.evaluation import DockerOptiProfilerEvaluator
+        from optiprofiler_evolve.shared.solver import InterfaceSpec
 
         solver_source = (
             "import numpy as np\n\n\n"

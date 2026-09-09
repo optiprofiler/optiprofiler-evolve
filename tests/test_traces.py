@@ -11,15 +11,15 @@ import time
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.config import (
+from optiprofiler_evolve.shared.config import (
     ProviderGatewayConfig,
     SandboxConfig,
     ToolConfig,
     WorkerConfig,
     WorkersConfig,
 )
-from optiprofiler_evolve.trace_ledger import TraceLedger, reconcile_trace_run
-from optiprofiler_evolve.traces import (
+from optiprofiler_evolve.observability.trace_ledger import TraceLedger, reconcile_trace_run
+from optiprofiler_evolve.observability.traces import (
     finalize_adapter_trace,
     prepare_trace,
     record_derived_trace_error,

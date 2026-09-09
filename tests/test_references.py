@@ -10,9 +10,9 @@ from unittest.mock import patch
 
 import numpy as np
 
-from optiprofiler_evolve.config import EvaluationConfig
-from optiprofiler_evolve.references import materialize_reference
-from optiprofiler_evolve.solver import InterfaceSpec, validate_interface
+from optiprofiler_evolve.shared.config import EvaluationConfig
+from optiprofiler_evolve.evaluation.references import materialize_reference
+from optiprofiler_evolve.shared.solver import InterfaceSpec, validate_interface
 
 
 class ReferenceTests(unittest.TestCase):

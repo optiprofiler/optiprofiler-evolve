@@ -11,8 +11,8 @@ from unittest.mock import patch
 import jsonschema
 import yaml
 
-from optiprofiler_evolve.config import EvolveConfig, load_config
-from optiprofiler_evolve.solver import InterfaceSpec, validate_interface
+from optiprofiler_evolve.shared.config import EvolveConfig, load_config
+from optiprofiler_evolve.shared.solver import InterfaceSpec, validate_interface
 
 
 ROOT = Path(__file__).resolve().parents[1]

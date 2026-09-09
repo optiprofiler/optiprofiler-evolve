@@ -24,6 +24,10 @@ changed deliberately with matching tests.
 
 - The engine is the sole writer of populations, accepted candidate records,
   checkpoints, and authoritative event ordering.
+- Controller-owned commit and variant helpers operate on the engine's state;
+  this is one authority, not a separate database per stage. Core stages return
+  typed results or call named controller commit operations. They never receive
+  the engine or an arbitrary state mutation interface.
 - Steps produce `StepResult`; policies produce `PopulationEdit`; neither may
   mutate controller state directly.
 - A failed component cannot leave a partially accepted candidate.
@@ -41,6 +45,10 @@ The supported extension slots are `Phase`, `AttemptStep`,
   files.
 - A package built-in needs its implementation, one explicit registry entry, and
   tests. It must not require an `engine.py` branch.
+- Each core and optional phase has a concrete class in its own directory.
+  The fixed five core contexts are bound by the controller; optional extensions
+  use `PhaseContext` and the existing five capabilities. There is no string
+  action dispatcher or engine mixin hierarchy behind the phase classes.
 - Registries are plain dictionaries. No auto-discovery or package entry-point
   framework is introduced before an external plugin actually requires it.
 - Process executors and Docker mechanics remain internal in v1. Harbor may be a
@@ -49,6 +57,11 @@ The supported extension slots are `Phase`, `AttemptStep`,
   cooperative cancellation event. It may add native evidence there, but it
   cannot replace controller-owned input/outcome manifests. A transcript-only
   adapter is supported with an explicitly degraded fallback trace.
+- `LLMClient.run(AgentJob)` is the sole backend invocation entrypoint for
+  mutation, research and review. Its controller-bound request fixes workspace,
+  provider, tool and broker authority. The client owns trace lifecycle and
+  declared output collection, but never candidate admission or phase scheduling.
+  Pure evaluation phases do not invoke a model.
 - Trusted phases receive one frozen `ControllerServices` value capped at five
   operations: run a sanitized role agent, materialize a gated variant, evaluate
   a public variant, select IDs by controller validation, and register a finalist.

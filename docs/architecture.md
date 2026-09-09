@@ -66,14 +66,23 @@ plugin discovery, DAG compiler, or arbitrary configuration language. A trusted
 owner extension may be supplied directly in Python. Package entry points should
 be added only after a real external plugin package needs them.
 
-Before a `WorkerAdapter` runs, the engine creates its private trace inputs and
-passes both `trace_dir` and `cancellation_event` in `WorkerRequest`. Built-in CLI
-workers add exact native stream evidence. A custom adapter should do the same;
-when it returns only a transcript, the engine imports that file and marks the
-missing native timing in the terminal trace manifest. Both explorer attempts
-and trusted role jobs pass through the same private engine call site. Workflow
-modules can invoke agents only through `ControllerServices.run_trusted_agent`;
-they do not receive the adapter or a subprocess capability.
+Every model invocation enters `agents/llm.py` through
+`LLMClient.run(AgentJob) -> AgentJobResult`. The controller first binds a
+`WorkerRequest` containing the selected provider, private workspace, tools,
+broker, resource limits and cancellation event. The client supplies the job
+prompt, creates trace inputs, invokes the injected `WorkerAdapter` once,
+finalizes evidence, and collects declared outputs. Job text cannot select a
+different host workspace or grant additional capabilities.
+
+Built-in CLI workers retain the real Codex/Claude tool loop and exact native
+streams. A transcript-only custom adapter remains supported with explicitly
+degraded trace timing. Explorer attempts, research roles and integrity reviewers
+use the same client; pure preparation, selection, holdout and reporting do not
+acquire model calls. Research modules retain the bounded
+`ControllerServices.run_trusted_agent` capability, whose implementation prepares
+the isolated job and calls the client. They never receive a backend or raw
+subprocess launcher. Stage prompts and interpretation remain with their stages;
+the client owns invocation mechanics, not scientific decisions.
 
 Each terminal invocation is joined to run/config/component provenance in
 `controller/trace_index.jsonl`. The separate
@@ -109,9 +118,20 @@ final selection; an optional attempt step cannot disable it. Worker tool calls
 use one private snapshot for both complexity and performance analysis and expose
 only the sanitized complexity report. Complexity never modifies benchmark fitness.
 
-`engine.py` is the only authoritative writer for population state, candidate
-acceptance, checkpoints, and the event ledger. Attempt steps return immutable
-`StepResult` values. Policies return immutable `PopulationEdit` proposals.
+The engine owns population state, candidate acceptance, checkpoints, and the
+event ledger. Its helpers under `controller/` commit phase results and research
+variants on its behalf; no phase owns a second population store. Attempt steps
+return immutable `StepResult` values. Policies return immutable `PopulationEdit`
+proposals.
+
+Every core and optional stage has its own class under `phases/<name>/phase.py`.
+The core classes contain the actual stage algorithms rather than dispatching
+back to an engine method. Prepare, Validate, Hidden and Report return typed
+staged results; the controller commits them after checking the declared
+artifacts. Explore owns the iteration barrier and receives immutable population
+snapshots plus named admission, policy and checkpoint callbacks. Core inputs
+are frozen stage-specific contexts; optional phases retain the smaller shared
+`PhaseContext`. Neither receives the engine itself or a generic state setter.
 
 The attempt context contains only its coordinate, private workspace, parent
 summary, prior step results, public capabilities, and event emitter. It does not
@@ -135,22 +155,28 @@ the optional `static_audit` evidence step is removed for an ablation.
 | Module | Responsibility |
 |---|---|
 | `api.py` | The single public `evolve(...)` function |
-| `config.py`, `presets.py` | Frozen config tree and explicit immutable variants |
-| `protocols.py`, `registry.py`, `builtins.py` | Narrow contracts and explicit component lookup |
-| `phases/`, `steps/`, `policies/` | Built-in orchestration components |
-| `engine.py` | Ordered execution, population ownership, selection, checkpoints, holdout |
-| `workers.py`, `harness.py`, `sandbox.py`, `traces.py` | Worker lifecycle, CLI commands, isolation, and per-invocation raw trace capture |
-| `provider_transport.py`, `provider_gateway.py`, `docker_runtime.py` | Provider route separation, pinned sidecar proxying, and internal Docker lifecycle/GC |
-| `trace_ledger.py` | Run-level trace indexing, crash reconciliation, and coverage summaries |
-| `evaluation.py`, `broker.py` | Evaluator adapter and bounded public worker tools |
-| `solver.py`, `data.py` | Solver tree checks and immutable problem splits |
-| `events.py`, `provenance.py`, `viewers.py` | Append-only events, reproducibility evidence, derived local views |
-| `selection.py` | Bounded island-archive retention, parent sampling, and Pareto variants |
-| `experiments.py` | Repeated seeded ablation matrices over frozen configs |
-| `research.py`, `phases/research.py` | Versioned scout/strategy evidence and optional research phases |
+| `shared/` | Frozen config, models, protocols, solver/data boundaries and shared evidence contracts |
+| `controller/engine.py`, `phase_contexts.py` | Workflow lifecycle, authoritative state and bounded phase bindings/commits |
+| `controller/attempts.py`, `attempt_capabilities.py` | Private attempt execution and public-only worker capabilities |
+| `controller/services.py`, `role_jobs.py` | Research variant gates and sanitized role preparation |
+| `controller/registry.py`, `builtins.py`, `selection.py`, `experiments.py` | Explicit registration, archive selection and experiment matrices |
+| `phases/prepare/`, `explore/`, `validate/`, `hidden/`, `report/` | Five core stage classes and their specific inputs/results |
+| `phases/direction_scout/`, `strategy_analysis/`, `strategy_transfer/`, `recombine/`, `challenger/` | Optional stage classes and their task prompts/helpers |
+| `phases/explore/steps/`, `policies/` | Attempt operations and iteration policy proposals |
+| `agents/` | Unified LLM invocation, injected CLI backend, isolation and provider/Docker transport |
+| `evaluation/` | Canonical evaluator, evaluator subprocess, references, broker and worker feedback |
+| `quality/` | Static complexity analysis and semantic integrity review |
+| `observability/` | Events, fingerprints, provenance, private traces and usage |
+| `phases/report/reports.py`, `viewers.py`, `owner_views.py` | Final scientific reports and public/private derived views, also refreshed during a run |
 
 No module copies or modifies OptiProfiler source. `optiprofiler` is a normal
 runtime dependency and remains a separate package.
+
+Package initializers do not register components or launch work. Internal import
+paths changed with this layout and have no compatibility forwarding modules.
+The public `evolve` API and documented `serve`/`docker_gc` command entrypoints
+remain unchanged. Provenance records the new component module names and source
+hashes honestly; artifact schemas and experiment configuration are unchanged.
 
 ## Isolation
 

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.explanations import (
+from optiprofiler_evolve.shared.explanations import (
     capture_solver_explanation,
     explanation_memory,
 )

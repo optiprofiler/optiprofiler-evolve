@@ -14,11 +14,11 @@ import sys
 import time
 from pathlib import Path
 
-from optiprofiler_evolve.broker import BrokerConnection
-from optiprofiler_evolve.config import EvolveConfig, WorkerConfig, load_config
-from optiprofiler_evolve.harness import build_harness_command
-from optiprofiler_evolve.provider_transport import prepare_provider_transport
-from optiprofiler_evolve.sandbox import run_agent
+from optiprofiler_evolve.evaluation.broker import BrokerConnection
+from optiprofiler_evolve.shared.config import EvolveConfig, WorkerConfig, load_config
+from optiprofiler_evolve.agents.harness import build_harness_command
+from optiprofiler_evolve.agents.provider_transport import prepare_provider_transport
+from optiprofiler_evolve.agents.sandbox import run_agent
 
 
 ROOT = Path(__file__).resolve().parents[1]
