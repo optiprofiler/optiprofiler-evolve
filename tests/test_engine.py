@@ -705,27 +705,41 @@ class EngineTests(unittest.TestCase):
                 worker_adapter=RunnerAdapter(runner),
                 evaluator_factory=fake_evaluator_factory,
             ).run()
-            self.assertEqual(runner.review_calls, 3)
+            # Only the attempt consumes reviewer attempts: seed review is a
+            # controller-local baseline approval (seed == parent, no transcript).
+            self.assertEqual(runner.review_calls, 2)
             self.assertEqual(FakeEvaluator.calls.count("validation"), 2)
 
-    def test_unavailable_initial_assessment_aborts_run(self) -> None:
+    def test_seed_integrity_review_is_a_baseline_approval_without_an_agent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "source"
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
-            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n# improved\n")
-            with self.assertRaisesRegex(RuntimeError, "Initial solver validation failed"):
-                EvolutionRun(
-                    initial=source,
-                    interface=InterfaceSpec.parse("solver.py:solver"),
-                    runtime="python",
-                    editable=(".",),
-                    config=load_config(reviewer_config()),
-                    run_dir=root / "run",
-                    worker_adapter=RunnerAdapter(ReviewingRunner("unavailable")),
-                    evaluator_factory=fake_evaluator_factory,
-                ).run()
+            runner = ReviewingRunner("approve")
+            result = EvolutionRun(
+                initial=source,
+                interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python",
+                editable=(".",),
+                config=load_config(reviewer_config()),
+                run_dir=root / "run",
+                worker_adapter=RunnerAdapter(runner),
+                evaluator_factory=fake_evaluator_factory,
+            ).run()
+            # The seed equals its parent and has no mutation transcript, so its
+            # integrity gate is a controller-local baseline approval: only the
+            # evolved attempt is reviewed by the agent.
+            self.assertEqual(runner.review_calls, 1)
+            seed_decision = json.loads(
+                next(
+                    (result.run_dir / "controller" / "integrity_reviews").glob(
+                        "seed-*/decision.json"
+                    )
+                ).read_text()
+            )
+            self.assertEqual(seed_decision["verdict"], "approve")
+            self.assertEqual(seed_decision["reason"], "baseline")
 
     def test_reviewer_outage_rejects_candidate_and_run_continues(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -745,7 +759,9 @@ class EngineTests(unittest.TestCase):
                 worker_adapter=RunnerAdapter(runner),
                 evaluator_factory=fake_evaluator_factory,
             ).run()
-            self.assertEqual(runner.review_calls, 3)
+            # The seed short-circuits to a baseline approval; the two reviewer
+            # calls are the attempt's initial try and its configured retry.
+            self.assertEqual(runner.review_calls, 2)
             self.assertEqual(FakeEvaluator.calls.count("validation"), 1)
             decision = json.loads(next((result.run_dir / "controller" / "integrity_reviews").glob("it001-i00-a00-*/decision.json")).read_text())
             self.assertEqual(decision["status"], "failed")

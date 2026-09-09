@@ -54,8 +54,10 @@ class IntegrityReviewExecutor:
         """Obtain a review for exactly these source, transcript, and option inputs."""
 
         config = self.reviewer_config(profile)
+        candidate_hash = tree_hash(candidate)
+        parent_hash = tree_hash(parent)
         fingerprint = hashlib.sha256(json.dumps({
-            "candidate": tree_hash(candidate), "parent": tree_hash(parent),
+            "candidate": candidate_hash, "parent": parent_hash,
             "transcript": mutation_transcript.read_text() if mutation_transcript else None,
             "config": plain_data(config),
             "profile": profile,
@@ -67,6 +69,37 @@ class IntegrityReviewExecutor:
             return cached, normalized_root / "decision.json"
         if cache_key in self.failures:
             raise RuntimeError(self.failures[cache_key])
+
+        review_scope = {
+            "phase": "prepare" if candidate_id == "seed" else "explore",
+            **({"candidate_id": candidate_id} if candidate_id == "seed" else {"attempt_id": candidate_id}),
+            "role": "integrity-reviewer",
+        }
+        # A candidate identical to its parent with no mutation transcript is the
+        # fixed initial baseline (the seed), not a worker proposal: there is no
+        # diff or transcript for a reviewer to audit, so approval is
+        # definitional. Record the same private decision without spending
+        # reviewer budget or letting a reviewer outage abort prepare.
+        if candidate_hash == parent_hash and mutation_transcript is None:
+            self.emit("integrity_review_started", "running", scope=review_scope)
+            decision = IntegrityReviewDecision(
+                verdict="approve",
+                checked=(),
+                summary=(
+                    "Initial baseline: the candidate equals its parent and no "
+                    "mutation transcript exists, so there is nothing to review."
+                ),
+                reason="baseline",
+            )
+            write_private_review(normalized_root / "decision.json", decision)
+            self.cache[cache_key] = decision
+            self.emit(
+                "integrity_review_finished",
+                "succeeded",
+                scope=review_scope,
+                data={"gate": "approved", "reason": "baseline"},
+            )
+            return decision, normalized_root / "decision.json"
 
         transcript = normalized_root / "inputs" / "mutation_transcript.txt"
         secret_values: dict[str, str] = {}
@@ -91,11 +124,6 @@ class IntegrityReviewExecutor:
         reviewer = build("reviewer", config.component)
         reviewer_worker = config.resolved_worker(self.workers)
         failures: list[str] = []
-        review_scope = {
-            "phase": "prepare" if candidate_id == "seed" else "explore",
-            **({"candidate_id": candidate_id} if candidate_id == "seed" else {"attempt_id": candidate_id}),
-            "role": "integrity-reviewer",
-        }
         self.emit("integrity_review_started", "running", scope=review_scope)
         for review_attempt in range(1, config.retries + 2):
             scope = {

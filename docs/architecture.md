@@ -113,8 +113,11 @@ silently ignore a budget policy.
 Quality checks share `AssessmentRunner`, which applies configured weights and
 warn/enforce constraints without admitting candidates itself. Public tools,
 seed preparation, ordinary submissions and research variants use the same
-criteria. Integrity review can be disabled like any other criterion; an outage
-is failed evidence, never a fabricated quarantine. Review retries and private
+criteria. The fixed seed equals its parent and has no mutation transcript, so
+its integrity review is a controller-local baseline approval that never invokes
+the reviewer agent; only actual submissions spend reviewer budget. Integrity
+review can be disabled like any other criterion; an outage is failed evidence,
+never a fabricated quarantine. Review retries and private
 evidence are owned by the integrity implementation rather than the engine.
 
 ## State ownership

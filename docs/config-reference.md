@@ -217,7 +217,11 @@ configured as a warning like any other criterion. The default implementation use
 separate coding-agent invocation with no evaluation broker, network, problem
 manifest, population, validation data, or hidden data. It sees sanitized copies
 of the parent, candidate, changed-file list, solver contract, and mutation
-transcript.
+transcript. The fixed seed equals its parent and has no mutation transcript, so
+its integrity check is a controller-local baseline approval that never invokes
+the reviewer; only actual submissions consume reviewer budget. After configured
+retries, reviewer unavailability is failed evidence for that submission, never
+a fabricated approve or quarantine verdict.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|

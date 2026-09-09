@@ -56,9 +56,14 @@ class AssessmentTests(unittest.TestCase):
         reviewer.review.side_effect = RuntimeError("offline")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            # Parent and candidate must differ: an identical pair with no
+            # transcript is a baseline approval that never reaches the agent.
+            parent = root / "parent"
+            parent.mkdir()
+            (parent / "solver.py").write_text("base = True\n")
             candidate = root / "candidate"
             candidate.mkdir()
-            (candidate / "solver.py").write_text("original = True\n")
+            (candidate / "solver.py").write_text("candidate = True\n")
             executor = IntegrityReviewExecutor(
                 run_dir=root, interface=InterfaceSpec.parse("solver.py:solver"), editable=(".",),
                 workers=config.workers, reviewer_config=config.reviewer_config,
@@ -66,17 +71,50 @@ class AssessmentTests(unittest.TestCase):
             )
             def review():
                 with self.assertRaisesRegex(RuntimeError, "offline"):
-                    executor.review(candidate_id="test", candidate=candidate, parent=candidate,
-                                    changed=(), mutation_transcript=None, mutation_worker=None)
+                    executor.review(candidate_id="test", candidate=candidate, parent=parent,
+                                    changed=("solver.py",), mutation_transcript=None,
+                                    mutation_worker=None)
 
             with patch("optiprofiler_evolve.criteria.integrity.execution.build", return_value=reviewer):
                 review()
                 calls = reviewer.review.call_count
                 review()
                 self.assertEqual(reviewer.review.call_count, calls)
-                (candidate / "solver.py").write_text("changed = True\n")
+                (candidate / "solver.py").write_text("candidate = False\n")
                 review()
                 self.assertEqual(reviewer.review.call_count, 2 * calls)
+
+    def test_baseline_review_is_a_local_approval_without_an_agent(self):
+        config = load_config(minimal_config())
+        reviewer = Mock()
+        reviewer.review.side_effect = AssertionError("baseline review must not call the agent")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = root / "baseline"
+            baseline.mkdir()
+            (baseline / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            executor = IntegrityReviewExecutor(
+                run_dir=root, interface=InterfaceSpec.parse("solver.py:solver"), editable=(".",),
+                workers=config.workers, reviewer_config=config.reviewer_config,
+                run_agent=Mock(), emit=Mock(),
+            )
+            with patch("optiprofiler_evolve.criteria.integrity.execution.build", return_value=reviewer):
+                decision, report = executor.review(
+                    candidate_id="seed", candidate=baseline, parent=baseline,
+                    changed=(), mutation_transcript=None, mutation_worker=None,
+                )
+                self.assertEqual(decision.verdict, "approve")
+                self.assertEqual(decision.reason, "baseline")
+                self.assertTrue(report.is_file())
+                self.assertEqual(
+                    json.loads(report.read_text())["reason"], "baseline",
+                )
+                # Repeat requests reuse the cached local decision, never the agent.
+                executor.review(
+                    candidate_id="seed", candidate=baseline, parent=baseline,
+                    changed=(), mutation_transcript=None, mutation_worker=None,
+                )
+                reviewer.review.assert_not_called()
 
     def test_disabled_reviewer_does_not_require_unused_environment_variables(self):
         raw = minimal_config()

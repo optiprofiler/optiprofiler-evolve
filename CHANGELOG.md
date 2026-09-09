@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The fixed seed now receives a controller-local baseline integrity approval
+  (the seed equals its parent and has no mutation transcript), so prepare no
+  longer invokes the reviewer agent and a reviewer outage cannot abort a run
+  before exploration; reviewer budget is spent only on actual submissions.
+
 - Owner console workflow is now a continuous pan/zoom canvas (Fit, zoom in,
   zoom out; drag or scroll to pan) so long research pipelines keep unbroken
   connectors at every width; the sanitized public page stays a script-free

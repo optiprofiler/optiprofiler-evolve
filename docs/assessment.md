@@ -97,6 +97,9 @@ Performance preserves the existing OptiProfiler fitness reduction. Complexity
 uses `1 / (1 + r)`, where `r` is the larger initial-relative branch/line ratio;
 the threshold `max_ratio` is independent of this score. Integrity maps approve
 to 1 and quarantine to 0. These are built-in formulas, not framework limits.
+The seed equals its parent and has no mutation transcript, so its integrity
+check is a controller-local baseline approval and never invokes the reviewer
+model; only actual submissions consume reviewer budget.
 
 `enforce` rejects unmet constraints. `warn` permits the candidate to continue,
 but the score still contributes with its configured weight. A failed
