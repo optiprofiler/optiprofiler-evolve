@@ -40,7 +40,8 @@ example invokes a model provider and OptiProfiler and should be run separately.
 | Worker mounts/resources | `src/optiprofiler_evolve/agents/sandbox.py` | isolation tests and security notes |
 | Worker evaluation tools | `src/optiprofiler_evolve/agents/broker.py` | quota and hidden-access tests |
 | Worker task/context | `src/optiprofiler_evolve/phases/attempts/prompt.py` | prompt tests and experiment note |
-| Population scheduling | `src/optiprofiler_evolve/controller/engine.py` | deterministic lineage/checkpoint tests |
+| Run composition/lifecycle | `src/optiprofiler_evolve/application/run.py` | startup, cancellation, cleanup tests |
+| Population scheduling/state | `src/optiprofiler_evolve/controller/coordinator.py`, `commits.py`, `state.py` | deterministic lineage/checkpoint and dependency-boundary tests |
 | Solver copying/interface rules | `src/optiprofiler_evolve/solver.py` | single-file and repository tests |
 | Phase implementation/context | `src/optiprofiler_evolve/phases/`, `controller/phase_contexts.py` | stage contracts, staged-state and deterministic workflow tests |
 | Unified model invocation | `src/optiprofiler_evolve/agents/llm.py` | backend lifecycle, authority, output and trace tests |

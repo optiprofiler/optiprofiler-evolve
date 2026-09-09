@@ -29,6 +29,7 @@ class StrategyAnalysisPhase:
 
     name = "strategy_analysis"
     requires = frozenset({"prepared", "populations"})
+    optional_requires = frozenset({"directions"})
     provides = frozenset({"strategy_cards", "island_bundles"})
 
     def __init__(

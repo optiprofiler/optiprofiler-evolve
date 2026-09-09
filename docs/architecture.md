@@ -125,7 +125,7 @@ its own independently weighted score. Worker tools assess one private snapshot
 and expose only public-profile feedback. Profile overrides may change budget,
 weights and constraints; formal candidate scores always share one configuration.
 
-The engine owns population state, candidate acceptance, checkpoints, and the
+The controller owns population state, candidate acceptance, checkpoints, and the
 event ledger. Its helpers under `controller/` commit phase results and research
 variants on its behalf; no phase owns a second population store. Attempt steps
 return immutable `StepResult` values. Policies return immutable `PopulationEdit`
@@ -164,7 +164,10 @@ the optional `static_audit` evidence step is removed for an ablation.
 |---|---|
 | `api.py` | The single public `evolve(...)` function |
 | `config.py`, `models.py`, `solver.py`, `data.py`, `files.py`, `errors.py` | Cross-subsystem configuration, domain values, solver/data boundaries and filesystem primitives |
-| `controller/engine.py`, `phase_contexts.py` | Workflow lifecycle, authoritative state and bounded phase bindings/commits |
+| `application/run.py` | Compose adapters and controller services; own run startup, traces and infrastructure cleanup |
+| `controller/coordinator.py`, `phase_contexts.py` | Ordered phase execution and registered, bounded context factories |
+| `controller/state.py`, `commits.py` | Explicit run state and the sole candidate/population/artifact commit operations |
+| `controller/runtime.py` | Frozen controller inputs and execution ports; no application dependency |
 | `phases/attempts/` | Private attempt execution, public-only capabilities, prompts, steps and iteration policy proposals |
 | `controller/variants.py`, `research_evaluation.py`, `validation.py`, `finalists.py`, `role_jobs.py` | Separate variant, evaluation, selection, registration and role capabilities |
 | `observability/live_views.py` | Live projection scheduling and rendering; no population authority |
@@ -195,6 +198,30 @@ remain unchanged. Provenance records the new component module names and source
 hashes honestly; experiment configuration is unchanged. Complexity reports use
 `source_complexity/2`: `score` is the criterion score and `complexity_percent`
 is the baseline-relative percentage.
+
+### Dependency and state rules
+
+`api -> application -> controller coordinator -> phases -> bounded services` is
+the execution path. Agents, criteria and observability implement the execution
+ports. Lower layers never import application; the coordinator does not import
+Docker, LLM clients, brokers, analyzers, reviewers or HTML implementations.
+
+`RunState` owns the run's registries, staged artifacts and selected results.
+`RunCommits` is the only production writer. Ordinary attempts and research
+finalists retain immutable candidate records and submit them through this same
+authority. Admission and research qualification remain distinct operations:
+their gates differ, so neither is forced through a fictitious linear status chain.
+
+Each phase sees only its `requires` artifacts and available `optional_requires`
+artifacts. Optional inputs do not impose ordering or require their producer to
+run; scout directions are an example. Context factories are registered mappings,
+not action dispatchers. Failed/cancelled phase results are never committed;
+skipped phases may publish typed results and declared skip evidence, including
+the final result when a holdout is disabled.
+
+File formats and paths remain owned by their subsystems. This refactor does not
+add generic path dispatch, wrapper registries around dictionaries, another
+research directory, or a second event schema beside the existing ledger.
 
 ## Isolation
 

@@ -48,6 +48,7 @@ class ExplorePhase:
 
     name = "explore"
     requires = frozenset(["prepared"])
+    optional_requires = frozenset({"directions"})
     provides = frozenset(["populations"])
 
     def run(self, context: ExploreContext) -> PhaseResult:

@@ -13,8 +13,8 @@ from test_owner_views import ATTEMPT, _attempt_rows, _write_events
 from test_selection import candidate
 from worker_helpers import RunnerAdapter
 
+from optiprofiler_evolve.application.run import EvolutionRun
 from optiprofiler_evolve.config import ComponentConfig, WorkerConfig, load_config
-from optiprofiler_evolve.controller.engine import EvolutionEngine
 from optiprofiler_evolve.controller.registry import build
 from optiprofiler_evolve.controller.selection import (
     MetricParetoRetention,
@@ -52,7 +52,7 @@ class ControllerBoundaryTests(unittest.TestCase):
                 config.evolution, islands=1, iterations=1, attempts_per_island=1
             ),
         )
-        self.engine = EvolutionEngine(
+        self.engine = EvolutionRun(
             initial=source,
             interface=InterfaceSpec.parse("solver.py:solver"),
             runtime="python",
@@ -80,9 +80,12 @@ class ControllerBoundaryTests(unittest.TestCase):
     def test_repair_invalidates_public_score_and_preserves_both_evaluations(
         self,
     ) -> None:
-        self.engine.attempt_steps += (RepairAfterEvaluation(),)
+        self.engine.attempt_runner.environment = dataclasses.replace(
+            self.engine.environment,
+            attempt_steps=(*self.engine.environment.attempt_steps, RepairAfterEvaluation()),
+        )
         self.engine.run()
-        record = self.engine.candidates[ATTEMPT]
+        record = self.engine.state.candidates[ATTEMPT]
         self.assertTrue(record.valid)
         self.assertEqual(record.public_score, 0.5)
         self.assertEqual(record.validation_score, 0.5)
@@ -95,7 +98,7 @@ class ControllerBoundaryTests(unittest.TestCase):
         b = dataclasses.replace(candidate("b", 0.8, 0.8), review_verdict="approve")
         bad = dataclasses.replace(candidate("bad", 0.9, 0.9), valid=False)
         unreviewed = dataclasses.replace(candidate("unreviewed", 0.9, 0.9), assessment_score=None)
-        self.engine.candidates = {r.candidate_id: r for r in (a, b, bad, unreviewed)}
+        self.engine.state.candidates = {r.candidate_id: r for r in (a, b, bad, unreviewed)}
         edits = (
             PopulationEdit(kill=("a",), migrate=(("unknown", 0),)),
             PopulationEdit(migrate=(("b", 0), ("unknown", 0))),
@@ -105,12 +108,12 @@ class ControllerBoundaryTests(unittest.TestCase):
         )
         for edit in edits:
             with self.subTest(edit=edit):
-                self.engine.populations = [[a]]
+                self.engine.state.populations = [[a]]
                 with self.assertRaises(ValueError):
-                    self.engine._apply_population_edit(edit)
-                self.assertEqual(self.engine.populations, [[a]])
-        self.engine._apply_population_edit(PopulationEdit(migrate=(("b", 0),)))
-        self.assertEqual(self.engine.populations, [[b, a]])
+                    self.engine.commits.apply_population_edit(edit)
+                self.assertEqual(self.engine.state.populations, [[a]])
+        self.engine.commits.apply_population_edit(PopulationEdit(migrate=(("b", 0),)))
+        self.assertEqual(self.engine.state.populations, [[b, a]])
 
     def test_core_phase_preserves_internal_key_error(self) -> None:
         from optiprofiler_evolve.phases.prepare import PreparePhase
@@ -118,7 +121,7 @@ class ControllerBoundaryTests(unittest.TestCase):
         with patch.object(
             PreparePhase, "run", side_effect=KeyError("missing_field")
         ), self.assertRaisesRegex(KeyError, "missing_field"):
-            self.engine._run_phase(PreparePhase(), {})
+            self.engine.coordinator.run_phase(PreparePhase(), {})
 
     def test_weighted_worker_selection_preserves_seeded_choices(self) -> None:
         pool = tuple(

@@ -11,9 +11,9 @@ from test_config import minimal_config
 from test_engine import fake_agent_runner, fake_evaluator_factory
 from worker_helpers import RunnerAdapter
 
+from optiprofiler_evolve.application.run import EvolutionRun
 from optiprofiler_evolve.config import AssessmentConfig, CriterionConfig, load_config
 from optiprofiler_evolve.controller.assessment import PublicAssessment
-from optiprofiler_evolve.controller.engine import EvolutionEngine
 from optiprofiler_evolve.controller.registry import register
 from optiprofiler_evolve.criteria.contracts import AssessmentRequest, Criterion, CriterionResult
 from optiprofiler_evolve.criteria.integrity.execution import IntegrityReviewExecutor
@@ -106,7 +106,7 @@ class AssessmentTests(unittest.TestCase):
             root = Path(directory)
             source = root / "solver.py"
             source.write_text("def solver(fun, x0):\n    return x0\n")
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source, interface=InterfaceSpec.parse("solver.py:solver"), runtime="python",
                 editable=(".",), config=load_config(raw), run_dir=root / "run",
                 worker_adapter=RunnerAdapter(fake_agent_runner),
@@ -121,7 +121,7 @@ class AssessmentTests(unittest.TestCase):
             public_events = (root / "run/public_events.jsonl").read_text()
             self.assertNotIn("-72.5", public_events)
             self.assertNotIn('"assessment_score"', public_events)
-            self.assertEqual(engine.champion[1].candidate_id, result.best_candidate_id)
+            self.assertEqual(engine.state.champion[1].candidate_id, result.best_candidate_id)
 
     def test_unbounded_performance_scores_survive_the_complete_pipeline(self):
         class LargeScoreEvaluator:
@@ -136,7 +136,7 @@ class AssessmentTests(unittest.TestCase):
             root = Path(directory)
             source = root / "solver.py"
             source.write_text("def solver(fun, x0):\n    return x0\n")
-            result = EvolutionEngine(
+            result = EvolutionRun(
                 initial=source, interface=InterfaceSpec.parse("solver.py:solver"), runtime="python",
                 editable=(".",), config=load_config(raw), run_dir=root / "run",
                 worker_adapter=RunnerAdapter(fake_agent_runner),
@@ -247,7 +247,7 @@ class AssessmentTests(unittest.TestCase):
                 backend = fake_evaluator_factory if name == "performance" else Mock(
                     side_effect=AssertionError("disabled evaluator was initialized")
                 )
-                engine = EvolutionEngine(
+                engine = EvolutionRun(
                     initial=source, interface=InterfaceSpec.parse("solver.py:solver"),
                     runtime="python", editable=(".",), config=load_config(raw),
                     run_dir=root / "run", worker_adapter=RunnerAdapter(fake_agent_runner),

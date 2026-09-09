@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from optiprofiler_evolve.controller.engine import EvolutionEngine
+    from optiprofiler_evolve.controller.runtime import RunEnvironment
 
 from optiprofiler_evolve.agents.contracts import WorkerOutcome
 from optiprofiler_evolve.agents.jobs import guidance_id as _guidance_id
@@ -13,17 +13,17 @@ from optiprofiler_evolve.config import WorkerConfig
 from optiprofiler_evolve.models import Attempt, CandidateRecord, EvaluationResult
 from optiprofiler_evolve.observability.provenance import coordinate_seed
 from optiprofiler_evolve.phases.attempts.capabilities import (
-    EngineAttemptCapabilities as _EngineAttemptCapabilities,
+    ControllerAttemptCapabilities as _ControllerAttemptCapabilities,
 )
 from optiprofiler_evolve.phases.attempts.contracts import AttemptContext, StepResult
 from optiprofiler_evolve.solver import copy_solver_tree, tree_hash
 
 
 class AttemptRunner:
-    """Execute private attempts; only the engine admits returned records."""
+    """Execute private attempts; only the environment admits returned records."""
 
-    def __init__(self, engine: EvolutionEngine) -> None:
-        self.engine = engine
+    def __init__(self, environment: RunEnvironment) -> None:
+        self.environment = environment
 
     def run(
         self,
@@ -41,20 +41,20 @@ class AttemptRunner:
             "island": island,
             "attempt_id": attempt_id,
         }
-        self.engine._emit(
+        self.environment.emit(
             "attempt_started",
             "running",
             scope=scope,
             data={
                 "parent_id": parent.candidate_id,
                 "worker": f"{worker.harness}:{worker.model}",
-                "guidance": _guidance_id(self.engine.direction_assignments.get(island)),
+                "guidance": _guidance_id(self.environment.state.direction_assignments.get(island)),
             },
         )
-        workspace = self.engine.run_dir / "workspaces" / attempt_id
+        workspace = self.environment.run_dir / "workspaces" / attempt_id
         copy_solver_tree(parent.path, workspace)
-        capabilities = _EngineAttemptCapabilities(
-            engine=self.engine,
+        capabilities = _ControllerAttemptCapabilities(
+            environment=self.environment,
             attempt_id=attempt_id,
             iteration=iteration,
             island=island,
@@ -65,9 +65,9 @@ class AttemptRunner:
         )
         results: list[StepResult] = []
         rejected = False
-        for step_index, step in enumerate(self.engine.attempt_steps):
+        for step_index, step in enumerate(self.environment.attempt_steps):
             step_scope = {**scope, "step": step.name, "step_idx": step_index}
-            self.engine._emit("step_started", "running", scope=step_scope)
+            self.environment.emit("step_started", "running", scope=step_scope)
             context = AttemptContext(
                 attempt_id=attempt_id,
                 iteration=iteration,
@@ -78,7 +78,7 @@ class AttemptRunner:
                 workspace=workspace,
                 worker_name=f"{worker.harness}:{worker.model}",
                 rng_seed=coordinate_seed(
-                    self.engine.config.evolution.random_seed,
+                    self.environment.config.evolution.random_seed,
                     "explore",
                     iteration,
                     island,
@@ -87,7 +87,7 @@ class AttemptRunner:
                 ),
                 prior_results=tuple(results),
                 capabilities=capabilities,
-                emit=self.engine._scoped_emitter(step_scope),
+                emit=self.environment.scoped_emitter(step_scope),
             )
             try:
                 result = step.run(context)
@@ -103,7 +103,7 @@ class AttemptRunner:
             # is safe and complete enough to admit.
             results.append(result)
             status = "failed" if result.verdict == "reject" else "succeeded"
-            self.engine._emit(
+            self.environment.emit(
                 "step_finished",
                 status,
                 scope=step_scope,
@@ -121,7 +121,7 @@ class AttemptRunner:
         changed = capabilities.changed
         outcome = capabilities.worker_outcome or WorkerOutcome(
             1,
-            self.engine.run_dir / "transcripts" / f"{attempt_id}.jsonl",
+            self.environment.run_dir / "transcripts" / f"{attempt_id}.jsonl",
         )
         metrics = {key: value for result in results for key, value in result.metrics.items()}
         validation: EvaluationResult | None = None
@@ -140,18 +140,18 @@ class AttemptRunner:
                 raise RuntimeError(public_result.error or "public evaluation failed")
             public_score = public_result.score
             metrics["public_score"] = public_score
-            if self.engine.evaluator is None:
+            if self.environment.state.evaluator is None:
                 raise RuntimeError("Evaluator is unavailable.")
-            validation = self.engine.evaluator.evaluate(
+            validation = self.environment.state.evaluator.evaluate(
                 workspace,
                 "validation",
-                self.engine.run_dir / "controller" / "evaluations" / attempt_id / "validation",
+                self.environment.run_dir / "controller" / "evaluations" / attempt_id / "validation",
                 candidate_id=attempt_id, parent=parent.path,
                 mutation_transcript=outcome.transcript, mutation_worker=worker,
             )
             if not validation.success:
                 raise RuntimeError(validation.error or "controller validation evaluation failed")
-            snapshot = self.engine.run_dir / "candidates" / attempt_id
+            snapshot = self.environment.run_dir / "candidates" / attempt_id
             copy_solver_tree(workspace, snapshot)
             record = CandidateRecord(
                 candidate_id=attempt_id,
@@ -167,7 +167,7 @@ class AttemptRunner:
                 assessment_score=validation.assessment_score,
                 assessment=validation.assessment,
                 worker=f"{worker.harness}:{worker.model}",
-                guidance=_guidance_id(self.engine.direction_assignments.get(island)),
+                guidance=_guidance_id(self.environment.state.direction_assignments.get(island)),
             )
         except Exception as exc:
             record = CandidateRecord(
@@ -182,7 +182,7 @@ class AttemptRunner:
                 validation_score=validation.score if validation else None,
                 assessment=validation.assessment if validation else None,
                 worker=f"{worker.harness}:{worker.model}",
-                guidance=_guidance_id(self.engine.direction_assignments.get(island)),
+                guidance=_guidance_id(self.environment.state.direction_assignments.get(island)),
                 valid=False,
                 error=f"{type(exc).__name__}: {exc}",
             )
@@ -199,7 +199,7 @@ class AttemptRunner:
         exc: Exception,
     ) -> Attempt:
         attempt_id = f"it{iteration:03d}-i{island:02d}-a{attempt_index:02d}"
-        transcript = self.engine.run_dir / "transcripts" / f"{attempt_id}.jsonl"
+        transcript = self.environment.run_dir / "transcripts" / f"{attempt_id}.jsonl"
         transcript.parent.mkdir(parents=True, exist_ok=True)
         transcript.write_text(
             f"[controller] attempt setup failed: {type(exc).__name__}: {exc}\n",
@@ -211,12 +211,12 @@ class AttemptRunner:
             iteration=iteration,
             attempt_index=attempt_index,
             parent_id=parent.candidate_id,
-            path=self.engine.run_dir / "workspaces" / attempt_id,
+            path=self.environment.run_dir / "workspaces" / attempt_id,
             tree_hash="",
             public_score=None,
             validation_score=None,
             worker=f"{worker.harness}:{worker.model}",
-            guidance=_guidance_id(self.engine.direction_assignments.get(island)),
+            guidance=_guidance_id(self.environment.state.direction_assignments.get(island)),
             valid=False,
             error=f"{type(exc).__name__}: {exc}",
         )

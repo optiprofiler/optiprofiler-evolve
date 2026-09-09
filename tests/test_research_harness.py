@@ -11,9 +11,9 @@ from test_config import minimal_config
 from worker_helpers import RunnerAdapter
 
 from optiprofiler_evolve.agents.contracts import WorkerOutcome
+from optiprofiler_evolve.application.run import EvolutionRun
 from optiprofiler_evolve.config import load_config
 from optiprofiler_evolve.controller.contracts import VariantRequest
-from optiprofiler_evolve.controller.engine import EvolutionEngine
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.phases.contracts import PhaseContext
 from optiprofiler_evolve.phases.prepare import PreparePhase
@@ -363,7 +363,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 {"name": "strategy_transfer"} if item["name"] == "recombine" else item
                 for item in raw["workflow"]["phases"]
             ]
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -401,7 +401,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 {"name": "strategy_transfer"} if item["name"] == "recombine" else item
                 for item in raw["workflow"]["phases"]
             ]
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -470,7 +470,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 for item in raw["workflow"]["phases"]
             ]
 
-            EvolutionEngine(
+            EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -499,7 +499,7 @@ class ResearchHarnessTests(unittest.TestCase):
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             source_hash = tree_hash(source)
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -639,7 +639,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 "# inert-0-slot\n"
                 "# inert-1-slot\n"
             )
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -673,9 +673,9 @@ class ResearchHarnessTests(unittest.TestCase):
                 [item["status"] for item in recombination["combinations"]],
                 ["succeeded"],
             )
-            self.assertIn("combo-001", engine.research_finalists)
+            self.assertIn("combo-001", engine.state.research_finalists)
             self.assertTrue(
-                {"bundle-island-0", "bundle-island-1"}.issubset(engine.research_finalists)
+                {"bundle-island-0", "bundle-island-1"}.issubset(engine.state.research_finalists)
             )
             selection = json.loads((root / "run" / "validation_selection.json").read_text())
             self.assertIn("combo-001", selection["finalists"])
@@ -686,9 +686,9 @@ class ResearchHarnessTests(unittest.TestCase):
             self.assertGreaterEqual(usage["selection_calls"], 6)
             self.assertEqual(usage["new_evaluations"], 3)
             for candidate_id in ("bundle-island-0", "bundle-island-1", "combo-001"):
-                self.assertEqual(engine.candidates[candidate_id].assessment["results"]["integrity"]["metrics"]["verdict"], "approve")
+                self.assertEqual(engine.state.candidates[candidate_id].assessment["results"]["integrity"]["metrics"]["verdict"], "approve")
                 self.assertTrue(
-                    Path(engine.candidates[candidate_id].assessment["results"]["integrity"]["evidence"][0]).is_file()
+                    Path(engine.state.candidates[candidate_id].assessment["results"]["integrity"]["evidence"][0]).is_file()
                 )
 
     def test_variant_gate_rejects_out_of_scope_and_conflicting_patches(self) -> None:
@@ -698,7 +698,7 @@ class ResearchHarnessTests(unittest.TestCase):
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             (source / "locked.txt").write_text("original\n")
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -773,7 +773,7 @@ class ResearchHarnessTests(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
-            result = EvolutionEngine(
+            result = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -843,7 +843,7 @@ class ResearchHarnessTests(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
-            result = EvolutionEngine(
+            result = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -933,7 +933,7 @@ class ResearchHarnessTests(unittest.TestCase):
             for phase in raw["workflow"]["phases"]:
                 if phase["name"] == "strategy_analysis":
                     phase["options"].update({"max_strategies": 4, "max_ablations": 1})
-            EvolutionEngine(
+            EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -970,7 +970,7 @@ class ResearchHarnessTests(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -981,7 +981,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 evaluator_factory=research_evaluator_factory,
             )
             engine._initialize_run_directory()
-            prepared = engine._run_phase(PreparePhase(), {})["prepared"]
+            prepared = engine.coordinator.run_phase(PreparePhase(), {})["prepared"]
             seed = Path(str(prepared["seed"]))
             portable = root / "run" / "research" / "analysis" / "island-1" / "portable"
             portable.mkdir(parents=True)
@@ -1065,7 +1065,7 @@ class ResearchHarnessTests(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -1076,7 +1076,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 evaluator_factory=research_evaluator_factory,
             )
             engine._initialize_run_directory()
-            prepared = engine._run_phase(PreparePhase(), {})["prepared"]
+            prepared = engine.coordinator.run_phase(PreparePhase(), {})["prepared"]
             seed = Path(str(prepared["seed"]))
             bundles = root / "run" / "research" / "analysis" / "island_bundles.json"
             bundles.parent.mkdir(parents=True)

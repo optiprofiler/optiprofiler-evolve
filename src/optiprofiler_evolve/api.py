@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from optiprofiler_evolve._presets import dfo_default
+from optiprofiler_evolve.application.run import EvolutionRun
 from optiprofiler_evolve.config import EvolveConfig, load_config
-from optiprofiler_evolve.controller.engine import EvolutionEngine
 from optiprofiler_evolve.models import EvolveResult
 from optiprofiler_evolve.solver import InterfaceSpec
 
@@ -55,7 +55,7 @@ def evolve(
         resolved_run_dir = Path.cwd() / "runs" / f"evolve_{stamp}"
     else:
         resolved_run_dir = Path(run_dir)
-    engine = EvolutionEngine(
+    engine = EvolutionRun(
         initial=initial,
         interface=declared_interface,
         runtime=detected_runtime,

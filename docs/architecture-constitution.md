@@ -22,9 +22,10 @@ changed deliberately with matching tests.
 
 ## 3. State ownership
 
-- The engine is the sole writer of populations, accepted candidate records,
-  checkpoints, and authoritative event ordering.
-- Controller-owned commit and variant helpers operate on the engine's state;
+- `RunCommits` is the sole writer of `RunState`, including populations, accepted
+  candidate records, research registries and checkpoints. The coordinator orders
+  phases; application assembles infrastructure and the authoritative event sink.
+- Controller-owned variant helpers submit through that commit authority;
   this is one authority, not a separate database per stage. Core stages return
   typed results or call named controller commit operations. They never receive
   the engine or an arbitrary state mutation interface.
@@ -44,12 +45,12 @@ The supported extension slots are `Phase`, `AttemptStep`,
 - A trusted custom component can be supplied directly without editing framework
   files.
 - A package built-in needs its implementation, one explicit registry entry, and
-  tests. It must not require an `engine.py` branch.
+  tests. It must not require a coordinator branch.
 - Each core and optional phase has a concrete class in `phases/<name>.py`,
   alongside its specific context and result types. Helpers belong to their
   owning subsystem, not a catch-all shared package. A directory must represent
   a real multi-module subsystem, not merely wrap one class or one file.
-  The fixed five core contexts are bound by the controller; optional extensions
+  Core context factories are registered by the controller; optional extensions
   use `PhaseContext` and the existing five capabilities. There is no string
   action dispatcher or engine mixin hierarchy behind the phase classes.
 - Registries are plain dictionaries. No auto-discovery or package entry-point

@@ -11,11 +11,10 @@ from test_config import minimal_config
 from test_extensibility import agent_runner, evaluator_factory
 from worker_helpers import RunnerAdapter
 
+from optiprofiler_evolve.application.run import EvolutionRun
 from optiprofiler_evolve.config import load_config
 from optiprofiler_evolve.controller.builtins import register_builtin_components
 from optiprofiler_evolve.controller.contracts import ControllerServices
-from optiprofiler_evolve.controller.engine import EvolutionEngine
-from optiprofiler_evolve.controller.phase_contexts import bind_context
 from optiprofiler_evolve.controller.registry import resolve
 from optiprofiler_evolve.phases.contracts import PhaseContext
 from optiprofiler_evolve.phases.prepare import PreparePhase
@@ -52,7 +51,7 @@ class PhaseLayoutTests(unittest.TestCase):
             root = Path(temporary)
             initial = root / "solver.py"
             initial.write_text("def solver(fun, x0):\n    return x0\n")
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=initial,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -70,20 +69,20 @@ class PhaseLayoutTests(unittest.TestCase):
                 emit=lambda *args: None,
                 services=engine.controller_services,
             )
-            context = bind_context(engine, "prepare", base)
+            context = engine.coordinator.contexts["prepare"](base)
             self.assertFalse(hasattr(context, "engine"))
             result = PreparePhase().run(context)
-            self.assertIsNone(engine.data)
-            self.assertEqual(engine.populations, [])
-            self.assertEqual(engine.candidates, {})
-            engine._commit_phase_result(result)
-            self.assertIs(engine.data, result.data)
-            self.assertEqual(engine.candidates, {"seed": result.seed})
-            self.assertTrue(all(population == [result.seed] for population in engine.populations))
+            self.assertIsNone(engine.state.data)
+            self.assertEqual(engine.state.populations, [])
+            self.assertEqual(engine.state.candidates, {})
+            engine.commits.commit_phase_result(result)
+            self.assertIs(engine.state.data, result.data)
+            self.assertEqual(engine.state.candidates, {"seed": result.seed})
+            self.assertTrue(all(population == [result.seed] for population in engine.state.populations))
             self.assertEqual(initial.read_text(), "def solver(fun, x0):\n    return x0\n")
 
     def test_worker_backend_has_one_invocation_entrypoint(self) -> None:
-        package = Path(inspect.getfile(EvolutionEngine)).parents[1]
+        package = Path(inspect.getfile(EvolutionRun)).parents[1]
         sites = []
         for path in package.rglob("*.py"):
             for node in ast.walk(ast.parse(path.read_text())):

@@ -25,8 +25,9 @@ agent, or problem libraries while working here. They are independent packages.
 
 ## Stable invariants
 
-- The engine is the sole writer of population state, candidate acceptance,
-  checkpoints, and authoritative events.
+- Controller commits are the sole writer of run state, candidate acceptance,
+  and checkpoints. The coordinator orders phases; application binds infrastructure
+  and the authoritative event sink.
 - Workers edit private candidate copies. They cannot see validation or hidden
   data, the immutable reference, OptiProfiler source, sibling repositories, the
   host home, or the Docker socket.
@@ -47,7 +48,9 @@ agent, or problem libraries while working here. They are independent packages.
 | Public call | `src/optiprofiler_evolve/api.py` |
 | Typed config | `config.py`, `config.schema.json`, `docs/config-reference.md` |
 | Workflow contracts | `phases/contracts.py`, `controller/contracts.py`, `controller/registry.py` |
-| Population and selection | `controller/engine.py`, `controller/selection.py`, `controller/phase_contexts.py` |
+| Run composition and infrastructure lifecycle | `application/run.py` |
+| Population and selection | `controller/state.py`, `controller/commits.py`, `controller/coordinator.py`, `controller/selection.py` |
+| Phase input binding | `controller/phase_contexts.py`, `controller/runtime.py` |
 | Attempts and policies | `phases/attempts/runner.py`, `phases/attempts/steps.py`, `phases/attempts/policies.py` |
 | Unified LLM entry and isolation | `agents/llm.py`, `agents/workers.py`, `agents/harness.py`, `agents/sandbox.py` |
 | OptiProfiler calls and public broker | `criteria/performance/evaluator.py`, `agents/broker.py` |

@@ -20,15 +20,15 @@ from optiprofiler_evolve.solver import (
 )
 
 if TYPE_CHECKING:
-    from optiprofiler_evolve.controller.engine import EvolutionEngine
+    from optiprofiler_evolve.controller.runtime import RunEnvironment
 
 
 class VariantMaterializer:
-    def __init__(self, engine: EvolutionEngine) -> None:
-        self.engine = engine
+    def __init__(self, environment: RunEnvironment) -> None:
+        self.environment = environment
 
     def materialize(self, request: VariantRequest) -> VariantHandle:
-        engine = self.engine
+        environment = self.environment
         variant_id = _safe_identifier(request.variant_id, "variant_id")
         if request.tree is not None and request.patches:
             raise ValueError("A variant request may provide a tree or patches, not both.")
@@ -38,32 +38,32 @@ class VariantMaterializer:
         base_hash = tree_hash(base)
         if request.expected_base_hash and request.expected_base_hash != base_hash:
             raise ValueError("Variant base tree hash does not match the declared base.")
-        destination = engine.run_dir / "research" / "variants" / variant_id
-        staging = engine.run_dir / "research" / "variant_staging" / variant_id
-        if destination.exists() or staging.exists() or variant_id in engine.variant_handles:
+        destination = environment.run_dir / "research" / "variants" / variant_id
+        staging = environment.run_dir / "research" / "variant_staging" / variant_id
+        if destination.exists() or staging.exists() or variant_id in environment.state.variant_handles:
             raise FileExistsError(f"Variant id already exists: {variant_id}")
         change_hashes: list[str] = []
         try:
             if request.tree is not None:
                 source_tree = request.tree.resolve()
-                _require_inside(source_tree, engine.run_dir / "research")
+                _require_inside(source_tree, environment.run_dir / "research")
                 copy_solver_tree(source_tree, staging)
                 change_hashes.append(tree_hash(source_tree))
             else:
                 copy_solver_tree(base, staging)
                 for patch in request.patches:
                     patch = patch.resolve()
-                    _require_inside(patch, engine.run_dir / "research")
+                    _require_inside(patch, environment.run_dir / "research")
                     if not patch.is_file():
                         raise FileNotFoundError(f"Variant patch does not exist: {patch}")
                     _validate_patch_paths(patch)
                     _apply_patch(staging, patch)
                     change_hashes.append(file_hash(patch))
-            engine._validate_candidate(staging)
+            environment.validate_candidate(staging)
             changed = changed_files(base, staging)
             if not changed:
                 raise ValueError("Executable variant produced no solver-tree change.")
-            validate_edit_scope(changed, engine.editable)
+            validate_edit_scope(changed, environment.editable)
             destination.parent.mkdir(parents=True, exist_ok=True)
             staging.replace(destination)
             handle = VariantHandle(
@@ -73,10 +73,9 @@ class VariantMaterializer:
                 base_tree_hash=base_hash,
                 change_hashes=tuple(change_hashes),
             )
-            engine.variant_handles[variant_id] = handle
-            engine.variant_bases[variant_id] = base
+            environment.commits.record_variant(handle, base)
             _write_json(
-                engine.run_dir / "research" / "variant_manifests" / f"{variant_id}.json",
+                environment.run_dir / "research" / "variant_manifests" / f"{variant_id}.json",
                 {
                     "schema": "variant_manifest/1",
                     "variant_id": variant_id,
@@ -86,7 +85,7 @@ class VariantMaterializer:
                     "changed_files": list(changed),
                 },
             )
-            engine._emit(
+            environment.emit(
                 "variant_materialized",
                 "succeeded",
                 scope={"variant_id": variant_id},
@@ -101,7 +100,7 @@ class VariantMaterializer:
         except Exception as exc:
             if staging.exists():
                 shutil.rmtree(staging)
-            engine._emit(
+            environment.emit(
                 "variant_materialized",
                 "failed",
                 scope={"variant_id": variant_id},

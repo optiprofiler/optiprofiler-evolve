@@ -8,6 +8,7 @@ import threading
 import unittest
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,10 +19,10 @@ from worker_helpers import RunnerAdapter
 from optiprofiler_evolve.agents.broker import EvaluationBroker
 from optiprofiler_evolve.agents.contracts import SolverJob, WorkerOutcome
 from optiprofiler_evolve.agents.feedback import project_feedback
+from optiprofiler_evolve.application.run import EvolutionRun
 from optiprofiler_evolve.config import SandboxConfig, load_config
 from optiprofiler_evolve.controller.assessment import PublicAssessment
 from optiprofiler_evolve.controller.contracts import VariantRequest
-from optiprofiler_evolve.controller.engine import EvolutionEngine
 from optiprofiler_evolve.criteria.complexity.analyzer import (
     ComplexityChecker,
     ComplexityConfig,
@@ -294,25 +295,25 @@ class ComplexityTests(unittest.TestCase):
     def test_broker_enforcement_quota_and_snapshot(self):
         for mode in ("warn", "enforce"):
             evaluator = RecordingEvaluator()
-            engine = self.engine(mode, run_name=f"broker-{mode}")
-            engine.evaluator_factory = lambda **kwargs: evaluator
+            engine = self.engine(mode, run_name=f"broker-{mode}",
+                                 evaluator_factory=lambda **kwargs: evaluator)
             engine._initialize_run_directory()
-            engine._run_phase(PreparePhase(), {})
+            engine.coordinator.run_phase(PreparePhase(), {})
             evaluator.calls.clear()
-            original_assess = engine.evaluator.complexity.assess
+            original_assess = engine.state.evaluator.complexity.assess
 
             def assess(snapshot):
                 report = original_assess(snapshot)
                 (self.candidate / "solver.py").write_text(SEED)
                 return report
 
-            engine.evaluator.complexity.assess = assess
+            engine.state.evaluator.complexity.assess = assess
 
             (self.candidate / "solver.py").write_text(LARGE)
             broker = EvaluationBroker(
                 workspace=self.candidate,
                 control_dir=self.root / mode,
-                evaluator=PublicAssessment(engine.evaluator.evaluate),
+                evaluator=PublicAssessment(engine.state.evaluator.evaluate),
                 max_smoke_calls=1,
                 max_public_calls=1,
             )
@@ -337,9 +338,11 @@ class ComplexityTests(unittest.TestCase):
             if evaluator.calls:
                 self.assertEqual(evaluator.calls[0][2], LARGE)
 
-    def engine(self, mode, ratio=1.2, run_name="run"):
+    def engine(self, mode, ratio=1.2, run_name="run", *,
+               evaluator_factory=evaluator_factory, **criterion_options):
         raw = minimal_config()
         raw["assessment"]["criteria"]["complexity"] = {"enabled": True, "mode": mode, "options": {"max_ratio": ratio}}
+        raw["assessment"]["criteria"]["complexity"].update(criterion_options)
         raw["evolution"].update(islands=1, attempts_per_island=1)
 
         def mutate(**kwargs):
@@ -348,7 +351,7 @@ class ComplexityTests(unittest.TestCase):
             kwargs["transcript"].write_text("synthetic mutation")
             return WorkerOutcome(0, kwargs["transcript"])
 
-        return EvolutionEngine(
+        return EvolutionRun(
             initial=self.seed,
             interface=InterfaceSpec.parse("solver.py:solver"),
             runtime="python",
@@ -360,19 +363,17 @@ class ComplexityTests(unittest.TestCase):
         )
 
     def test_enforced_candidate_never_reaches_performance_or_validation(self):
-        engine = self.engine("enforce")
         evaluator = RecordingEvaluator()
-        engine.evaluator_factory = lambda **kwargs: evaluator
+        engine = self.engine("enforce", evaluator_factory=lambda **kwargs: evaluator)
         engine.run()
-        self.assertFalse(engine.candidates["it001-i00-a00"].valid)
+        self.assertFalse(engine.state.candidates["it001-i00-a00"].valid)
         self.assertTrue(all(code == SEED for _, _, code in evaluator.calls))
 
     def test_worker_receives_configured_complexity_prompt(self):
         for mode in (None, "warn", "enforce"):
             with self.subTest(mode=mode):
-                engine = self.engine(mode or "warn", 1.75, run_name=f"worker-{mode}")
-                if mode is None:
-                    engine.config = engine.config.with_criterion("complexity", enabled=False)
+                engine = self.engine(mode or "warn", 1.75, run_name=f"worker-{mode}",
+                                     enabled=mode is not None)
                 prompts = []
                 mutate = engine.worker_adapter.runner
 
@@ -396,15 +397,14 @@ class ComplexityTests(unittest.TestCase):
                 self.assertIn("All candidate Python files count", prompt)
                 self.assertIn("rather than compress formatting or remove documentation", prompt)
                 self.assertEqual(prompt.count("Complexity budget ("), 1)
-                self.assertNotIn(engine.evaluator.complexity.baseline_hash, prompt)
+                self.assertNotIn(engine.state.evaluator.complexity.baseline_hash, prompt)
                 self.assertNotIn(str(self.seed), prompt)
 
     def test_research_job_receives_budget_without_mutating_original_prompt(self):
         for mode in (None, "warn", "enforce"):
             with self.subTest(mode=mode):
-                engine = self.engine(mode or "warn", 1.75, run_name=f"research-{mode}")
-                if mode is None:
-                    engine.config = engine.config.with_criterion("complexity", enabled=False)
+                engine = self.engine(mode or "warn", 1.75, run_name=f"research-{mode}",
+                                     enabled=mode is not None)
                 prompts = []
 
                 def capture(**kwargs):
@@ -419,7 +419,7 @@ class ComplexityTests(unittest.TestCase):
                     engine.run_dir, run_id="prompt-test", config_hash="test",
                     adapter_name=engine.worker_adapter.name,
                 )
-                engine._run_phase(PreparePhase(), {})
+                engine.coordinator.run_phase(PreparePhase(), {})
                 job = SolverJob(
                     role="strategy-integrator", job_id="prompt-test", prompt="Integrate strategies."
                 )
@@ -435,27 +435,24 @@ class ComplexityTests(unittest.TestCase):
                         "1.75 times their initial values.", prompts[0]
                     )
                     self.assertEqual(prompts[0].count("Complexity budget ("), 1)
-                    self.assertNotIn(engine.evaluator.complexity.baseline_hash, prompts[0])
+                    self.assertNotIn(engine.state.evaluator.complexity.baseline_hash, prompts[0])
                     self.assertNotIn(str(self.seed), prompts[0])
 
     def test_warn_candidate_is_admitted_and_reported(self):
         engine = self.engine("warn")
         engine.run()
-        self.assertTrue(engine.candidates["it001-i00-a00"].valid)
+        self.assertTrue(engine.state.candidates["it001-i00-a00"].valid)
         self.assertTrue(list((engine.run_dir / "controller/final_evaluations").glob("*/assessment.json")))
         self.assertIn("Quality assessment", (engine.run_dir / "FINAL_REPORT.md").read_text())
 
     def test_strict_reduction_without_eligible_candidate_skips_hidden(self):
-        engine = self.engine("enforce", 0.8)
         evaluator = RecordingEvaluator()
-        engine.evaluator_factory = lambda **kwargs: evaluator
+        engine = self.engine("enforce", 0.8, evaluator_factory=lambda **kwargs: evaluator)
         with self.assertRaisesRegex(RuntimeError, "Initial solver evaluation failed"):
             engine.run()
         self.assertNotIn("hidden", [mode for _, mode, _ in evaluator.calls])
 
     def test_complexity_weight_can_favor_simplification_over_performance(self):
-        engine = self.engine("enforce", 1.0)
-        engine.config = engine.config.with_criterion("complexity", weight=10)
         (self.seed / "solver.py").write_text(LARGE)
 
         def simplify(**kwargs):
@@ -470,8 +467,9 @@ class ComplexityTests(unittest.TestCase):
                 score = 0.9 if (candidate / "solver.py").read_text() == LARGE else 0.1
                 return EvaluationResult(mode, score, score, 0.5, 1, result.output_dir)
 
+        engine = self.engine("enforce", 1.0, weight=10,
+                             evaluator_factory=lambda **kwargs: PreferSeed())
         engine.worker_adapter = RunnerAdapter(simplify)
-        engine.evaluator_factory = lambda **kwargs: PreferSeed()
         result = engine.run()
         self.assertEqual(result.best_candidate_id, "it001-i00-a00")
         self.assertEqual(result.public_score, 0.1)
@@ -486,14 +484,17 @@ class ComplexityTests(unittest.TestCase):
                 (context.workspace / "solver.py").write_text(LARGE + "if True:\n    pass\n")
                 return StepResult()
 
-        engine.attempt_steps += (ExpandAfterScore(),)
+        engine.attempt_runner.environment = replace(
+            engine.environment,
+            attempt_steps=(*engine.environment.attempt_steps, ExpandAfterScore()),
+        )
         engine.run()
-        self.assertFalse(engine.candidates["it001-i00-a00"].valid)
+        self.assertFalse(engine.state.candidates["it001-i00-a00"].valid)
 
     def test_research_variant_uses_same_limit(self):
         engine = self.engine("enforce")
         engine._initialize_run_directory()
-        engine._run_phase(PreparePhase(), {})
+        engine.coordinator.run_phase(PreparePhase(), {})
         variant = self.source("run/research/proposed", LARGE)
         handle = engine.controller_services.materialize_variant(
                 VariantRequest("large", engine.run_dir / "candidates/seed", tree=variant)

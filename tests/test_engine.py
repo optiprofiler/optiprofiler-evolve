@@ -13,8 +13,8 @@ from test_config import minimal_config
 from worker_helpers import RunnerAdapter
 
 from optiprofiler_evolve.agents.contracts import WorkerOutcome
+from optiprofiler_evolve.application.run import EvolutionRun, _controller_cancellation
 from optiprofiler_evolve.config import load_config
-from optiprofiler_evolve.controller.engine import EvolutionEngine, _controller_cancellation
 from optiprofiler_evolve.criteria.integrity.reviewer import REQUIRED_CHECKS
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.phases.prepare import PreparePhase
@@ -164,7 +164,7 @@ class EngineTests(unittest.TestCase):
             raw = minimal_config()
             raw["evolution"].update({"islands": 1, "attempts_per_island": 1})
             raw["workers"]["max_parallel"] = 1
-            result = EvolutionEngine(
+            result = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -217,7 +217,7 @@ class EngineTests(unittest.TestCase):
             raw["workers"]["max_parallel"] = 1
             raw["data"]["split"]["lockbox_required"] = True
             run_dir = root / "run"
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -242,7 +242,7 @@ class EngineTests(unittest.TestCase):
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             raw = minimal_config()
             raw["execution"]["forbidden_candidate_imports"] = ["scipy.optimize", "prima"]
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -253,7 +253,7 @@ class EngineTests(unittest.TestCase):
                 evaluator_factory=fake_evaluator_factory,
             )
 
-            engine._run_phase(PreparePhase(), {})
+            engine.coordinator.run_phase(PreparePhase(), {})
 
             contract = json.loads((root / "run" / "solver_contract.json").read_text())
             self.assertEqual(
@@ -296,7 +296,7 @@ class EngineTests(unittest.TestCase):
                 kwargs["run_page"] = page
                 return observing_runner(**kwargs)
 
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -326,7 +326,7 @@ class EngineTests(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -369,7 +369,7 @@ class EngineTests(unittest.TestCase):
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             config = load_config(minimal_config())
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -453,7 +453,7 @@ class EngineTests(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -498,7 +498,7 @@ class EngineTests(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
-            result = EvolutionEngine(
+            result = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -537,7 +537,7 @@ class EngineTests(unittest.TestCase):
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             original_hash = tree_hash(source)
             config = load_config(minimal_config())
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -607,7 +607,7 @@ class EngineTests(unittest.TestCase):
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             runner = ReviewingRunner("approve")
-            result = EvolutionEngine(
+            result = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -669,7 +669,7 @@ class EngineTests(unittest.TestCase):
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             runner = ReviewingRunner("quarantine")
-            result = EvolutionEngine(
+            result = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -695,7 +695,7 @@ class EngineTests(unittest.TestCase):
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             runner = ReviewingRunner("malformed_once")
-            EvolutionEngine(
+            EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
@@ -716,7 +716,7 @@ class EngineTests(unittest.TestCase):
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n# improved\n")
             with self.assertRaisesRegex(RuntimeError, "Initial solver validation failed"):
-                EvolutionEngine(
+                EvolutionRun(
                     initial=source,
                     interface=InterfaceSpec.parse("solver.py:solver"),
                     runtime="python",
@@ -735,7 +735,7 @@ class EngineTests(unittest.TestCase):
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             runner = ReviewingRunner("unavailable")
-            result = EvolutionEngine(
+            result = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
