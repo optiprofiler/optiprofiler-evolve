@@ -17,7 +17,7 @@ from optiprofiler_evolve.files import write_json
 from optiprofiler_evolve.solver import source_files, tree_hash, validate_tree_safety
 
 ANALYZER = "radon/6.0.1"
-METRICS_VERSION = "source_complexity/1"
+METRICS_VERSION = "source_complexity/2"
 ANALYSIS_TIMEOUT = 30
 
 
@@ -50,6 +50,11 @@ class ComplexityReport:
         )
 
     @property
+    def score(self) -> float | None:
+        ratios = self.ratios
+        return 1 / (1 + max(ratios)) if ratios is not None else None
+
+    @property
     def status(self) -> str:
         if self.ratios is None:
             return "unavailable"
@@ -68,7 +73,8 @@ class ComplexityReport:
             "branch_ratio": ratios[0] if ratios else None,
             "size_ratio": ratios[1] if ratios else None,
             "complexity_ratio": max(ratios) if ratios else None,
-            "score": 100 * max(ratios) if ratios else None,
+            "score": self.score,
+            "complexity_percent": 100 * max(ratios) if ratios else None,
             "blocked": self.blocked,
         }
 
@@ -90,10 +96,11 @@ class ComplexityReport:
         }
 
     def feedback(self) -> str:
-        score = self.summary()["score"]
+        percent = self.summary()["complexity_percent"]
+        relative = f"{percent:g}%" if percent is not None else "unavailable"
         lines = [
-            f"Complexity: {score if score is not None else 'unavailable'} / "
-            f"limit {100 * self.max_ratio:g} — {self.mode}: {self.status}",
+            f"Relative complexity: {relative} / "
+            f"limit {100 * self.max_ratio:g}% — {self.mode}: {self.status}",
         ]
         if self.candidate is not None:
             lines.extend(
@@ -113,7 +120,7 @@ class ComplexityReport:
         if self.status == "exceeded":
             lines.append(
                 "Simplify duplicated logic and unnecessary special cases. "
-                "Do not remove documentation or compress formatting to reduce the score."
+                "Do not remove documentation or compress formatting to reduce complexity."
             )
         return "\n".join(lines) + "\n"
 
@@ -179,30 +186,27 @@ class ComplexityChecker:
 
     def assess(self, root: Path) -> ComplexityReport:
         digest = tree_hash(root)
-        metrics = None
         error = None
         with self._lock:
-            try:
-                metrics = self._cache.get(digest)
-                if metrics is None:
-                    metrics = self._analyze(root)
-                    if tree_hash(root) != digest:
-                        raise ValueError("Source changed during complexity analysis; submit again.")
-                    self._cache[digest] = metrics
-            except (ValueError, OSError) as exc:
-                metrics = None
-                error = str(exc)
-            report = ComplexityReport(
-                digest,
-                self.baseline_hash,
-                self.baseline,
-                metrics,
-                self.config.mode,
-                self.config.max_ratio,
-                error,
-            )
+            metrics = self._cache.get(digest)
+        try:
+            if metrics is None:
+                metrics = self._analyze(root)
+            if tree_hash(root) != digest:
+                raise ValueError("Source changed during complexity analysis; submit again.")
+        except (ValueError, OSError) as exc:
+            metrics = None
+            error = str(exc)
+        report = ComplexityReport(
+            digest, self.baseline_hash, self.baseline, metrics,
+            self.config.mode, self.config.max_ratio, error,
+        )
+        # Only shared cache entries and same-hash report writes require serialization.
+        with self._lock:
+            if metrics is not None:
+                self._cache[digest] = metrics
             write_json(self.output / f"{digest}.json", report.as_dict())
-            return report
+        return report
 
 
 def analyze_source(root: Path) -> ComplexityMetrics:

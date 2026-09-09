@@ -10,6 +10,7 @@ from typing import Protocol
 from optiprofiler_evolve.controller.contracts import ControllerServices
 from optiprofiler_evolve.observability.events import EventEmitter
 
+
 @dataclass(frozen=True)
 class PhaseContext:
     """Context for a trusted outer workflow phase."""

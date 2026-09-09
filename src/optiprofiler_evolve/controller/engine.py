@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import random
 import secrets
 import signal
 import threading
-import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
@@ -23,15 +23,18 @@ from optiprofiler_evolve.agents.llm import LLMClient
 from optiprofiler_evolve.config import EvolveConfig, WorkerConfig
 from optiprofiler_evolve.controller.builtins import register_builtin_components
 from optiprofiler_evolve.controller.contracts import ControllerServices, VariantHandle
-from optiprofiler_evolve.controller.phase_contexts import bind_context, commit_result
+from optiprofiler_evolve.controller.finalists import FinalistRegistrar
+from optiprofiler_evolve.controller.phase_contexts import bind_context
 from optiprofiler_evolve.controller.registry import build, resolve
+from optiprofiler_evolve.controller.research_evaluation import ResearchEvaluator
 from optiprofiler_evolve.controller.role_jobs import RoleJobs
 from optiprofiler_evolve.controller.selection import (
     MetricSelectionError,
     ParentSampler,
     RetentionPolicy,
 )
-from optiprofiler_evolve.controller.services import EngineControllerServices
+from optiprofiler_evolve.controller.validation import ValidationSelector
+from optiprofiler_evolve.controller.variants import VariantMaterializer
 from optiprofiler_evolve.criteria.guidance import build_generation_guidance
 from optiprofiler_evolve.criteria.integrity.execution import IntegrityReviewExecutor
 from optiprofiler_evolve.criteria.performance.contracts import Evaluator
@@ -47,25 +50,22 @@ from optiprofiler_evolve.models import (
     FinalistResult,
 )
 from optiprofiler_evolve.observability.events import EventWriter
-from optiprofiler_evolve.observability.projections import project_public_events
+from optiprofiler_evolve.observability.live_views import LiveViews
 from optiprofiler_evolve.observability.provenance import build_run_provenance
 from optiprofiler_evolve.observability.reports import append_trace_coverage
 from optiprofiler_evolve.observability.trace_ledger import TraceLedger
 from optiprofiler_evolve.observability.usage import UsageRecord, aggregate_usage
-from optiprofiler_evolve.observability.views.owner import render_owner_views
-from optiprofiler_evolve.observability.views.public import (
-    materialize_public_bundle,
-    render_final_report,
-    render_public_report,
-    render_status,
-)
 from optiprofiler_evolve.phases.attempts.contracts import (
     AfterIterationPolicy,
     AttemptStep,
     PopulationEdit,
 )
 from optiprofiler_evolve.phases.attempts.runner import AttemptRunner
-from optiprofiler_evolve.phases.contracts import Phase, PhaseContext
+from optiprofiler_evolve.phases.contracts import Phase, PhaseContext, PhaseResult
+from optiprofiler_evolve.phases.hidden import HiddenResult
+from optiprofiler_evolve.phases.prepare import PrepareResult
+from optiprofiler_evolve.phases.report import ReportResult
+from optiprofiler_evolve.phases.validate import ValidateResult
 from optiprofiler_evolve.solver import (
     InterfaceSpec,
     validate_candidate_imports,
@@ -131,12 +131,8 @@ class EvolutionEngine:
         self.final_result: FinalistResult | None = None
         self.final_solver: Path | None = None
         self.result: EvolveResult | None = None
-        self._render_lock = threading.Lock()
+        self.views = LiveViews(self.run_dir, self._emit)
         self._usage_lock = threading.Lock()
-        self._refresh_stop = threading.Event()
-        self._refresh_thread: threading.Thread | None = None
-        self._refresh_poll_seconds = 2.0
-        self._refresh_due_seconds = 4.0
         self.direction_assignments: dict[int, dict[str, object]] = {}
         self.variant_handles: dict[str, VariantHandle] = {}
         self.variant_bases: dict[str, Path] = {}
@@ -145,17 +141,15 @@ class EvolutionEngine:
         self.research_finalists: dict[str, CandidateRecord] = {}
         self.validation_query_count = 0
         self.validation_selection_count = 0
-        self._last_status_refresh = 0.0
         self._cancellation_event = threading.Event()
         self.attempt_runner = AttemptRunner(self)
         self.role_jobs = RoleJobs(self)
-        service_impl = EngineControllerServices(self)
         self.controller_services = ControllerServices(
             run_trusted_agent=self.role_jobs.run,
-            materialize_variant=service_impl.materialize_variant,
-            evaluate_public_variant=service_impl.evaluate_public_variant,
-            select_by_validation=service_impl.select_by_validation,
-            register_finalist=service_impl.register_finalist,
+            materialize_variant=VariantMaterializer(self).materialize,
+            evaluate_public_variant=ResearchEvaluator(self).evaluate,
+            select_by_validation=ValidationSelector(self).select,
+            register_finalist=FinalistRegistrar(self).register,
         )
         self.integrity_executor = IntegrityReviewExecutor(
             run_dir=self.run_dir, interface=self.interface, editable=self.editable,
@@ -214,11 +208,7 @@ class EvolutionEngine:
         run_succeeded = False
         try:
             with _controller_cancellation(self._cancellation_event):
-                self._refresh_stop.clear()
-                self._refresh_thread = threading.Thread(
-                    target=self._refresh_status_loop, name="ope-status-refresher", daemon=True
-                )
-                self._refresh_thread.start()
+                self.views.start(self.events)
                 reviewer_worker = (
                     self.config.reviewer_config().resolved_worker(self.config.workers)
                     if self.config.assessment.enabled("integrity", "validation") else None
@@ -290,7 +280,7 @@ class EvolutionEngine:
                 try:
                     self._emit("trace_coverage", "failed")
                 except Exception:
-                    pass
+                    logging.getLogger(__name__).exception("Failed to record Docker cleanup evidence")
             if self.config.sandbox.backend == "docker":
                 cleanup_errors: tuple[str, ...]
                 try:
@@ -315,17 +305,15 @@ class EvolutionEngine:
                     )
                 except Exception:
                     pass
-            self._refresh_stop.set()
-            if self._refresh_thread is not None and self._refresh_thread.ident is not None:
-                self._refresh_thread.join(timeout=10)
-                self._refresh_thread = None
+            self.views.stop()
             try:
                 if self.events is not None:
-                    self._refresh_status(include_report=True)
+                    self.views.refresh(include_report=True)
             finally:
                 if self.events is not None:
                     self.events.close()
                     self.events = None
+                    self.views.events = None
             if trace_failure is not None and run_succeeded:
                 raise RuntimeError(
                     "Trace finalization failed after a successful run."
@@ -344,7 +332,7 @@ class EvolutionEngine:
             )
         scope = {"phase": phase.name}
         self._emit("phase_started", "running", scope=scope)
-        self._refresh_status()
+        self.views.refresh()
         try:
             context = PhaseContext(
                 run_dir=self.run_dir,
@@ -359,7 +347,7 @@ class EvolutionEngine:
                 raise RuntimeError(
                     f"Phase {phase.name!r} produced undeclared artifacts {sorted(undeclared)!r}."
                 )
-            commit_result(self, result)
+            self._commit_phase_result(result)
             self.artifacts.update(result.artifacts)
             self._emit(
                 "phase_finished",
@@ -379,9 +367,29 @@ class EvolutionEngine:
             )
             raise
         finally:
-            self._refresh_status()
+            self.views.refresh()
         self._raise_if_cancelled()
         return result.artifacts
+
+    def _commit_phase_result(self, result: PhaseResult) -> None:
+        if isinstance(result, PrepareResult):
+            self.data = result.data
+            self.reference = result.reference
+            self.evaluator = result.evaluator
+            self.candidates[result.seed.candidate_id] = result.seed
+            self.populations = [[result.seed] for _ in range(self.config.evolution.islands)]
+            self._write_checkpoint(0)
+        elif isinstance(result, ValidateResult):
+            self.champion = result.champion
+        elif isinstance(result, HiddenResult):
+            self.final_result = result.final_result
+            self.final_solver = result.final_solver
+        elif isinstance(result, ReportResult):
+            self.result = result.result
+
+    def _register_research_finalist(self, record: CandidateRecord) -> None:
+        self.candidates[record.candidate_id] = record
+        self.research_finalists[record.candidate_id] = record
 
     def _accept_and_record(self, attempt: Attempt) -> None:
         record = attempt.record
@@ -638,50 +646,6 @@ class EvolutionEngine:
 
         return emit
 
-    def _refresh_status_loop(self) -> None:
-        # Events stream into the ledger continuously, but the main thread
-        # only refreshes at attempt and phase boundaries; during a long
-        # agent invocation the on-disk dashboards would otherwise go stale
-        # for the whole invocation. The ledger stays the single source of
-        # truth; this thread merely re-renders projections of it.
-        while not self._refresh_stop.wait(self._refresh_poll_seconds):
-            try:
-                self._refresh_status_if_due(interval_seconds=self._refresh_due_seconds)
-            except Exception:
-                continue
-
-    def _refresh_status(self, *, include_report: bool = False) -> None:
-        if self.events is None:
-            return
-        with self._render_lock:
-            if self.events is None:
-                return
-            self.events.flush()
-            try:
-                public_events = self.run_dir / "public_events.jsonl"
-                project_public_events(self.run_dir / "events.jsonl", public_events)
-                state = render_status(public_events, self.run_dir / "public_status.html")
-                render_public_report(state, self.run_dir / "PUBLIC_REPORT.md")
-                if include_report:
-                    render_final_report(public_events, self.run_dir / "report.html")
-                materialize_public_bundle(self.run_dir)
-                render_owner_views(
-                    self.run_dir / "events.jsonl",
-                    self.run_dir,
-                    final=include_report,
-                )
-            except Exception as exc:
-                self._emit(
-                    "public_view_refresh_failed",
-                    "failed",
-                    data={"error": f"{type(exc).__name__}: {exc}"},
-                )
-            finally:
-                self._last_status_refresh = time.monotonic()
-
-    def _refresh_status_if_due(self, interval_seconds: float = 1.0) -> None:
-        if time.monotonic() - self._last_status_refresh >= interval_seconds:
-            self._refresh_status()
 
 
 @contextmanager

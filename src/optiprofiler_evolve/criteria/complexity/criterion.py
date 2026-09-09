@@ -3,11 +3,16 @@
 from dataclasses import replace
 
 from optiprofiler_evolve.criteria.complexity.analyzer import ComplexityChecker
-from optiprofiler_evolve.criteria.contracts import AssessmentRequest, Criterion, CriterionResult, GuidanceRequest
+from optiprofiler_evolve.criteria.contracts import (
+    AssessmentRequest,
+    Criterion,
+    CriterionResult,
+    GuidanceRequest,
+)
 
 
 class ComplexityCriterion(Criterion):
-    version = "source_complexity/1"
+    version = "source_complexity/2"
     guidance_fields = ("max_ratio",)
 
     @classmethod
@@ -32,7 +37,7 @@ class ComplexityCriterion(Criterion):
             return CriterionResult("failed", error=report.error)
         ratio = max(report.ratios)
         return CriterionResult(
-            "succeeded", score=1 / (1 + ratio), satisfied=ratio <= report.max_ratio,
+            "succeeded", score=report.score, satisfied=ratio <= report.max_ratio,
             metrics=report.worker_dict(),
             error=None if ratio <= report.max_ratio else "complexity_limit_exceeded",
         )

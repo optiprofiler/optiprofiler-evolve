@@ -166,7 +166,8 @@ the optional `static_audit` evidence step is removed for an ablation.
 | `config.py`, `models.py`, `solver.py`, `data.py`, `files.py`, `errors.py` | Cross-subsystem configuration, domain values, solver/data boundaries and filesystem primitives |
 | `controller/engine.py`, `phase_contexts.py` | Workflow lifecycle, authoritative state and bounded phase bindings/commits |
 | `phases/attempts/` | Private attempt execution, public-only capabilities, prompts, steps and iteration policy proposals |
-| `controller/services.py`, `role_jobs.py` | Research variant gates and sanitized role preparation |
+| `controller/variants.py`, `research_evaluation.py`, `validation.py`, `finalists.py`, `role_jobs.py` | Separate variant, evaluation, selection, registration and role capabilities |
+| `observability/live_views.py` | Live projection scheduling and rendering; no population authority |
 | `controller/registry.py`, `builtins.py`, `selection.py`, `experiments.py` | Explicit registration, archive selection and experiment matrices |
 | `phases/<name>.py` | One class per core or optional stage, including its specific inputs/results and local helpers |
 | `phases/contracts.py`, `_support.py`, `_research.py` | Stage contracts, shared phase helpers and research artifact formats |
@@ -191,7 +192,9 @@ Package initializers do not register components or launch work. Internal import
 paths changed with this layout and have no compatibility forwarding modules.
 The public `evolve` API and documented `serve`/`docker_gc` command entrypoints
 remain unchanged. Provenance records the new component module names and source
-hashes honestly; artifact schemas and experiment configuration are unchanged.
+hashes honestly; experiment configuration is unchanged. Complexity reports use
+`source_complexity/2`: `score` is the criterion score and `complexity_percent`
+is the baseline-relative percentage.
 
 ## Isolation
 

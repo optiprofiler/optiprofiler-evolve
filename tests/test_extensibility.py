@@ -132,7 +132,7 @@ class ExtensibilityTests(unittest.TestCase):
                     return function(*args, **kwargs)
 
                 with patch(
-                    f"optiprofiler_evolve.controller.engine.{name}",
+                    f"optiprofiler_evolve.observability.live_views.{name}",
                     side_effect=fail_after_first,
                 ):
                     result = EvolutionEngine(

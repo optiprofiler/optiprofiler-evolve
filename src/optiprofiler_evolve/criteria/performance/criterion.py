@@ -3,7 +3,12 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from optiprofiler_evolve.criteria.contracts import AssessmentRequest, Criterion, CriterionResult, GuidanceRequest
+from optiprofiler_evolve.criteria.contracts import (
+    AssessmentRequest,
+    Criterion,
+    CriterionResult,
+    GuidanceRequest,
+)
 from optiprofiler_evolve.models import EvaluationResult
 
 

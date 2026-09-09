@@ -9,6 +9,7 @@ from typing import Protocol
 
 from optiprofiler_evolve.models import CandidateRecord, MetricBundle
 
+
 class RetentionPolicy(Protocol):
     """Choose the bounded archive retained by one island."""
 

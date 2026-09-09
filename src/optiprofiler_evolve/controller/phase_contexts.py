@@ -1,22 +1,23 @@
-"""Bind core phases to narrow inputs; commit their results in the controller."""
+"""Bind core phases to narrow controller capabilities."""
 
 from __future__ import annotations
 
 from dataclasses import fields
 from typing import TYPE_CHECKING
 
-from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
+from optiprofiler_evolve.phases.contracts import PhaseContext
 from optiprofiler_evolve.phases.explore import ExploreContext
-from optiprofiler_evolve.phases.hidden import HiddenContext, HiddenResult
-from optiprofiler_evolve.phases.prepare import PrepareContext, PrepareResult
-from optiprofiler_evolve.phases.report import ReportContext, ReportResult
-from optiprofiler_evolve.phases.validate import ValidateContext, ValidateResult
+from optiprofiler_evolve.phases.hidden import HiddenContext
+from optiprofiler_evolve.phases.prepare import PrepareContext
+from optiprofiler_evolve.phases.report import ReportContext
+from optiprofiler_evolve.phases.validate import ValidateContext
 
 if TYPE_CHECKING:
     from optiprofiler_evolve.controller.engine import EvolutionEngine
 
 
 def bind_context(engine: EvolutionEngine, name: str, base: PhaseContext) -> PhaseContext:
+    """Bind the fixed core capabilities; custom phases retain the public base context."""
     common = {field.name: getattr(base, field.name) for field in fields(base)}
     if name == "prepare":
         return PrepareContext(
@@ -50,8 +51,8 @@ def bind_context(engine: EvolutionEngine, name: str, base: PhaseContext) -> Phas
             write_checkpoint=engine._write_checkpoint,
             raise_if_cancelled=engine._raise_if_cancelled,
             emit_scoped=engine._emit,
-            refresh_status=engine._refresh_status,
-            refresh_status_if_due=engine._refresh_status_if_due,
+            refresh_status=engine.views.refresh,
+            refresh_status_if_due=engine.views.refresh_if_due,
         )
     if name == "validate":
         return ValidateContext(
@@ -78,20 +79,3 @@ def bind_context(engine: EvolutionEngine, name: str, base: PhaseContext) -> Phas
             final_solver=engine.final_solver,
         )
     return base
-
-
-def commit_result(engine: EvolutionEngine, result: PhaseResult) -> None:
-    if isinstance(result, PrepareResult):
-        engine.data = result.data
-        engine.reference = result.reference
-        engine.evaluator = result.evaluator
-        engine.candidates[result.seed.candidate_id] = result.seed
-        engine.populations = [[result.seed] for _ in range(engine.config.evolution.islands)]
-        engine._write_checkpoint(0)
-    elif isinstance(result, ValidateResult):
-        engine.champion = result.champion
-    elif isinstance(result, HiddenResult):
-        engine.final_result = result.final_result
-        engine.final_solver = result.final_solver
-    elif isinstance(result, ReportResult):
-        engine.result = result.result

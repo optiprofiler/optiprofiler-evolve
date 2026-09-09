@@ -236,7 +236,7 @@ def render_public_report(state: Mapping[str, Any], destination: Path) -> None:
     complexity = _mapping(run.get("complexity"))
     if complexity:
         lines[7:7] = [
-            f"- Latest source complexity: `{_md(complexity.get('score'))}` / "
+            f"- Latest source complexity: `{_md(complexity.get('complexity_percent'))}%` / "
             f"ratio limit `{_md(complexity.get('max_ratio'))}`; "
             f"`{_md(complexity.get('mode'))}: {_md(complexity.get('status'))}`",
         ]
@@ -626,7 +626,8 @@ def _render_complexity(value: object) -> str:
         return ""
     return (
         '<section id="complexity"><h2>Latest source complexity</h2><p>'
-        f"Score: {_h(data.get('score'))}; ratio limit: {_h(data.get('max_ratio'))}; "
+        f"Score: {_h(data.get('score'))}; relative complexity: "
+        f"{_h(data.get('complexity_percent'))}%; ratio limit: {_h(data.get('max_ratio'))}; "
         f"branches: {_h(data.get('branch_ratio'))}; size: {_h(data.get('size_ratio'))}; "
         f"{_h(data.get('mode'))}: {_h(data.get('status'))}</p></section>"
     )

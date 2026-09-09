@@ -61,4 +61,3 @@ class ReportPhase:
             artifacts={"result": result, "report": context.run_dir / "FINAL_REPORT.md"},
             result=result,
         )
-

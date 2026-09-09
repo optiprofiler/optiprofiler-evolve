@@ -21,6 +21,7 @@ from optiprofiler_evolve.phases.attempts.contracts import (
 )
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 
+
 @dataclass(frozen=True)
 class ExploreContext(PhaseContext):
     evolution: EvolutionConfig

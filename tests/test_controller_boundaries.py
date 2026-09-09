@@ -67,7 +67,7 @@ class ControllerBoundaryTests(unittest.TestCase):
         threads = []
 
         def fail(_workers):
-            threads.extend((self.engine.events._thread, self.engine._refresh_thread))
+            threads.extend((self.engine.events._thread, self.engine.views.thread))
             raise RuntimeError("provenance unavailable")
 
         with patch.object(self.engine.worker_adapter, "provenance", side_effect=fail):

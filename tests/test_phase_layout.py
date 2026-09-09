@@ -15,7 +15,7 @@ from optiprofiler_evolve.config import load_config
 from optiprofiler_evolve.controller.builtins import register_builtin_components
 from optiprofiler_evolve.controller.contracts import ControllerServices
 from optiprofiler_evolve.controller.engine import EvolutionEngine
-from optiprofiler_evolve.controller.phase_contexts import bind_context, commit_result
+from optiprofiler_evolve.controller.phase_contexts import bind_context
 from optiprofiler_evolve.controller.registry import resolve
 from optiprofiler_evolve.phases.contracts import PhaseContext
 from optiprofiler_evolve.phases.prepare import PreparePhase
@@ -76,7 +76,7 @@ class PhaseLayoutTests(unittest.TestCase):
             self.assertIsNone(engine.data)
             self.assertEqual(engine.populations, [])
             self.assertEqual(engine.candidates, {})
-            commit_result(engine, result)
+            engine._commit_phase_result(result)
             self.assertIs(engine.data, result.data)
             self.assertEqual(engine.candidates, {"seed": result.seed})
             self.assertTrue(all(population == [result.seed] for population in engine.populations))

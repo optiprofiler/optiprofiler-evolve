@@ -14,6 +14,9 @@ python -m pip install -e '.[dev]'
 
 Run the lightweight checks before spending model tokens:
 
+The development dependency pins Ruff; `pyproject.toml` also declares the lint
+rules explicitly so a different installed version does not change the baseline.
+
 ```bash
 ruff check src tests scripts examples
 python scripts/check_markdown_links.py

@@ -306,8 +306,8 @@ class EngineTests(unittest.TestCase):
                 worker_adapter=RunnerAdapter(runner),
                 evaluator_factory=fake_evaluator_factory,
             )
-            engine._refresh_poll_seconds = 0.05
-            engine._refresh_due_seconds = 0.05
+            engine.views.poll_seconds = 0.05
+            engine.views.due_seconds = 0.05
             engine.run()
 
             text = captured["text"]
@@ -337,13 +337,13 @@ class EngineTests(unittest.TestCase):
                 evaluator_factory=fake_evaluator_factory,
             )
             calls: list[int] = []
-            engine._refresh_status = lambda **_kwargs: calls.append(1)
-            engine._refresh_poll_seconds = 0.02
-            engine._last_status_refresh = 0.0
-            thread = threading.Thread(target=engine._refresh_status_loop, daemon=True)
+            engine.views.refresh = lambda **_kwargs: calls.append(1)
+            engine.views.poll_seconds = 0.02
+            engine.views._last_refresh = 0.0
+            thread = threading.Thread(target=engine.views._loop, daemon=True)
             thread.start()
             time.sleep(0.3)
-            engine._refresh_stop.set()
+            engine.views._stop.set()
             thread.join(timeout=2)
 
             self.assertFalse(thread.is_alive())

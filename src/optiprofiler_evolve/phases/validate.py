@@ -66,4 +66,3 @@ class ValidatePhase:
             },
         )
         return ValidateResult(artifacts={"champion": champion}, champion=champion)
-

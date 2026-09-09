@@ -72,4 +72,3 @@ def _evaluate_hidden_champion(
         final_assessment_score=result.assessment_score,
         assessment_status="skipped" if skipped else "succeeded" if result.success else "failed",
     )
-

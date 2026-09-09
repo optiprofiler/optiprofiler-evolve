@@ -68,7 +68,8 @@ reference. Radon 6.0.1 counts decisions across all candidate Python files and
 lexical scopes, with one base point for the complete tree. Logical lines exclude
 comments, blanks and actual docstrings. Existing snapshot exclusions apply;
 test-named directories are not specially excluded. Installed dependencies are
-outside this source budget. The analyzer diagnostic score is 100 times the larger ratio;
+outside this source budget. The analyzer score is `1 / (1 + max(ratios))`, matching
+the criterion score; `complexity_percent` is 100 times the larger ratio;
 the branch denominator is the initial decision complexity and the size
 denominator is `max(initial logical lines, 1)`.
 

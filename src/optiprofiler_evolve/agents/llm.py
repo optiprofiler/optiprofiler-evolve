@@ -21,11 +21,7 @@ from optiprofiler_evolve.observability.traces import finalize_adapter_trace
 
 
 class LLMClient:
-    """One authority-bound Agent entrypoint with complete invocation evidence.
-
-    The controller binds the workspace, provider, tools and broker before handing
-    a job to this client. Job text cannot select a different host workspace.
-    """
+    """Execute jobs with controller-bound authority and retain invocation evidence."""
 
     def __init__(
         self,

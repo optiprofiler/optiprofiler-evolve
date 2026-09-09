@@ -29,7 +29,7 @@ _PUBLIC_SCOPE_KEYS = frozenset(
 _PUBLIC_DATA_KEYS: Mapping[str, frozenset[str]] = {
     "complexity_checked": frozenset({
         "mode", "status", "max_ratio", "branch_ratio", "size_ratio",
-        "complexity_ratio", "score", "blocked",
+        "complexity_ratio", "complexity_percent", "score", "blocked",
     }),
     "run_started": frozenset(),
     "run_finished": frozenset({"best_candidate_id"}),

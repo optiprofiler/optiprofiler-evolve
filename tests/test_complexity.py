@@ -4,8 +4,10 @@ import json
 import math
 import subprocess
 import tempfile
+import threading
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -120,7 +122,8 @@ class ComplexityTests(unittest.TestCase):
 
     def test_boundaries_fixed_baseline_cache_and_source_invalidation(self):
         checker = self.checker("enforce", 2)
-        self.assertEqual(checker.assess(self.seed).summary()["score"], 100)
+        self.assertEqual(checker.assess(self.seed).summary()["score"], 0.5)
+        self.assertEqual(checker.assess(self.seed).summary()["complexity_percent"], 100)
         self.assertEqual(checker.assess(self.candidate).status, "within_limit")
         with patch.object(checker, "_analyze", wraps=checker._analyze) as analyzer:
             checker.assess(self.candidate)
@@ -135,6 +138,62 @@ class ComplexityTests(unittest.TestCase):
         (self.seed / "solver.py").write_text("")
         report = self.checker().assess(self.candidate)
         self.assertTrue(math.isfinite(report.summary()["complexity_ratio"]))
+
+    def test_analysis_of_distinct_candidates_runs_concurrently(self):
+        checker = self.checker()
+        other = self.source("other", LARGE + "extra = 1\n")
+        barrier = threading.Barrier(2, timeout=5)
+
+        def analyze(root):
+            barrier.wait()
+            return analyze_source(root)
+
+        with patch.object(checker, "_analyze", side_effect=analyze):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                reports = list(pool.map(checker.assess, (self.candidate, other)))
+        self.assertTrue(all(report.error is None for report in reports))
+
+    def test_concurrent_identical_sources_publish_a_valid_cached_report(self):
+        checker = self.checker()
+        other = self.source("other", LARGE)
+        barrier = threading.Barrier(2, timeout=5)
+
+        def analyze(root):
+            barrier.wait()
+            return analyze_source(root)
+
+        with patch.object(checker, "_analyze", side_effect=analyze):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                reports = list(pool.map(checker.assess, (self.candidate, other)))
+        self.assertEqual(reports[0].as_dict(), reports[1].as_dict())
+        with patch.object(checker, "_analyze") as analyzer:
+            self.assertEqual(checker.assess(other).as_dict(), reports[0].as_dict())
+            analyzer.assert_not_called()
+        for path in (self.root / "analysis").glob("*.json"):
+            json.loads(path.read_text())
+
+    def test_source_changed_during_analysis_is_not_cached(self):
+        checker = self.checker()
+
+        def analyze(root):
+            metrics = analyze_source(root)
+            (root / "solver.py").write_text(SEED)
+            return metrics
+
+        with patch.object(checker, "_analyze", side_effect=analyze):
+            self.assertEqual(checker.assess(self.candidate).status, "unavailable")
+        (self.candidate / "solver.py").write_text(LARGE)
+        with patch.object(checker, "_analyze", wraps=checker._analyze) as analyzer:
+            report = checker.assess(self.candidate)
+            analyzer.assert_called_once()
+        self.assertEqual(report.score, 1 / (1 + max(report.ratios)))
+        self.assertEqual(report.summary()["complexity_percent"], 100 * max(report.ratios))
+
+    def test_analysis_programming_errors_propagate(self):
+        checker = self.checker()
+        with patch.object(checker, "_analyze", side_effect=AttributeError("bug")):
+            with self.assertRaisesRegex(AttributeError, "bug"):
+                checker.assess(self.candidate)
 
     def test_each_metric_can_independently_exceed_the_limit(self):
         checker = self.checker("enforce")
