@@ -7,9 +7,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
-from optiprofiler_evolve.shared.config import ProviderGatewayConfig, WorkerConfig
 from optiprofiler_evolve.agents.provider_gateway import GatewayRoute
-
+from optiprofiler_evolve.config import ProviderGatewayConfig, WorkerConfig
 
 _DUMMY_CREDENTIAL = "ope-gateway-placeholder-not-a-provider-secret"
 _CODEX_DUMMY_ENV = "OPTIPROFILER_EVOLVE_GATEWAY_DUMMY_KEY"

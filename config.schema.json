@@ -6,15 +6,8 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "complexity": {
-      "oneOf": [{"$ref": "#/$defs/ComplexityConfig"}, {"type": "null"}],
-      "default": null
-    },
     "data": {
       "$ref": "#/$defs/DataConfig"
-    },
-    "evaluation": {
-      "$ref": "#/$defs/EvaluationConfig"
     },
     "evolution": {
       "$ref": "#/$defs/EvolutionConfig"
@@ -22,28 +15,118 @@
     "workers": {
       "$ref": "#/$defs/WorkersConfig"
     },
-    "integrity_review": {
-      "$ref": "#/$defs/IntegrityReviewConfig"
-    },
     "sandbox": {
       "$ref": "#/$defs/SandboxConfig"
     },
     "workflow": {
       "$ref": "#/$defs/WorkflowConfig"
+    },
+    "execution": {
+      "$ref": "#/$defs/evaluation_execution"
+    },
+    "assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "criteria": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/criterion"
+          },
+          "patternProperties": {
+            "^performance$": {
+              "type": "object",
+              "properties": {
+                "options": {
+                  "$ref": "#/$defs/performance_options"
+                }
+              }
+            },
+            "^complexity$": {
+              "type": "object",
+              "properties": {
+                "options": {
+                  "$ref": "#/$defs/complexity_options"
+                }
+              }
+            },
+            "^integrity$": {
+              "type": "object",
+              "properties": {
+                "options": {
+                  "$ref": "#/$defs/IntegrityReviewConfig"
+                }
+              }
+            }
+          }
+        },
+        "profiles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/$defs/criterion"
+            },
+            "patternProperties": {
+              "^performance$": {
+                "type": "object",
+                "properties": {
+                  "options": {
+                    "$ref": "#/$defs/performance_options"
+                  }
+                }
+              },
+              "^complexity$": {
+                "type": "object",
+                "properties": {
+                  "options": {
+                    "$ref": "#/$defs/complexity_options"
+                  }
+                }
+              },
+              "^integrity$": {
+                "type": "object",
+                "properties": {
+                  "options": {
+                    "$ref": "#/$defs/IntegrityReviewConfig"
+                  }
+                }
+              }
+            }
+          },
+          "propertyNames": {
+            "enum": [
+              "smoke",
+              "public",
+              "validation",
+              "hidden"
+            ]
+          }
+        }
+      }
     }
   },
   "required": [
-    "evaluation",
-    "workers",
-    "integrity_review"
+    "workers"
   ],
   "$defs": {
     "ComplexityConfig": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "mode": {"type": "string", "enum": ["warn", "enforce"], "default": "warn"},
-        "max_ratio": {"type": "number", "exclusiveMinimum": 0, "default": 1.2}
+        "mode": {
+          "type": "string",
+          "enum": [
+            "warn",
+            "enforce"
+          ],
+          "default": "warn"
+        },
+        "max_ratio": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1.2
+        }
       }
     },
     "DataConfig": {
@@ -348,13 +431,17 @@
         },
         "retention": {
           "$ref": "#/$defs/ComponentConfig",
-          "default": {"name": "validation_lexicographic"}
+          "default": {
+            "name": "validation_lexicographic"
+          }
         },
         "parent_sampler": {
           "$ref": "#/$defs/ComponentConfig",
           "default": {
             "name": "top_biased_validation_weighted",
-            "options": {"greedy_ratio": 0.7}
+            "options": {
+              "greedy_ratio": 0.7
+            }
           }
         }
       }
@@ -495,12 +582,20 @@
         },
         "protocol": {
           "type": "string",
-          "enum": ["auto", "anthropic", "openai_responses"],
+          "enum": [
+            "auto",
+            "anthropic",
+            "openai_responses"
+          ],
           "default": "auto"
         },
         "auth_mode": {
           "type": "string",
-          "enum": ["auto", "bearer", "x-api-key"],
+          "enum": [
+            "auto",
+            "bearer",
+            "x-api-key"
+          ],
           "default": "auto"
         },
         "max_request_bytes": {
@@ -519,7 +614,10 @@
           "default": 900
         }
       },
-      "required": ["upstream_base_url", "credential_env"]
+      "required": [
+        "upstream_base_url",
+        "credential_env"
+      ]
     },
     "IntegrityReviewConfig": {
       "type": "object",
@@ -527,12 +625,18 @@
       "properties": {
         "component": {
           "$ref": "#/$defs/ComponentConfig",
-          "default": {"name": "agent_integrity"}
+          "default": {
+            "name": "agent_integrity"
+          }
         },
         "worker": {
           "oneOf": [
-            {"$ref": "#/$defs/WorkerConfig"},
-            {"type": "null"}
+            {
+              "$ref": "#/$defs/WorkerConfig"
+            },
+            {
+              "type": "null"
+            }
           ],
           "default": null
         },
@@ -549,27 +653,31 @@
           "minimum": 0,
           "default": 1
         },
-        "strict": {
-          "type": "boolean",
-          "default": false
-        },
         "timeout_seconds": {
           "type": "integer",
           "minimum": 1,
           "default": 600
         },
         "token_budget": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1,
           "default": 4000
         },
         "max_budget_usd": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "exclusiveMinimum": 0,
           "default": null
         }
       },
-      "required": ["component"]
+      "required": [
+        "component"
+      ]
     },
     "ToolConfig": {
       "type": "object",
@@ -638,7 +746,9 @@
           "additionalProperties": true
         }
       },
-      "required": ["name"]
+      "required": [
+        "name"
+      ]
     },
     "WorkflowConfig": {
       "type": "object",
@@ -646,15 +756,21 @@
       "properties": {
         "phases": {
           "type": "array",
-          "items": {"$ref": "#/$defs/ComponentConfig"}
+          "items": {
+            "$ref": "#/$defs/ComponentConfig"
+          }
         },
         "attempt_steps": {
           "type": "array",
-          "items": {"$ref": "#/$defs/ComponentConfig"}
+          "items": {
+            "$ref": "#/$defs/ComponentConfig"
+          }
         },
         "after_iteration": {
           "type": "array",
-          "items": {"$ref": "#/$defs/ComponentConfig"}
+          "items": {
+            "$ref": "#/$defs/ComponentConfig"
+          }
         }
       }
     },
@@ -728,6 +844,209 @@
         "allow_direct_network": {
           "type": "boolean",
           "default": false
+        }
+      }
+    },
+    "evaluation_execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": [
+            "docker",
+            "unsafe_local"
+          ],
+          "default": "docker"
+        },
+        "docker_image": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3600
+        },
+        "cpus": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 2.0
+        },
+        "memory": {
+          "type": "string",
+          "minLength": 1,
+          "default": "4g"
+        },
+        "pids_limit": {
+          "type": "integer",
+          "minimum": 16,
+          "default": 512
+        },
+        "feedback_mode": {
+          "type": "string",
+          "enum": [
+            "score_only",
+            "structured_numeric",
+            "full_artifacts"
+          ],
+          "default": "score_only"
+        },
+        "forbidden_candidate_imports": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "max_smoke_calls_per_worker": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 20
+        },
+        "max_public_calls_per_worker": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 5
+        },
+        "adapter": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",
+          "default": "optiprofiler"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "backend": {
+                "const": "docker"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "docker_image"
+            ],
+            "properties": {
+              "docker_image": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0
+        },
+        "mode": {
+          "enum": [
+            "warn",
+            "enforce"
+          ]
+        },
+        "options": {
+          "type": "object"
+        }
+      }
+    },
+    "performance_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "benchmark": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": true,
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "load"
+                ]
+              },
+              {
+                "required": [
+                  "solvers_to_load"
+                ]
+              }
+            ]
+          }
+        },
+        "smoke_overrides": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": true,
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "load"
+                ]
+              },
+              {
+                "required": [
+                  "solvers_to_load"
+                ]
+              }
+            ]
+          }
+        },
+        "reference": {
+          "type": "string",
+          "enum": [
+            "initial",
+            "scipy_nelder_mead",
+            "scipy_powell",
+            "scipy_cobyla",
+            "scipy_cobyqa",
+            "pdfo",
+            "pdfo_uobyqa",
+            "pdfo_newuoa",
+            "pdfo_bobyqa",
+            "pdfo_lincoa",
+            "pdfo_cobyla",
+            "prima",
+            "prima_uobyqa",
+            "prima_newuoa",
+            "prima_bobyqa",
+            "prima_lincoa",
+            "prima_cobyla"
+          ],
+          "default": "initial"
+        },
+        "fitness_source": {
+          "type": "string",
+          "enum": [
+            "solver_scores",
+            "profile_scores_mean"
+          ],
+          "default": "solver_scores"
+        }
+      }
+    },
+    "complexity_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_ratio": {
+          "type": "number",
+          "exclusiveMinimum": 0
         }
       }
     }

@@ -14,23 +14,21 @@ from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
 
-from optiprofiler_evolve.evaluation.broker import BrokerConnection
-from optiprofiler_evolve.shared.agent_helpers import copy_role_input as _copy_role_input
-from optiprofiler_evolve.shared.agent_helpers import redact_role_input as _redact_role_input
-from optiprofiler_evolve.shared.agent_helpers import safe_identifier as _safe_identifier
-from optiprofiler_evolve.shared.agent_helpers import worker_exit_warning as _worker_exit_warning
-from optiprofiler_evolve.shared.config import ToolConfig
-from optiprofiler_evolve.shared.errors import RunCancelled as _RunCancelled
-from optiprofiler_evolve.shared.protocols import (
+from optiprofiler_evolve.agents.broker import BrokerConnection
+from optiprofiler_evolve.agents.contracts import (
     AgentJob,
     AgentJobResult,
     WorkerOutcome,
     WorkerRequest,
 )
-from optiprofiler_evolve.shared.research import safe_relative_path
-from optiprofiler_evolve.shared.solver import (
-    validate_tree_safety,
-)
+from optiprofiler_evolve.agents.jobs import copy_role_input as _copy_role_input
+from optiprofiler_evolve.agents.jobs import redact_role_input as _redact_role_input
+from optiprofiler_evolve.agents.jobs import safe_identifier as _safe_identifier
+from optiprofiler_evolve.agents.jobs import worker_exit_warning as _worker_exit_warning
+from optiprofiler_evolve.config import ToolConfig
+from optiprofiler_evolve.errors import RunCancelled as _RunCancelled
+from optiprofiler_evolve.files import safe_relative_path
+from optiprofiler_evolve.solver import validate_tree_safety
 
 
 class RoleJobs:
@@ -64,8 +62,6 @@ class RoleJobs:
             max_bytes=engine.config.sandbox.max_candidate_bytes * 8,
         )
 
-        if engine.complexity is not None:
-            job = replace(job, prompt=job.prompt + "\n\n" + engine.complexity.prompt())
         tools = job.tools or ToolConfig(
             preset="minimal",
             web_search=False,

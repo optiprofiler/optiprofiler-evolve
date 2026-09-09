@@ -7,23 +7,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from optiprofiler_evolve.shared.config import ComponentConfig, load_config
-from optiprofiler_evolve.controller.engine import EvolutionEngine
-from optiprofiler_evolve.shared.models import CandidateRecord, EvaluationResult
-from optiprofiler_evolve.phases.explore.policies.builtin import MigrationPolicy
-from optiprofiler_evolve.shared.protocols import (
-    ControllerServices,
-    IterationView,
-    PopulationEdit,
-    StepResult,
-)
-from optiprofiler_evolve.controller.registry import build
-from optiprofiler_evolve.shared.protocols import WorkerOutcome
-from optiprofiler_evolve.shared.solver import InterfaceSpec
-from optiprofiler_evolve.phases.report.viewers import materialize_public_bundle, render_status
-
-from worker_helpers import RunnerAdapter
 from test_config import minimal_config
+from worker_helpers import RunnerAdapter
+
+from optiprofiler_evolve.agents.contracts import WorkerOutcome
+from optiprofiler_evolve.config import ComponentConfig, load_config
+from optiprofiler_evolve.controller.contracts import ControllerServices
+from optiprofiler_evolve.controller.engine import EvolutionEngine
+from optiprofiler_evolve.controller.registry import build
+from optiprofiler_evolve.models import CandidateRecord, EvaluationResult
+from optiprofiler_evolve.observability.views.public import materialize_public_bundle, render_status
+from optiprofiler_evolve.phases.attempts.contracts import IterationView, PopulationEdit, StepResult
+from optiprofiler_evolve.phases.attempts.policies import MigrationPolicy
+from optiprofiler_evolve.solver import InterfaceSpec
 
 
 class FakeEvaluator:
@@ -90,7 +86,7 @@ class StopAfterFirstIteration:
     name = "stop_after_first"
 
     def propose(self, view: object) -> PopulationEdit:
-        return PopulationEdit(stop=getattr(view, "iteration") >= 1, reason="test")
+        return PopulationEdit(stop=view.iteration >= 1, reason="test")
 
 
 class UnsupportedBudgetPolicy:
@@ -107,7 +103,7 @@ class SeedCaptureStep:
         self.seeds: dict[str, int] = {}
 
     def run(self, context: object) -> StepResult:
-        self.seeds[getattr(context, "attempt_id")] = getattr(context, "rng_seed")
+        self.seeds[context.attempt_id] = context.rng_seed
         return StepResult()
 
 
@@ -182,7 +178,7 @@ class ExtensibilityTests(unittest.TestCase):
         self.assertEqual(reordered.workflow.attempt_steps[-1].name, "static_audit")
         self.assertIn("inspect_context", [step.name for step in inserted.workflow.attempt_steps])
         with self.assertRaises(TypeError):
-            base.evaluation.benchmark["new"] = True  # type: ignore[index]
+            base.evaluation_config().benchmark["new"] = True  # type: ignore[index]
 
     def test_phase_options_are_immutable_ablation_variants(self) -> None:
         base = load_config(minimal_config()).with_phase(

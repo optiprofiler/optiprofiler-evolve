@@ -39,13 +39,16 @@ changed deliberately with matching tests.
 
 The supported extension slots are `Phase`, `AttemptStep`,
 `AfterIterationPolicy`, `RetentionPolicy`, `ParentSampler`, `CandidateReviewer`,
-`WorkerAdapter`, and `Evaluator`.
+`WorkerAdapter`, `Evaluator`, and `Criterion`.
 
 - A trusted custom component can be supplied directly without editing framework
   files.
 - A package built-in needs its implementation, one explicit registry entry, and
   tests. It must not require an `engine.py` branch.
-- Each core and optional phase has a concrete class in its own directory.
+- Each core and optional phase has a concrete class in `phases/<name>.py`,
+  alongside its specific context and result types. Helpers belong to their
+  owning subsystem, not a catch-all shared package. A directory must represent
+  a real multi-module subsystem, not merely wrap one class or one file.
   The fixed five core contexts are bound by the controller; optional extensions
   use `PhaseContext` and the existing five capabilities. There is no string
   action dispatcher or engine mixin hierarchy behind the phase classes.
@@ -62,6 +65,11 @@ The supported extension slots are `Phase`, `AttemptStep`,
   provider, tool and broker authority. The client owns trace lifecycle and
   declared output collection, but never candidate admission or phase scheduling.
   Pure evaluation phases do not invoke a model.
+- Solver proposal/edit tasks use `SolverJob`. The LLM entrypoint combines their
+  task with criterion-owned generation guidance, using controller-bound public
+  rule fields only. Review jobs never inherit those instructions. Each
+  `Criterion` owns both its assessment and its generation guidance; stages must
+  not hard-code standard-specific instructions or append special-case notes.
 - Trusted phases receive one frozen `ControllerServices` value capped at five
   operations: run a sanitized role agent, materialize a gated variant, evaluate
   a public variant, select IDs by controller validation, and register a finalist.
@@ -76,9 +84,11 @@ The supported extension slots are `Phase`, `AttemptStep`,
 - Retention and parent sampling are read-only proposals over one bounded island
   archive. They cannot admit candidates, change lineage, exceed capacity, or
   bypass controller validation.
-- The semantic integrity gate is a non-removable engine operation after public
-  checks and before every validation query. Its reviewer implementation is
-  replaceable; an unsafe approval stub requires explicit double opt-in.
+- Quality criteria have equal authority: performance, complexity and integrity
+  can each be disabled, weighted, or enforced. A shared runner applies their
+  verdicts; only the controller admits candidates. Formal assessment requires
+  an enabled positive-weight criterion. Disabled checks never fabricate scores
+  or approval, and execution safety boundaries remain mandatory.
 
 ## 5. Trust and isolation
 

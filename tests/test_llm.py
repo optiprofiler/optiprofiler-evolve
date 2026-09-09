@@ -6,17 +6,46 @@ import threading
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import Mock
 
 from test_config import minimal_config
 from worker_helpers import RunnerAdapter
 
+from optiprofiler_evolve.agents.contracts import AgentJob, SolverJob, WorkerOutcome, WorkerRequest
 from optiprofiler_evolve.agents.llm import LLMClient
+from optiprofiler_evolve.config import load_config
 from optiprofiler_evolve.observability.trace_ledger import TraceLedger
-from optiprofiler_evolve.shared.config import load_config
-from optiprofiler_evolve.shared.protocols import AgentJob, WorkerOutcome, WorkerRequest
 
 
 class LLMClientTests(unittest.TestCase):
+    def test_solver_guidance_is_rendered_once_and_recorded_in_the_trace(self) -> None:
+        client = self.client(lambda kwargs: WorkerOutcome(0, kwargs["transcript"]))
+        guidance = Mock(return_value="SYNTHETIC_CRITERION_GUIDANCE")
+        client.generation_guidance = guidance
+        job = SolverJob("explorer", "job", "Edit the solver.")
+        client.run(job)
+        guidance.assert_called_once_with()
+        self.assertEqual(job.prompt, "Edit the solver.")
+        prompt = self.calls[0]["prompt"]
+        self.assertEqual(prompt, f"{job.prompt}\n\n{guidance.return_value}")
+        self.assertEqual(prompt.count(guidance.return_value), 1)
+        self.assertTrue(any(guidance.return_value in p.read_text() for p in
+                            self.request.trace_dir.rglob("*.txt")))
+
+    def test_review_job_never_requests_generation_guidance(self) -> None:
+        client = self.client(lambda kwargs: WorkerOutcome(0, kwargs["transcript"]))
+        client.generation_guidance = Mock(side_effect=AssertionError("review is not generation"))
+        job = AgentJob("integrity-reviewer", "job", "Review the solver independently.")
+        client.run(job)
+        client.generation_guidance.assert_not_called()
+        self.assertEqual(self.calls[0]["prompt"], job.prompt)
+
+    def test_solver_job_cannot_silently_omit_criterion_guidance(self) -> None:
+        client = self.client(lambda kwargs: WorkerOutcome(0, kwargs["transcript"]))
+        with self.assertRaisesRegex(ValueError, "controller-bound criterion guidance"):
+            client.run(SolverJob("explorer", "job", "Edit."))
+        self.assertFalse(self.calls)
+
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

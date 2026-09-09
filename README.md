@@ -22,15 +22,16 @@ independent solver workspaces, an anonymous experiment manifest, and two tools:
 `smoke_test` for a small public subset and `evaluate` for all public problems.
 Validation selects one champion inside the controller; hidden problems evaluate
 that fixed champion once and never influence the worker or population loop.
-Every public-gated candidate also passes an independent semantic integrity
-review before validation or population admission.
+Enabled quality standards assess each candidate before population admission.
+Performance, complexity and semantic integrity have independent weights and
+can each be disabled; see [Algorithm assessment](docs/assessment.md).
 
 ## Alpha status
 
 The Python path is an end-to-end MVP: repository candidates, deterministic data
 splits, OptiProfiler scoring, Codex/Claude workers, Docker isolation, four-island
 population evolution, checkpoints, migration, validation selection, and a final
-hidden holdout evaluation. An optional full research workflow adds a direction
+hidden holdout execution. An optional full research workflow adds a direction
 scout, per-island strategy attribution with executable leave-one-out ablations,
 bounded cross-island recombination, and a post-selection strong-challenger
 report. These are configured phases, not additional public APIs.

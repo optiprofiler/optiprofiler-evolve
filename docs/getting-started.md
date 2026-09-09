@@ -157,9 +157,9 @@ After this exploration-only path is stable, switch the YAML to the ordered
 research phases in `examples/experiment-research.yaml`. Do not enable every
 phase merely to test provider connectivity: strategy attribution and
 recombination add extra public and controller-only validation evaluations. A
-mandatory integrity-review agent also runs once for every candidate that
-survives public checks, with one retry on malformed or unavailable output by
-default.
+default-enabled integrity-review agent also assesses the initial solver and
+each candidate that survives public checks, with one retry on malformed or
+unavailable output by default. Its weight and enabled state are configurable.
 
 To launch this same flow from GitHub Actions, start from the
 [single-job template](github-actions.md). GitHub Actions does not schedule

@@ -9,18 +9,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from optiprofiler_evolve.evaluation.broker import EvaluationBroker
-from optiprofiler_evolve.shared.config import EvaluationConfig
-from optiprofiler_evolve.shared.data import DataPlan
-from optiprofiler_evolve.evaluation.evaluation import (
+from optiprofiler_evolve.agents.broker import EvaluationBroker
+from optiprofiler_evolve.config import EvaluationConfig
+from optiprofiler_evolve.criteria.performance.evaluator import (
     DockerOptiProfilerEvaluator,
     PythonOptiProfilerEvaluator,
-    _profile_scores_mean_fitness,
     _problems_for_mode,
+    _profile_scores_mean_fitness,
     _sanitize_worker_artifacts,
     _scoped_data_manifest,
 )
-from optiprofiler_evolve.shared.solver import InterfaceSpec
+from optiprofiler_evolve.data import DataPlan
+from optiprofiler_evolve.solver import InterfaceSpec
 
 
 class ProfileTensorFitnessTests(unittest.TestCase):
@@ -143,7 +143,7 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
                 ),
             )
             completed = types.SimpleNamespace(returncode=1, stdout="expected test failure")
-            with patch("optiprofiler_evolve.evaluation.evaluation.subprocess.run", return_value=completed):
+            with patch("optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", return_value=completed):
                 result = evaluator.evaluate(candidate, "public", root / "output")
             self.assertFalse(result.success)
             self.assertIn("code 1", result.error or "")
@@ -305,7 +305,7 @@ class DockerRequestStagingTests(unittest.TestCase):
             return types.SimpleNamespace(returncode=7, stdout="evaluator refused")
 
         with patch(
-            "optiprofiler_evolve.evaluation.evaluation.subprocess.run", side_effect=fake_run
+            "optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", side_effect=fake_run
         ):
             result = evaluator.evaluate(candidate, "smoke", output_dir)
         return seen, result
@@ -399,7 +399,7 @@ class DockerRequestStagingTests(unittest.TestCase):
                 return types.SimpleNamespace(returncode=7, stdout="refused")
 
             with patch(
-                "optiprofiler_evolve.evaluation.evaluation.subprocess.run", side_effect=fake_run
+                "optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", side_effect=fake_run
             ):
                 broker._evaluate_and_publish("smoke", output)
 

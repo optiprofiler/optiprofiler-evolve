@@ -4,6 +4,7 @@ import dataclasses
 import json
 import os
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
 from unittest.mock import patch
@@ -11,9 +12,8 @@ from unittest.mock import patch
 import jsonschema
 import yaml
 
-from optiprofiler_evolve.shared.config import EvolveConfig, load_config
-from optiprofiler_evolve.shared.solver import InterfaceSpec, validate_interface
-
+from optiprofiler_evolve.config import EvolveConfig, load_config
+from optiprofiler_evolve.solver import InterfaceSpec, validate_interface
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -92,6 +92,9 @@ def _dataclass_paths(cls: type[Any], prefix: str = "") -> set[str]:
         annotation = hints[field.name]
         path = f"{prefix}.{field.name}" if prefix else field.name
         args = get_args(annotation)
+        if get_origin(annotation) is Mapping and len(args) == 2 and dataclasses.is_dataclass(args[1]):
+            paths.update(_dataclass_paths(args[1], f"{path}.<name>"))
+            continue
         if get_origin(annotation) is tuple and args and dataclasses.is_dataclass(args[0]):
             paths.update(_dataclass_paths(args[0], f"{path}[]"))
             continue
@@ -118,6 +121,10 @@ def _schema_paths(root: dict[str, Any], node: dict[str, Any], prefix: str = "") 
     for name, raw_child in node.get("properties", {}).items():
         path = f"{prefix}.{name}" if prefix else name
         child = _resolve_schema(root, raw_child)
+        additional = child.get("additionalProperties")
+        if child.get("type") == "object" and isinstance(additional, dict) and "$ref" in additional:
+            paths.update(_schema_paths(root, _resolve_schema(root, additional), f"{path}.<name>"))
+            continue
         if child.get("type") == "object" and "properties" in child:
             paths.update(_schema_paths(root, child, path))
             continue

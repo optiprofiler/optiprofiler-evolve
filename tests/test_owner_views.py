@@ -7,15 +7,15 @@ import unittest
 from pathlib import Path
 from urllib.parse import unquote
 
-from optiprofiler_evolve.phases.report.owner_views import (
+from optiprofiler_evolve.observability.projections import project_public_events
+from optiprofiler_evolve.observability.views.owner import (
     _lineage_lanes,
     _ordered_islands,
     _render_lineage_graph,
     _render_score_chart,
     render_owner_views,
 )
-from optiprofiler_evolve.observability.projections import project_public_events
-from optiprofiler_evolve.phases.report.viewers import (
+from optiprofiler_evolve.observability.views.public import (
     materialize_public_bundle,
     render_final_report,
     render_public_report,

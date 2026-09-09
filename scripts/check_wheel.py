@@ -6,7 +6,6 @@ import sys
 import zipfile
 from pathlib import Path
 
-
 wheel = Path(sys.argv[1])
 forbidden = ("/tests/", "/examples/", "/recipes/", "/legacy/")
 with zipfile.ZipFile(wheel) as archive:

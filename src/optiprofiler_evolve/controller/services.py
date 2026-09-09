@@ -5,26 +5,23 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .engine import EvolutionEngine
+    from optiprofiler_evolve.controller.engine import EvolutionEngine
 
 import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
-from optiprofiler_evolve.evaluation.references import materialize_reference
-from optiprofiler_evolve.shared.agent_helpers import safe_identifier as _safe_identifier
-from optiprofiler_evolve.shared.files import append_json as _append_json
-from optiprofiler_evolve.shared.files import write_json as _write_json
-from optiprofiler_evolve.shared.models import CandidateRecord, EvaluationResult
-from optiprofiler_evolve.shared.patches import apply_patch as _apply_patch
-from optiprofiler_evolve.shared.patches import require_inside as _require_inside
-from optiprofiler_evolve.shared.patches import validate_patch_paths as _validate_patch_paths
-from optiprofiler_evolve.shared.protocols import (
-    VariantHandle,
-    VariantRequest,
-)
-from optiprofiler_evolve.shared.research import file_hash
-from optiprofiler_evolve.shared.solver import (
+from optiprofiler_evolve.agents.jobs import safe_identifier as _safe_identifier
+from optiprofiler_evolve.controller.contracts import VariantHandle, VariantRequest
+from optiprofiler_evolve.controller.patches import apply_patch as _apply_patch
+from optiprofiler_evolve.controller.patches import require_inside as _require_inside
+from optiprofiler_evolve.controller.patches import validate_patch_paths as _validate_patch_paths
+from optiprofiler_evolve.criteria.performance.references import materialize_reference
+from optiprofiler_evolve.files import append_json as _append_json
+from optiprofiler_evolve.files import file_hash
+from optiprofiler_evolve.files import write_json as _write_json
+from optiprofiler_evolve.models import CandidateRecord, EvaluationResult
+from optiprofiler_evolve.solver import (
     changed_files,
     copy_solver_tree,
     tree_hash,
@@ -71,7 +68,6 @@ class EngineControllerServices:
                     _apply_patch(staging, patch)
                     change_hashes.append(file_hash(patch))
             engine._validate_candidate(staging)
-            engine._check_complexity(staging, {"variant_id": variant_id})
             changed = changed_files(base, staging)
             if not changed:
                 raise ValueError("Executable variant produced no solver-tree change.")
@@ -133,10 +129,10 @@ class EngineControllerServices:
         label = _safe_identifier(label, "evaluation label")
         if tree_hash(handle.path) != handle.tree_hash:
             raise ValueError(f"Variant tree changed after materialization: {handle.variant_id}")
-        engine._check_complexity(handle.path, {"variant_id": handle.variant_id})
         if engine.evaluator is None or engine.data is None:
             raise RuntimeError("Public variant evaluation requires a prepared evaluator.")
         evaluator = engine.evaluator
+        reference_path = None
         if mode not in {"smoke", "public_score"}:
             raise ValueError("Research variants may use only smoke or public_score evaluation.")
         evaluation_mode = mode
@@ -151,21 +147,19 @@ class EngineControllerServices:
                     initial=engine.initial,
                     destination=challenger_root,
                     interface=engine.interface,
-                    config=replace(engine.config.evaluation, reference=reference),
+                    config=replace(engine.config.evaluation_config(), reference=reference),
                     ptype=ptype,
                 )
-            evaluator = engine.evaluator_factory(
-                runtime=engine.runtime,
-                reference=challenger_root,
-                interface=engine.interface,
-                data=engine.data,
-                config=replace(engine.config.evaluation, reference=reference),
-            )
+            reference_path = challenger_root
             evaluation_mode = "public"
         output_dir = (
             engine.run_dir / "controller" / "research_evaluations" / handle.variant_id / label
         )
-        result = evaluator.evaluate(handle.path, evaluation_mode, output_dir)
+        result = evaluator.evaluate(
+            handle.path, evaluation_mode, output_dir, candidate_id=handle.variant_id,
+            parent=engine.variant_bases.get(handle.variant_id, engine.evaluator.seed),
+            reference=reference_path,
+        )
         if reference is None and evaluation_mode == "public_score":
             engine.variant_public[handle.variant_id] = result
         engine._emit(
@@ -180,7 +174,7 @@ class EngineControllerServices:
                     if evaluation_mode == "smoke"
                     else "public"
                 ),
-                "reference": reference or engine.config.evaluation.reference,
+                "reference": reference or engine.config.evaluation_config().reference,
                 "output_dir": str(result.output_dir),
                 "success": result.success,
             },
@@ -200,12 +194,9 @@ class EngineControllerServices:
             if record is not None:
                 if not record.valid:
                     continue
-                report = engine._assess_complexity(record.path, {"variant_id": candidate_id})
-                if report is not None and report.blocked:
+                if record.assessment_score is None or tree_hash(record.path) != record.tree_hash:
                     continue
-                if record.candidate_id != "seed" and record.review_verdict != "approve":
-                    continue
-                ranked.append((record.validation_score, record.public_score, candidate_id))
+                ranked.append((record.ranking_score, 0.0, candidate_id))
                 continue
             handle = engine.variant_handles.get(candidate_id)
             if handle is None:
@@ -219,19 +210,10 @@ class EngineControllerServices:
                     "before integrity review and validation selection."
                 )
             base = engine.variant_bases.get(candidate_id)
-            engine._check_complexity(handle.path, {"variant_id": candidate_id})
+            if tree_hash(handle.path) != handle.tree_hash:
+                raise ValueError("Variant changed after materialization.")
             if base is None:
                 raise RuntimeError(f"Research variant {candidate_id!r} has no recorded base tree.")
-            decision, _report = engine._review_candidate(
-                candidate_id=candidate_id,
-                candidate=handle.path,
-                parent=base,
-                changed=changed_files(base, handle.path),
-                mutation_transcript=None,
-                mutation_worker=None,
-            )
-            if decision.verdict != "approve":
-                continue
             result = engine.variant_validation.get(candidate_id)
             if result is None:
                 if engine.evaluator is None:
@@ -244,14 +226,17 @@ class EngineControllerServices:
                     / "research_evaluations"
                     / candidate_id
                     / "validation",
+                    candidate_id=candidate_id, parent=base,
                 )
                 engine.variant_validation[candidate_id] = result
                 engine.validation_query_count += 1
                 new_queries += 1
+            if not result.success or result.assessment_score is None:
+                continue
             ranked.append(
                 (
-                    result.score if result.success else 0.0,
-                    public.score if public is not None and public.success else 0.0,
+                    result.assessment_score,
+                    0.0,
                     candidate_id,
                 )
             )
@@ -294,13 +279,11 @@ class EngineControllerServices:
         engine = self.engine
         if handle.variant_id not in engine.variant_handles:
             raise ValueError("Only a gated controller variant can be registered as a finalist.")
-        engine._check_complexity(handle.path, {"variant_id": handle.variant_id})
+        if tree_hash(handle.path) != handle.tree_hash:
+            raise ValueError("Variant changed after formal assessment.")
         validation = engine.variant_validation.get(handle.variant_id)
-        if validation is None or not validation.success:
+        if validation is None or not validation.success or validation.assessment_score is None:
             raise ValueError("A research finalist must pass controller validation first.")
-        review = engine.integrity_reviews.get(handle.variant_id)
-        if review is None or review.verdict != "approve":
-            raise ValueError("A research finalist must pass integrity review first.")
         public = engine.variant_public.get(handle.variant_id)
         public_score = (
             public.score
@@ -323,14 +306,8 @@ class EngineControllerServices:
             public_score=public_score,
             validation_score=validation.score,
             selection_metrics=validation.metric_bundle,
-            review_verdict=review.verdict,
-            review_report=str(
-                engine.run_dir
-                / "controller"
-                / "integrity_reviews"
-                / handle.variant_id
-                / "decision.json"
-            ),
+            assessment_score=validation.assessment_score,
+            assessment=validation.assessment,
             worker="controller:research",
         )
         engine.candidates[record.candidate_id] = record

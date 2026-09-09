@@ -5,7 +5,6 @@ from pathlib import Path
 
 from optiprofiler_evolve import evolve
 
-
 ROOT = Path(__file__).resolve().parents[2]
 RUN_DIR = Path(os.environ.get("OPTIPROFILER_EVOLVE_RUN_DIR", "runs/github-actions"))
 CONFIG = Path(

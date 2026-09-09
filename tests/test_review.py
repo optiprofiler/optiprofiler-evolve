@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.quality.review import (
-    IntegrityReviewRequest,
+from optiprofiler_evolve.criteria.integrity.reviewer import (
     REQUIRED_CHECKS,
+    IntegrityReviewRequest,
     _review_prompt,
     parse_review,
     write_sanitized_transcript,

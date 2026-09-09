@@ -6,9 +6,9 @@ import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 
-from optiprofiler_evolve.shared.config import WorkerConfig
-from optiprofiler_evolve.shared.protocols import WorkerOutcome, WorkerRequest
+from optiprofiler_evolve.agents.contracts import WorkerOutcome, WorkerRequest
 from optiprofiler_evolve.agents.sandbox import run_agent
+from optiprofiler_evolve.config import WorkerConfig
 
 
 class CliWorkerAdapter:

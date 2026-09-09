@@ -1,1 +1,0 @@
-"""Internal challenger package."""

@@ -6,18 +6,18 @@ import threading
 from collections.abc import Callable
 from dataclasses import replace
 
-from optiprofiler_evolve.agents.docker_runtime import read_gateway_outcome
-from optiprofiler_evolve.observability.trace_ledger import TraceLedger
-from optiprofiler_evolve.observability.traces import finalize_adapter_trace
-from optiprofiler_evolve.shared.agent_helpers import trace_event_scope as _trace_event_scope
-from optiprofiler_evolve.shared.protocols import (
+from optiprofiler_evolve.agents.contracts import (
     AgentJob,
     AgentJobResult,
     WorkerAdapter,
     WorkerOutcome,
     WorkerRequest,
 )
-from optiprofiler_evolve.shared.research import safe_relative_path
+from optiprofiler_evolve.agents.docker_runtime import read_gateway_outcome
+from optiprofiler_evolve.agents.jobs import trace_event_scope as _trace_event_scope
+from optiprofiler_evolve.files import safe_relative_path
+from optiprofiler_evolve.observability.trace_ledger import TraceLedger
+from optiprofiler_evolve.observability.traces import finalize_adapter_trace
 
 
 class LLMClient:
@@ -35,6 +35,7 @@ class LLMClient:
         ledger: TraceLedger,
         emit: Callable[..., None],
         record_usage: Callable[[WorkerRequest, WorkerOutcome], None],
+        generation_guidance: Callable[[], str] | None = None,
     ) -> None:
         self.adapter = adapter
         self.request = request
@@ -42,9 +43,10 @@ class LLMClient:
         self.cancellation_event = request.cancellation_event or threading.Event()
         self.emit = emit
         self.record_usage = record_usage
+        self.generation_guidance = generation_guidance
 
     def run(self, job: AgentJob) -> AgentJobResult:
-        request = replace(self.request, prompt=job.prompt)
+        request = replace(self.request, prompt=job.render_prompt(self.generation_guidance))
         outcome = self._execute(request)
         outputs = {}
         for relative in job.expected_outputs:

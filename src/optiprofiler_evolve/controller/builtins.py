@@ -5,38 +5,47 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from optiprofiler_evolve.evaluation.evaluation import create_evaluator
-from optiprofiler_evolve.phases.prepare.phase import PreparePhase
-from optiprofiler_evolve.phases.explore.phase import ExplorePhase
-from optiprofiler_evolve.phases.validate.phase import ValidatePhase
-from optiprofiler_evolve.phases.hidden.phase import HiddenPhase
-from optiprofiler_evolve.phases.report.phase import ReportPhase
-from optiprofiler_evolve.phases.challenger.phase import ChallengerPhase
-from optiprofiler_evolve.phases.direction_scout.phase import DirectionScoutPhase
-from optiprofiler_evolve.phases.recombine.phase import RecombinePhase
-from optiprofiler_evolve.phases.strategy_analysis.phase import StrategyAnalysisPhase
-from optiprofiler_evolve.phases.strategy_transfer.phase import StrategyTransferPhase
-from optiprofiler_evolve.phases.explore.policies.builtin import EarlyStopPolicy, MigrationPolicy
+from optiprofiler_evolve.agents.workers import CliWorkerAdapter
 from optiprofiler_evolve.controller.registry import register, registered
-from optiprofiler_evolve.quality.review import AgentIntegrityReviewer, UnsafeApproveReviewer
 from optiprofiler_evolve.controller.selection import (
     MetricParetoRetention,
     TopBiasedValidationWeightedSampler,
     ValidationLexicographicRetention,
 )
-from optiprofiler_evolve.phases.explore.steps.builtin import (
+from optiprofiler_evolve.criteria.complexity.criterion import ComplexityCriterion
+from optiprofiler_evolve.criteria.integrity.criterion import IntegrityCriterion
+from optiprofiler_evolve.criteria.integrity.reviewer import (
+    AgentIntegrityReviewer,
+    UnsafeApproveReviewer,
+)
+from optiprofiler_evolve.criteria.performance.criterion import PerformanceCriterion
+from optiprofiler_evolve.criteria.performance.evaluator import create_evaluator
+from optiprofiler_evolve.phases.attempts.policies import EarlyStopPolicy, MigrationPolicy
+from optiprofiler_evolve.phases.attempts.steps import (
     FeedbackStep,
     MutateStep,
     PublicEvaluateStep,
     SmokeStep,
     StaticAuditStep,
 )
-from optiprofiler_evolve.agents.workers import CliWorkerAdapter
+from optiprofiler_evolve.phases.challenger import ChallengerPhase
+from optiprofiler_evolve.phases.direction_scout import DirectionScoutPhase
+from optiprofiler_evolve.phases.explore import ExplorePhase
+from optiprofiler_evolve.phases.hidden import HiddenPhase
+from optiprofiler_evolve.phases.prepare import PreparePhase
+from optiprofiler_evolve.phases.recombine import RecombinePhase
+from optiprofiler_evolve.phases.report import ReportPhase
+from optiprofiler_evolve.phases.strategy_analysis import StrategyAnalysisPhase
+from optiprofiler_evolve.phases.strategy_transfer import StrategyTransferPhase
+from optiprofiler_evolve.phases.validate import ValidatePhase
 
 
 def register_builtin_components() -> None:
     """Populate the explicit local registries exactly once."""
 
+    _register("criterion", "complexity", ComplexityCriterion)
+    _register("criterion", "integrity", IntegrityCriterion)
+    _register("criterion", "performance", PerformanceCriterion)
     _register("step", "mutate", MutateStep)
     _register("step", "static_audit", StaticAuditStep)
     _register("step", "smoke", SmokeStep)

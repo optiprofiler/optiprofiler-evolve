@@ -1,1 +1,0 @@
-"""Internal strategy analysis package."""

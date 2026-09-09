@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from optiprofiler_evolve.phases.prepare.phase import PreparePhase
-
 import difflib
 import json
 import shutil
@@ -9,17 +7,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.shared.config import load_config
-from optiprofiler_evolve.controller.engine import EvolutionEngine
-from optiprofiler_evolve.shared.models import EvaluationResult
-from optiprofiler_evolve.phases.recombine.phase import RecombinePhase
-from optiprofiler_evolve.phases.strategy_analysis.phase import StrategyAnalysisPhase
-from optiprofiler_evolve.shared.protocols import PhaseContext, VariantRequest
-from optiprofiler_evolve.shared.protocols import WorkerOutcome
-from optiprofiler_evolve.shared.solver import InterfaceSpec, tree_hash
-
-from worker_helpers import RunnerAdapter
 from test_config import minimal_config
+from worker_helpers import RunnerAdapter
+
+from optiprofiler_evolve.agents.contracts import WorkerOutcome
+from optiprofiler_evolve.config import load_config
+from optiprofiler_evolve.controller.contracts import VariantRequest
+from optiprofiler_evolve.controller.engine import EvolutionEngine
+from optiprofiler_evolve.models import EvaluationResult
+from optiprofiler_evolve.phases.contracts import PhaseContext
+from optiprofiler_evolve.phases.prepare import PreparePhase
+from optiprofiler_evolve.phases.recombine import RecombinePhase
+from optiprofiler_evolve.phases.strategy_analysis import StrategyAnalysisPhase
+from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
 
 
 class ResearchEvaluator:
@@ -686,16 +686,9 @@ class ResearchHarnessTests(unittest.TestCase):
             self.assertGreaterEqual(usage["selection_calls"], 6)
             self.assertEqual(usage["new_evaluations"], 3)
             for candidate_id in ("bundle-island-0", "bundle-island-1", "combo-001"):
-                self.assertEqual(engine.integrity_reviews[candidate_id].verdict, "approve")
+                self.assertEqual(engine.candidates[candidate_id].assessment["results"]["integrity"]["metrics"]["verdict"], "approve")
                 self.assertTrue(
-                    (
-                        root
-                        / "run"
-                        / "controller"
-                        / "integrity_reviews"
-                        / candidate_id
-                        / "decision.json"
-                    ).is_file()
+                    Path(engine.candidates[candidate_id].assessment["results"]["integrity"]["evidence"][0]).is_file()
                 )
 
     def test_variant_gate_rejects_out_of_scope_and_conflicting_patches(self) -> None:

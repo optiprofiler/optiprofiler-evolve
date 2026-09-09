@@ -45,16 +45,26 @@ agent, or problem libraries while working here. They are independent packages.
 | Concern | Module or document |
 |---|---|
 | Public call | `src/optiprofiler_evolve/api.py` |
-| Typed config | `shared/config.py`, `config.schema.json`, `docs/config-reference.md` |
-| Workflow contracts | `shared/protocols.py`, `controller/registry.py`, `phases/*/phase.py` |
+| Typed config | `config.py`, `config.schema.json`, `docs/config-reference.md` |
+| Workflow contracts | `phases/contracts.py`, `controller/contracts.py`, `controller/registry.py` |
 | Population and selection | `controller/engine.py`, `controller/selection.py`, `controller/phase_contexts.py` |
-| Attempts and policies | `controller/attempts.py`, `phases/explore/steps/`, `phases/explore/policies/` |
+| Attempts and policies | `phases/attempts/runner.py`, `phases/attempts/steps.py`, `phases/attempts/policies.py` |
 | Unified LLM entry and isolation | `agents/llm.py`, `agents/workers.py`, `agents/harness.py`, `agents/sandbox.py` |
-| OptiProfiler calls and public broker | `evaluation/evaluation.py`, `evaluation/broker.py` |
-| Solver/data boundaries | `shared/solver.py`, `shared/data.py` |
-| Research evidence | `shared/research.py`, optional stage directories under `phases/` |
-| Complexity and integrity gates | `quality/complexity.py`, `quality/review.py` |
-| Events and local views | `observability/`, `phases/report/` |
+| OptiProfiler calls and public broker | `criteria/performance/evaluator.py`, `agents/broker.py` |
+| Solver/data boundaries | `solver.py`, `data.py` |
+| Research evidence | `phases/_research.py`, `criteria/performance/evidence.py` |
+| Criteria and scoring | `criteria/contracts.py`, `criteria/runner.py`, `criteria/{performance,complexity,integrity}/` |
+| Events, reports and local views | `observability/`, `observability/views/` |
+
+Each phase has one module, `phases/<name>.py`, containing its class and specific
+context/result types. Keep subsystem-only helpers inside their owning package;
+only genuinely cross-subsystem foundations belong at the package root. Do not
+reintroduce generic `shared` or `quality` buckets or single-file phase packages.
+
+Criteria own both `assess` and `generation_guidance`. Use `SolverJob` for solver
+proposal/edit tasks; the unified LLM entrypoint supplies their criterion guidance.
+Keep review jobs independent, and expose only explicitly public rule fields to
+generation guidance, never evaluation data, private results or credentials.
 
 When adding a config field, update the dataclass, JSON Schema, configuration
 reference, a checked-in example when relevant, and tests. Documentation tests

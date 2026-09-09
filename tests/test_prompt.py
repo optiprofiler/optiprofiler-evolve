@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from optiprofiler_evolve.shared.data import DataPlan
-from optiprofiler_evolve.phases.explore.prompt import build_worker_prompt
-from optiprofiler_evolve.shared.solver import InterfaceSpec
+from optiprofiler_evolve.data import DataPlan
+from optiprofiler_evolve.phases.attempts.prompt import build_worker_prompt
+from optiprofiler_evolve.solver import InterfaceSpec
 
 
 def _prompt_kwargs() -> dict:
@@ -27,7 +27,6 @@ def _prompt_kwargs() -> dict:
         "data": data,
         "iteration": 1,
         "island": 0,
-        "parent_score": 0.5,
         "controller_memory": None,
         "token_budget": 1000,
         "max_smoke_calls": 2,
@@ -37,17 +36,11 @@ def _prompt_kwargs() -> dict:
 
 
 class PromptTests(unittest.TestCase):
-    def test_complexity_note_only_adds_to_the_contract(self) -> None:
-        kwargs = _prompt_kwargs()
-        without_note = build_worker_prompt(**kwargs)
-        self.assertEqual(without_note, build_worker_prompt(**kwargs, complexity_note=None))
-        self.assertNotIn("Complexity budget", without_note)
-        note = "Complexity budget (warn): synthetic constraint."
-        with_note = build_worker_prompt(**kwargs, complexity_note=note)
-        self.assertEqual(with_note.count(note), 1)
-        self.assertLess(with_note.index("Contract"), with_note.index(note))
-        self.assertLess(with_note.index(note), with_note.index("Evaluation tools"))
-        self.assertEqual(without_note, with_note.replace(note, ""))
+    def test_stage_prompt_does_not_own_criterion_instructions(self) -> None:
+        prompt = build_worker_prompt(**_prompt_kwargs())
+        for text in ("Complexity budget", "render_pdf", "history plots", "public fitness"):
+            self.assertNotIn(text, prompt)
+        self.assertIn("configured full public assessment", prompt)
 
     def test_prompt_note_renders_only_when_configured(self) -> None:
         kwargs = _prompt_kwargs()
@@ -105,7 +98,6 @@ class PromptTests(unittest.TestCase):
             data=data,
             iteration=1,
             island=0,
-            parent_score=0.5,
             controller_memory=None,
             token_budget=1000,
             max_smoke_calls=3,
@@ -117,7 +109,7 @@ class PromptTests(unittest.TestCase):
         self.assertIn("at most\n  1 calls", prompt)
         self.assertIn("waiting cannot restore it", prompt)
         self.assertIn("do not sleep or retry", prompt)
-        self.assertIn("render_pdf", prompt)
+        self.assertNotIn("render_pdf", prompt)
         self.assertIn("diagnostic outputs under `/tmp`", prompt)
         self.assertIn("strict scope audit rejects", prompt)
         self.assertIn("scipy.optimize", prompt)

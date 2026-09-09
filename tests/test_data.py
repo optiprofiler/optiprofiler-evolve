@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.shared.config import DataConfig, SplitConfig
-from optiprofiler_evolve.shared.data import resolve_data_plan, write_data_manifests
+from optiprofiler_evolve.config import DataConfig, SplitConfig
+from optiprofiler_evolve.data import resolve_data_plan, write_data_manifests
 
 
 class DataPlanTests(unittest.TestCase):

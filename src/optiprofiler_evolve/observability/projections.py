@@ -9,7 +9,6 @@ from typing import Any
 
 from optiprofiler_evolve.observability.events import STATUSES, read_events
 
-
 _PUBLIC_SCOPE_KEYS = frozenset(
     {
         "phase",

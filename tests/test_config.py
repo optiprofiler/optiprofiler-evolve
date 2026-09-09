@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from optiprofiler_evolve.shared.config import load_config
+from optiprofiler_evolve.config import load_config
 
 
 def minimal_config() -> dict:
@@ -13,16 +13,19 @@ def minimal_config() -> dict:
             "problem_names": ["P1", "P2", "P3", "P4"],
             "split": {"smoke_count": 1, "hidden_fraction": 0.25},
         },
-        "evaluation": {"backend": "unsafe_local"},
+        "execution": {"backend": "unsafe_local"},
         "evolution": {"iterations": 1, "islands": 2},
         "workers": {
             "pool": [{"harness": "codex", "model": "test-model"}],
             "max_parallel": 2,
         },
-        "integrity_review": {
-            "component": {"name": "unsafe_approve"},
-            "allow_unsafe_stub": True,
-        },
+        "assessment": {"criteria": {
+            "performance": {"options": {}},
+            "integrity": {"options": {
+                "component": {"name": "unsafe_approve"}, "allow_unsafe_stub": True,
+            }},
+            "complexity": {"enabled": False, "mode": "warn"},
+        }},
         "sandbox": {"backend": "unsafe_local"},
     }
 
@@ -35,24 +38,24 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown keys"):
             load_config(raw)
         raw = minimal_config()
-        raw["evaluation"]["backend"] = "local"
+        raw["execution"]["backend"] = "local"
         with self.assertRaisesRegex(ValueError, "backend"):
             load_config(raw)
 
     def test_feedback_modes_are_explicit_and_legacy_names_are_rejected(self) -> None:
         for mode in ("score_only", "structured_numeric", "full_artifacts"):
             raw = minimal_config()
-            raw["evaluation"]["feedback_mode"] = mode
-            self.assertEqual(load_config(raw).evaluation.feedback_mode, mode)
+            raw["execution"]["feedback_mode"] = mode
+            self.assertEqual(load_config(raw).evaluation_config().feedback_mode, mode)
 
         for legacy in ("summary", "agent"):
             raw = minimal_config()
-            raw["evaluation"]["feedback_mode"] = legacy
+            raw["execution"]["feedback_mode"] = legacy
             with self.assertRaisesRegex(ValueError, "feedback_mode"):
                 load_config(raw)
 
         raw = minimal_config()
-        raw["evaluation"]["feedback_mode"] = "everything"
+        raw["execution"]["feedback_mode"] = "everything"
         with self.assertRaisesRegex(ValueError, "feedback_mode"):
             load_config(raw)
 
@@ -97,30 +100,30 @@ class ConfigTests(unittest.TestCase):
             "top_biased_validation_weighted",
         )
         self.assertEqual(config.evolution.parent_sampler.options["greedy_ratio"], 0.7)
-        self.assertEqual(config.integrity_review.component.name, "unsafe_approve")
+        self.assertEqual(config.reviewer_config().component.name, "unsafe_approve")
 
     def test_agent_reviewer_requires_a_distinct_model_or_explicit_override(self) -> None:
         raw = minimal_config()
-        raw["integrity_review"] = {"component": {"name": "agent_integrity"}}
+        raw["assessment"]["criteria"]["integrity"]["options"] = {"component": {"name": "agent_integrity"}}
         with self.assertRaisesRegex(ValueError, "dedicated integrity_review.worker"):
             load_config(raw)
 
-        raw["integrity_review"]["allow_same_model"] = True
+        raw["assessment"]["criteria"]["integrity"]["options"]["allow_same_model"] = True
         config = load_config(raw)
         self.assertEqual(
-            config.integrity_review.resolved_worker(config.workers).model,
+            config.reviewer_config().resolved_worker(config.workers).model,
             "test-model",
         )
 
     def test_unsafe_reviewer_requires_double_opt_in(self) -> None:
         raw = minimal_config()
-        raw["integrity_review"].pop("allow_unsafe_stub")
+        raw["assessment"]["criteria"]["integrity"]["options"].pop("allow_unsafe_stub")
         with self.assertRaisesRegex(ValueError, "allow_unsafe_stub=true"):
             load_config(raw)
 
     def test_dedicated_reviewer_must_differ_and_its_secrets_are_redacted(self) -> None:
         raw = minimal_config()
-        raw["integrity_review"] = {
+        raw["assessment"]["criteria"]["integrity"]["options"] = {
             "component": {"name": "agent_integrity"},
             "worker": {
                 "harness": "claude",
@@ -129,15 +132,15 @@ class ConfigTests(unittest.TestCase):
             },
         }
         config = load_config(raw)
-        self.assertEqual(config.integrity_review.worker.model, "review-model")
+        self.assertEqual(config.reviewer_config().worker.model, "review-model")
         self.assertEqual(
-            config.redacted_dict()["integrity_review"]["worker"]["env"][
+            config.redacted_dict()["assessment"]["criteria"]["integrity"]["options"]["worker"]["env"][
                 "ANTHROPIC_API_KEY"
             ],
             "<redacted>",
         )
-        raw["integrity_review"]["worker"]["harness"] = "codex"
-        raw["integrity_review"]["worker"]["model"] = "test-model"
+        raw["assessment"]["criteria"]["integrity"]["options"]["worker"]["harness"] = "codex"
+        raw["assessment"]["criteria"]["integrity"]["options"]["worker"]["model"] = "test-model"
         with self.assertRaisesRegex(ValueError, "outside the mutation pool"):
             load_config(raw)
 
@@ -149,29 +152,29 @@ class ConfigTests(unittest.TestCase):
 
     def test_evaluator_cannot_reuse_previous_benchmark_results(self) -> None:
         raw = minimal_config()
-        raw["evaluation"]["benchmark"] = {"load": "old-run"}
+        raw["assessment"]["criteria"]["performance"]["options"]["benchmark"] = {"load": "old-run"}
         with self.assertRaisesRegex(ValueError, "cannot load previous"):
             load_config(raw)
 
     def test_profile_tensor_fitness_source_is_strict(self) -> None:
         raw = minimal_config()
-        raw["evaluation"]["fitness_source"] = "profile_scores_mean"
+        raw["assessment"]["criteria"]["performance"]["options"]["fitness_source"] = "profile_scores_mean"
         config = load_config(raw)
-        self.assertEqual(config.evaluation.fitness_source, "profile_scores_mean")
+        self.assertEqual(config.evaluation_config().fitness_source, "profile_scores_mean")
 
-        raw["evaluation"]["fitness_source"] = "unknown"
+        raw["assessment"]["criteria"]["performance"]["options"]["fitness_source"] = "unknown"
         with self.assertRaisesRegex(ValueError, "fitness_source"):
             load_config(raw)
 
     def test_forbidden_candidate_imports_are_typed_and_validated(self) -> None:
         raw = minimal_config()
-        raw["evaluation"]["forbidden_candidate_imports"] = ["scipy.optimize", "pdfo"]
+        raw["execution"]["forbidden_candidate_imports"] = ["scipy.optimize", "pdfo"]
         config = load_config(raw)
         self.assertEqual(
-            config.evaluation.forbidden_candidate_imports,
+            config.evaluation_config().forbidden_candidate_imports,
             ("scipy.optimize", "pdfo"),
         )
-        raw["evaluation"]["forbidden_candidate_imports"] = ["not valid"]
+        raw["execution"]["forbidden_candidate_imports"] = ["not valid"]
         with self.assertRaisesRegex(ValueError, "dotted Python module names"):
             load_config(raw)
 
@@ -213,7 +216,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_docker_provider_transport_is_gateway_first_and_direct_is_double_opt_in(self) -> None:
         raw = minimal_config()
-        raw["evaluation"] = {
+        raw["execution"] = {
             "backend": "docker",
             "docker_image": "evaluator:test",
         }
@@ -232,7 +235,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_gateway_route_is_strict_and_credential_value_is_redacted(self) -> None:
         raw = minimal_config()
-        raw["evaluation"] = {
+        raw["execution"] = {
             "backend": "docker",
             "docker_image": "evaluator:test",
         }
@@ -281,7 +284,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_custom_worker_adapter_cannot_claim_the_builtin_gateway(self) -> None:
         raw = minimal_config()
-        raw["evaluation"] = {
+        raw["execution"] = {
             "backend": "docker",
             "docker_image": "evaluator:test",
         }

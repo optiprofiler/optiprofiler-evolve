@@ -6,8 +6,8 @@ import hashlib
 import json
 import os
 import secrets
-import signal
 import shutil
+import signal
 import stat
 import subprocess
 import threading
@@ -17,9 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO, Mapping, Sequence
 
-from optiprofiler_evolve.shared.config import SandboxConfig, WorkerConfig, WorkersConfig, plain_data
-from optiprofiler_evolve.shared.solver import tree_hash
-
+from optiprofiler_evolve.config import SandboxConfig, WorkerConfig, WorkersConfig, plain_data
+from optiprofiler_evolve.solver import tree_hash
 
 _CHUNK_BYTES = 64 * 1024
 _FSYNC_INTERVAL_SECONDS = 5.0

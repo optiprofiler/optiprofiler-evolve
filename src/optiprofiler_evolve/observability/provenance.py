@@ -14,10 +14,10 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.shared.config import ComponentConfig, EvolveConfig, plain_data
-from optiprofiler_evolve.phases.explore.prompt import WORKER_PROMPT_VERSION
-from optiprofiler_evolve.quality.review import REVIEW_PROMPT_VERSION
+from optiprofiler_evolve.config import ComponentConfig, EvolveConfig, plain_data
 from optiprofiler_evolve.controller.registry import resolve
+from optiprofiler_evolve.criteria.integrity.reviewer import REVIEW_PROMPT_VERSION
+from optiprofiler_evolve.phases.attempts.prompt import WORKER_PROMPT_VERSION
 
 
 def coordinate_seed(base_seed: int, *coordinates: object) -> int:
@@ -48,14 +48,18 @@ def build_run_provenance(
             "sampler", (config.evolution.parent_sampler,)
         )[0],
         "integrity_reviewer": _component_table(
-            "reviewer", (config.integrity_review.component,)
-        )[0],
+            "reviewer", (config.reviewer_config().component,)
+        )[0] if config.assessment.enabled("integrity") else None,
+        "criteria": [
+            {"name": name, **_callable_identity(resolve("criterion", name))}
+            for name in config.assessment.criteria if config.assessment.enabled(name)
+        ],
         "worker": {
             **_callable_identity(worker_adapter),
             **dict(worker_provenance),
         },
         "evaluator": {
-            "name": config.evaluation.adapter,
+            "name": config.execution.adapter,
             "declared_deterministic": getattr(evaluator_factory, "deterministic", None),
             **_callable_identity(evaluator_factory),
         },
@@ -74,7 +78,9 @@ def build_run_provenance(
                 config.sandbox.worker_image if config.sandbox.backend == "docker" else None
             ),
             "evaluator_image": _image_identity(
-                config.evaluation.docker_image if config.evaluation.backend == "docker" else None
+                config.execution.docker_image
+                if config.assessment.enabled("performance") and config.execution.backend == "docker"
+                else None
             ),
         },
         "seed_coordinates": ["seed", "phase", "iteration", "island", "attempt", "component"],

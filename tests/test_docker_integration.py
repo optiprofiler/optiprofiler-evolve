@@ -9,7 +9,6 @@ import unittest
 import uuid
 from pathlib import Path
 
-
 RUN_DOCKER = os.environ.get("OPE_RUN_DOCKER_TESTS") == "1"
 GATEWAY_IMAGE = os.environ.get(
     "OPE_GATEWAY_IMAGE",
@@ -270,10 +269,10 @@ class DockerEvaluatorIntegrationTests(unittest.TestCase):
     """Deterministic in-container scoring smoke: no model, no secrets."""
 
     def test_evaluator_scores_a_seed_candidate_in_container(self) -> None:
-        from optiprofiler_evolve.shared.config import EvaluationConfig
-        from optiprofiler_evolve.shared.data import DataPlan
-        from optiprofiler_evolve.evaluation.evaluation import DockerOptiProfilerEvaluator
-        from optiprofiler_evolve.shared.solver import InterfaceSpec
+        from optiprofiler_evolve.config import EvaluationConfig
+        from optiprofiler_evolve.criteria.performance.evaluator import DockerOptiProfilerEvaluator
+        from optiprofiler_evolve.data import DataPlan
+        from optiprofiler_evolve.solver import InterfaceSpec
 
         solver_source = (
             "import numpy as np\n\n\n"

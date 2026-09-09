@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from optiprofiler_evolve.phases.prepare.phase import PreparePhase
-
 import json
 import os
 import signal
@@ -11,15 +9,16 @@ import time
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.shared.config import load_config
-from optiprofiler_evolve.controller.engine import EvolutionEngine, _controller_cancellation
-from optiprofiler_evolve.shared.models import EvaluationResult
-from optiprofiler_evolve.quality.review import REQUIRED_CHECKS
-from optiprofiler_evolve.shared.protocols import WorkerOutcome
-from optiprofiler_evolve.shared.solver import InterfaceSpec, tree_hash
-
-from worker_helpers import RunnerAdapter
 from test_config import minimal_config
+from worker_helpers import RunnerAdapter
+
+from optiprofiler_evolve.agents.contracts import WorkerOutcome
+from optiprofiler_evolve.config import load_config
+from optiprofiler_evolve.controller.engine import EvolutionEngine, _controller_cancellation
+from optiprofiler_evolve.criteria.integrity.reviewer import REQUIRED_CHECKS
+from optiprofiler_evolve.models import EvaluationResult
+from optiprofiler_evolve.phases.prepare import PreparePhase
+from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
 
 
 class FakeEvaluator:
@@ -58,6 +57,7 @@ class ReviewingRunner:
     def __init__(self, mode: str) -> None:
         self.mode = mode
         self.review_calls = 0
+        self.candidate_review_calls = 0
 
     def __call__(self, **kwargs) -> WorkerOutcome:
         workspace = kwargs["workspace"]
@@ -71,15 +71,18 @@ class ReviewingRunner:
             return WorkerOutcome(0, transcript)
 
         self.review_calls += 1
+        is_submission = "improved" in (workspace / "candidate" / "solver.py").read_text()
+        if is_submission:
+            self.candidate_review_calls += 1
         transcript.write_text(f"review attempt {self.review_calls}\n")
-        if self.mode == "unavailable":
+        if self.mode == "unavailable" and is_submission:
             return WorkerOutcome(1, transcript)
-        if self.mode == "malformed_once" and self.review_calls == 1:
+        if self.mode == "malformed_once" and is_submission and self.candidate_review_calls == 1:
             (workspace / "review.json").write_text('{"schema": "wrong"}')
             return WorkerOutcome(0, transcript)
         findings = []
         verdict = "approve"
-        if self.mode == "quarantine":
+        if self.mode == "quarantine" and is_submission:
             verdict = "quarantine"
             findings = [
                 {
@@ -109,14 +112,13 @@ class ReviewingRunner:
         return WorkerOutcome(0, transcript)
 
 
-def reviewer_config(*, strict: bool = False) -> dict:
+def reviewer_config() -> dict:
     raw = minimal_config()
     raw["evolution"].update({"islands": 1, "attempts_per_island": 1})
-    raw["integrity_review"] = {
+    raw["assessment"]["criteria"]["integrity"]["options"] = {
         "component": {"name": "agent_integrity"},
         "allow_same_model": True,
         "retries": 1,
-        "strict": strict,
     }
     return raw
 
@@ -239,7 +241,7 @@ class EngineTests(unittest.TestCase):
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             raw = minimal_config()
-            raw["evaluation"]["forbidden_candidate_imports"] = ["scipy.optimize", "prima"]
+            raw["execution"]["forbidden_candidate_imports"] = ["scipy.optimize", "prima"]
             engine = EvolutionEngine(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
@@ -615,26 +617,19 @@ class EngineTests(unittest.TestCase):
                 worker_adapter=RunnerAdapter(runner),
                 evaluator_factory=fake_evaluator_factory,
             ).run()
-            self.assertEqual(runner.review_calls, 1)
+            self.assertEqual(runner.candidate_review_calls, 1)
             self.assertEqual(FakeEvaluator.calls.count("validation"), 2)
             review_root = (
                 result.run_dir
                 / "research"
                 / "traces"
                 / "integrity-reviewer"
-                / "it001-i00-a00-r01"
+
             )
+            review_root = next(review_root.glob("it001-i00-a00-*-r01"))
             self.assertTrue((review_root / "raw.stdout.stream").is_file())
             self.assertEqual(json.loads((review_root / "outcome.json").read_text())["state"], "completed")
-            decision = json.loads(
-                (
-                    result.run_dir
-                    / "controller"
-                    / "integrity_reviews"
-                    / "it001-i00-a00"
-                    / "decision.json"
-                ).read_text()
-            )
+            decision = json.loads(next((result.run_dir / "controller" / "integrity_reviews").glob("it001-i00-a00-*/decision.json")).read_text())
             self.assertEqual(decision["verdict"], "approve")
             public_events = (result.run_dir / "public_events.jsonl").read_text()
             self.assertIn('"gate": "approved"', public_events)
@@ -645,8 +640,9 @@ class EngineTests(unittest.TestCase):
                 / "research"
                 / "roles"
                 / "integrity-reviewer"
-                / "it001-i00-a00-r01"
+
             )
+            reviewer_workspace = next(reviewer_workspace.glob("it001-i00-a00-*-r01"))
             self.assertIn(
                 "mutation worker",
                 (reviewer_workspace / "mutation_transcript.txt").read_text(),
@@ -660,7 +656,7 @@ class EngineTests(unittest.TestCase):
             reviewer_entry = next(
                 entry
                 for entry in trace_entries
-                if entry["join"].get("role") == "integrity-reviewer"
+                if entry["join"].get("role") == "integrity-reviewer" and entry["join"].get("candidate_id") != "seed"
             )
             self.assertEqual(reviewer_entry["join"]["candidate_id"], "it001-i00-a00")
             self.assertEqual(reviewer_entry["join"]["module"], "integrity-reviewer")
@@ -689,7 +685,7 @@ class EngineTests(unittest.TestCase):
                 for line in (result.run_dir / "attempts.jsonl").read_text().splitlines()
             )
             self.assertFalse(attempt["valid"])
-            self.assertEqual(attempt["review_verdict"], "quarantine")
+            self.assertEqual(attempt["assessment"]["results"]["integrity"]["metrics"]["verdict"], "quarantine")
 
     def test_malformed_review_retries_then_approves(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -709,28 +705,29 @@ class EngineTests(unittest.TestCase):
                 worker_adapter=RunnerAdapter(runner),
                 evaluator_factory=fake_evaluator_factory,
             ).run()
-            self.assertEqual(runner.review_calls, 2)
+            self.assertEqual(runner.review_calls, 3)
             self.assertEqual(FakeEvaluator.calls.count("validation"), 2)
 
-    def test_strict_reviewer_outage_aborts_run(self) -> None:
+    def test_unavailable_initial_assessment_aborts_run(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "source"
             source.mkdir()
             (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
-            with self.assertRaisesRegex(RuntimeError, "unavailable in strict mode"):
+            (source / "solver.py").write_text("def solver(fun, x0):\n    return x0\n# improved\n")
+            with self.assertRaisesRegex(RuntimeError, "Initial solver validation failed"):
                 EvolutionEngine(
                     initial=source,
                     interface=InterfaceSpec.parse("solver.py:solver"),
                     runtime="python",
                     editable=(".",),
-                    config=load_config(reviewer_config(strict=True)),
+                    config=load_config(reviewer_config()),
                     run_dir=root / "run",
                     worker_adapter=RunnerAdapter(ReviewingRunner("unavailable")),
                     evaluator_factory=fake_evaluator_factory,
                 ).run()
 
-    def test_nonstrict_reviewer_outage_quarantines_and_run_continues(self) -> None:
+    def test_reviewer_outage_rejects_candidate_and_run_continues(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             FakeEvaluator.calls = []
             root = Path(directory)
@@ -743,24 +740,16 @@ class EngineTests(unittest.TestCase):
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
                 editable=(".",),
-                config=load_config(reviewer_config(strict=False)),
+                config=load_config(reviewer_config()),
                 run_dir=root / "run",
                 worker_adapter=RunnerAdapter(runner),
                 evaluator_factory=fake_evaluator_factory,
             ).run()
-            self.assertEqual(runner.review_calls, 2)
+            self.assertEqual(runner.review_calls, 3)
             self.assertEqual(FakeEvaluator.calls.count("validation"), 1)
-            decision = json.loads(
-                (
-                    result.run_dir
-                    / "controller"
-                    / "integrity_reviews"
-                    / "it001-i00-a00"
-                    / "decision.json"
-                ).read_text()
-            )
-            self.assertEqual(decision["verdict"], "quarantine")
-            self.assertEqual(decision["reason"], "reviewer_unavailable")
+            decision = json.loads(next((result.run_dir / "controller" / "integrity_reviews").glob("it001-i00-a00-*/decision.json")).read_text())
+            self.assertEqual(decision["status"], "failed")
+            self.assertNotIn("verdict", decision)
 
     @unittest.skipUnless(os.name == "posix", "signal test requires POSIX")
     def test_controller_signal_scope_requests_cooperative_cancellation(self) -> None:

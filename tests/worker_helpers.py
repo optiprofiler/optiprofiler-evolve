@@ -2,7 +2,7 @@
 
 from dataclasses import fields
 
-from optiprofiler_evolve.shared.protocols import WorkerOutcome, WorkerRequest
+from optiprofiler_evolve.agents.contracts import WorkerOutcome, WorkerRequest
 
 
 class RunnerAdapter:

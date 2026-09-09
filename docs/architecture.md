@@ -12,10 +12,10 @@ evolve(...)
          launch configured attempts for every island
          run each private attempt pipeline
            mutate -> audit -> smoke -> public evaluate -> feedback
-         run mandatory independent integrity review
-         controller evaluates each surviving candidate on validation
+         run enabled formal criteria, including integrity review by default
+         controller evaluates enabled performance criteria on validation
          wait at the iteration barrier
-         engine accepts/rejects and ranks each island by validation, then public
+         engine accepts/rejects and ranks each island by its formal weighted score
          after-iteration policies propose migration/budget/stop edits
          engine applies accepted proposals and checkpoints state
   -> validate
@@ -47,8 +47,8 @@ launch more than one attempt through `attempts_per_island`.
 
 ## Extension layers
 
-The package has three workflow slots, a mandatory reviewer slot, two selection
-slots, and two backend adapters:
+The package has workflow slots, equal-authority quality criteria, selection
+policies, and backend adapters:
 
 | Contract | Purpose | May change population? |
 |---|---|---|
@@ -58,6 +58,7 @@ slots, and two backend adapters:
 | `RetentionPolicy` | Choose the ordered bounded archive retained by one island | No; the engine validates and applies the choice |
 | `ParentSampler` | Choose one parent from an island archive | No |
 | `CandidateReviewer` | Approve or quarantine a public-gated tree before validation | No |
+| `Criterion` | Produce a score and constraint verdict under one assessment profile | No |
 | `WorkerAdapter` | Launch a coding worker and collect lifecycle output | No |
 | `Evaluator` | Execute trusted public/validation/hidden benchmark calls | No |
 
@@ -73,6 +74,14 @@ broker, resource limits and cancellation event. The client supplies the job
 prompt, creates trace inputs, invokes the injected `WorkerAdapter` once,
 finalizes evidence, and collects declared outputs. Job text cannot select a
 different host workspace or grant additional capabilities.
+
+Solver proposal/edit tasks use the `SolverJob` subtype. At this same LLM
+entrypoint, each enabled criterion contributes its own generation guidance from
+allowlisted public rule fields. Profile-specific weights and constraints stay
+explicit; hidden settings and private evaluation evidence are never inputs.
+Review jobs remain separate and receive no generation guidance. Neither the
+exploration stage nor research role preparation contains criterion-name
+branches or special-case prompt concatenation.
 
 Built-in CLI workers retain the real Codex/Claude tool loop and exact native
 streams. A transcript-only custom adapter remains supported with explicitly
@@ -101,22 +110,20 @@ The `budget` field is reserved for a future scheduler. The alpha engine raises
 on a nonempty budget proposal so an apparently successful experiment cannot
 silently ignore a budget policy.
 
-The integrity-review call is not an `AttemptStep`: configuration cannot remove
-or reorder it. Its implementation is replaceable, but the engine always calls
-it inside `_run_attempt`, after deterministic/public checks and immediately
-before the first validation evaluation. Research variants pass the same gate
-before controller validation selection. Reviewer failures retry once by
-default; exhaustion quarantines the candidate unless strict availability was
-requested.
+Quality checks share `AssessmentRunner`, which applies configured weights and
+warn/enforce constraints without admitting candidates itself. Public tools,
+seed preparation, ordinary submissions and research variants use the same
+criteria. Integrity review can be disabled like any other criterion; an outage
+is failed evidence, never a fabricated quarantine. Review retries and private
+evidence are owned by the integrity implementation rather than the engine.
 
 ## State ownership
 
-Optional source complexity budgets are computed by `complexity.py` in a bounded
-static-analysis subprocess. The initial solver snapshot fixes the baseline.
-The controller enforces the same budget for attempts, research variants and
-final selection; an optional attempt step cannot disable it. Worker tool calls
-use one private snapshot for both complexity and performance analysis and expose
-only the sanitized complexity report. Complexity never modifies benchmark fitness.
+Source complexity uses a bounded static-analysis subprocess with the initial
+solver as its fixed baseline. It preserves raw benchmark fitness and contributes
+its own independently weighted score. Worker tools assess one private snapshot
+and expose only public-profile feedback. Profile overrides may change budget,
+weights and constraints; formal candidate scores always share one configuration.
 
 The engine owns population state, candidate acceptance, checkpoints, and the
 event ledger. Its helpers under `controller/` commit phase results and research
@@ -124,7 +131,8 @@ variants on its behalf; no phase owns a second population store. Attempt steps
 return immutable `StepResult` values. Policies return immutable `PopulationEdit`
 proposals.
 
-Every core and optional stage has its own class under `phases/<name>/phase.py`.
+Every core and optional stage has its own class in `phases/<name>.py`.
+Its specific context and result types live in the same module.
 The core classes contain the actual stage algorithms rather than dispatching
 back to an engine method. Prepare, Validate, Hidden and Report return typed
 staged results; the controller commits them after checking the declared
@@ -155,19 +163,26 @@ the optional `static_audit` evidence step is removed for an ablation.
 | Module | Responsibility |
 |---|---|
 | `api.py` | The single public `evolve(...)` function |
-| `shared/` | Frozen config, models, protocols, solver/data boundaries and shared evidence contracts |
+| `config.py`, `models.py`, `solver.py`, `data.py`, `files.py`, `errors.py` | Cross-subsystem configuration, domain values, solver/data boundaries and filesystem primitives |
 | `controller/engine.py`, `phase_contexts.py` | Workflow lifecycle, authoritative state and bounded phase bindings/commits |
-| `controller/attempts.py`, `attempt_capabilities.py` | Private attempt execution and public-only worker capabilities |
+| `phases/attempts/` | Private attempt execution, public-only capabilities, prompts, steps and iteration policy proposals |
 | `controller/services.py`, `role_jobs.py` | Research variant gates and sanitized role preparation |
 | `controller/registry.py`, `builtins.py`, `selection.py`, `experiments.py` | Explicit registration, archive selection and experiment matrices |
-| `phases/prepare/`, `explore/`, `validate/`, `hidden/`, `report/` | Five core stage classes and their specific inputs/results |
-| `phases/direction_scout/`, `strategy_analysis/`, `strategy_transfer/`, `recombine/`, `challenger/` | Optional stage classes and their task prompts/helpers |
-| `phases/explore/steps/`, `policies/` | Attempt operations and iteration policy proposals |
-| `agents/` | Unified LLM invocation, injected CLI backend, isolation and provider/Docker transport |
-| `evaluation/` | Canonical evaluator, evaluator subprocess, references, broker and worker feedback |
-| `quality/` | Static complexity analysis and semantic integrity review |
-| `observability/` | Events, fingerprints, provenance, private traces and usage |
-| `phases/report/reports.py`, `viewers.py`, `owner_views.py` | Final scientific reports and public/private derived views, also refreshed during a run |
+| `phases/<name>.py` | One class per core or optional stage, including its specific inputs/results and local helpers |
+| `phases/contracts.py`, `_support.py`, `_research.py` | Stage contracts, shared phase helpers and research artifact formats |
+| `agents/` | Unified LLM invocation, CLI backend, isolation, provider transport, public tool broker and feedback |
+| `criteria/` | Criterion contracts, runner, aggregator, and performance/complexity/integrity implementations |
+| `criteria/performance/` | Performance criterion, canonical evaluator, subprocess entrypoint, references and benchmark evidence |
+| `observability/` | Events, provenance, private traces, usage and report generation |
+| `observability/views/` | Public/private derived views and their evidence readers, refreshed throughout a run |
+
+The former `quality` package is named `criteria`. The mixed `evaluation` package
+has been dissolved into performance execution and agent tools. There is no
+catch-all `shared` package: agent contracts live in `agents/contracts.py`, phase
+contracts in `phases/contracts.py`, controller capabilities in
+`controller/contracts.py`, and evaluator contracts beside the performance
+implementation. A module's owner is determined by its responsibility, not by
+how many consumers import it.
 
 No module copies or modifies OptiProfiler source. `optiprofiler` is a normal
 runtime dependency and remains a separate package.
@@ -196,11 +211,11 @@ the complete coordinate `(run seed, phase, iteration, island, attempt,
 component)` so removing one optional component does not silently shift unrelated
 random streams.
 
-Validation is controller-only, not end-only: each candidate that passes its
-public pipeline receives one validation evaluation. Validation is the primary
-key for population retention, parent selection, and final champion selection;
-public fitness breaks ties. This approximately doubles canonical candidate
-evaluation work. Hidden remains a one-time final holdout and never feeds back.
+Validation-profile assessment is controller-only, not end-only. Its weighted
+total drives default retention, sampling and champion selection. Raw public,
+validation and hidden fitness are separate evidence and may be absent when
+performance is disabled. Hidden remains a one-time final check and never feeds
+back. See [Algorithm assessment](assessment.md) for weights and failure behavior.
 
 ## Repository candidates
 

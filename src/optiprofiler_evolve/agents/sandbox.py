@@ -8,10 +8,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Mapping
 
-from optiprofiler_evolve.evaluation.broker import BrokerConnection
-from optiprofiler_evolve.shared.config import SandboxConfig, WorkerConfig, WorkersConfig
+from optiprofiler_evolve.agents.broker import BrokerConnection
+from optiprofiler_evolve.agents.contracts import WorkerOutcome
 from optiprofiler_evolve.agents.docker_runtime import DockerInvocationRuntime, GatewayRuntimeOutcome
 from optiprofiler_evolve.agents.harness import build_harness_command
+from optiprofiler_evolve.config import SandboxConfig, WorkerConfig, WorkersConfig
 from optiprofiler_evolve.observability.traces import (
     finalize_adapter_trace,
     prepare_trace,
@@ -23,10 +24,7 @@ from optiprofiler_evolve.observability.traces import (
     run_captured_process,
     trace_paths,
 )
-from optiprofiler_evolve.shared.protocols import WorkerOutcome
 from optiprofiler_evolve.observability.usage import UsageRecord
-
-
 
 
 def run_agent(

@@ -3,89 +3,70 @@
 from __future__ import annotations
 
 import json
-import os
 import random
 import secrets
 import signal
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Iterator
+from typing import Any
 
+from optiprofiler_evolve.agents.contracts import WorkerAdapter, WorkerOutcome, WorkerRequest
 from optiprofiler_evolve.agents.docker_runtime import cleanup_managed_resources
+from optiprofiler_evolve.agents.explanations import explanation_memory, explanation_status
+from optiprofiler_evolve.agents.jobs import worker_exit_warning as _worker_exit_warning
 from optiprofiler_evolve.agents.llm import LLMClient
-from optiprofiler_evolve.controller.attempts import AttemptRunner
-from optiprofiler_evolve.shared.models import Attempt
+from optiprofiler_evolve.config import EvolveConfig, WorkerConfig
 from optiprofiler_evolve.controller.builtins import register_builtin_components
+from optiprofiler_evolve.controller.contracts import ControllerServices, VariantHandle
 from optiprofiler_evolve.controller.phase_contexts import bind_context, commit_result
 from optiprofiler_evolve.controller.registry import build, resolve
 from optiprofiler_evolve.controller.role_jobs import RoleJobs
-from optiprofiler_evolve.controller.selection import MetricSelectionError
+from optiprofiler_evolve.controller.selection import (
+    MetricSelectionError,
+    ParentSampler,
+    RetentionPolicy,
+)
 from optiprofiler_evolve.controller.services import EngineControllerServices
-from optiprofiler_evolve.observability.events import EventWriter
-from optiprofiler_evolve.observability.projections import project_public_events
-from optiprofiler_evolve.observability.provenance import build_run_provenance
-from optiprofiler_evolve.observability.trace_ledger import TraceLedger
-from optiprofiler_evolve.observability.usage import UsageRecord, aggregate_usage
-from optiprofiler_evolve.phases.report.owner_views import render_owner_views
-from optiprofiler_evolve.phases.report.reports import append_trace_coverage
-from optiprofiler_evolve.phases.report.viewers import (
-    materialize_public_bundle,
-    render_final_report,
-    render_public_report,
-    render_status,
-)
-from optiprofiler_evolve.quality.complexity import (
-    ComplexityChecker,
-    ComplexityLimitExceeded,
-    ComplexityReport,
-)
-from optiprofiler_evolve.quality.review import (
-    CandidateReviewer,
-    IntegrityReviewDecision,
-    IntegrityReviewRequest,
-    write_private_review,
-    write_sanitized_transcript,
-)
-from optiprofiler_evolve.shared.agent_helpers import worker_exit_warning as _worker_exit_warning
-from optiprofiler_evolve.shared.config import EvolveConfig, WorkerConfig
-from optiprofiler_evolve.shared.data import DataPlan
-from optiprofiler_evolve.shared.errors import (
-    IntegrityReviewerUnavailable as _IntegrityReviewerUnavailable,
-)
-from optiprofiler_evolve.shared.errors import RunCancelled as _RunCancelled
-from optiprofiler_evolve.shared.explanations import (
-    explanation_memory,
-    explanation_status,
-)
-from optiprofiler_evolve.shared.files import append_json as _append_json
-from optiprofiler_evolve.shared.files import write_json as _write_json
-from optiprofiler_evolve.shared.models import (
+from optiprofiler_evolve.criteria.guidance import build_generation_guidance
+from optiprofiler_evolve.criteria.integrity.execution import IntegrityReviewExecutor
+from optiprofiler_evolve.criteria.performance.contracts import Evaluator
+from optiprofiler_evolve.data import DataPlan
+from optiprofiler_evolve.errors import RunCancelled as _RunCancelled
+from optiprofiler_evolve.files import append_json as _append_json
+from optiprofiler_evolve.files import write_json as _write_json
+from optiprofiler_evolve.models import (
+    Attempt,
     CandidateRecord,
     EvaluationResult,
     EvolveResult,
     FinalistResult,
 )
-from optiprofiler_evolve.shared.protocols import (
+from optiprofiler_evolve.observability.events import EventWriter
+from optiprofiler_evolve.observability.projections import project_public_events
+from optiprofiler_evolve.observability.provenance import build_run_provenance
+from optiprofiler_evolve.observability.reports import append_trace_coverage
+from optiprofiler_evolve.observability.trace_ledger import TraceLedger
+from optiprofiler_evolve.observability.usage import UsageRecord, aggregate_usage
+from optiprofiler_evolve.observability.views.owner import render_owner_views
+from optiprofiler_evolve.observability.views.public import (
+    materialize_public_bundle,
+    render_final_report,
+    render_public_report,
+    render_status,
+)
+from optiprofiler_evolve.phases.attempts.contracts import (
     AfterIterationPolicy,
     AttemptStep,
-    ControllerServices,
-    Evaluator,
-    ParentSampler,
-    Phase,
-    PhaseContext,
     PopulationEdit,
-    RetentionPolicy,
-    VariantHandle,
-    WorkerAdapter,
-    WorkerOutcome,
-    WorkerRequest,
 )
-from optiprofiler_evolve.shared.solver import (
+from optiprofiler_evolve.phases.attempts.runner import AttemptRunner
+from optiprofiler_evolve.phases.contracts import Phase, PhaseContext
+from optiprofiler_evolve.solver import (
     InterfaceSpec,
     validate_candidate_imports,
     validate_interface,
@@ -120,9 +101,9 @@ class EvolutionEngine:
             if worker_adapter is not None
             else resolve("worker", config.workers.adapter)()
         )
-        self.evaluator_factory = evaluator_factory or resolve(
-            "evaluator", config.evaluation.adapter
-        )
+        self.evaluator_factory = evaluator_factory
+        if self.evaluator_factory is None and config.assessment.enabled("performance"):
+            self.evaluator_factory = resolve("evaluator", config.execution.adapter)
         self.phases: tuple[Phase, ...] = tuple(
             build("phase", spec) for spec in config.workflow.phases
         )
@@ -134,9 +115,6 @@ class EvolutionEngine:
         )
         self.retention: RetentionPolicy = build("retention", config.evolution.retention)
         self.parent_sampler: ParentSampler = build("sampler", config.evolution.parent_sampler)
-        self.integrity_reviewer: CandidateReviewer = build(
-            "reviewer", config.integrity_review.component
-        )
         self.attempt_history: list[dict[str, Any]] = []
         self.usage_records: list[UsageRecord] = []
         self.usage_entries: list[dict[str, Any]] = []
@@ -149,7 +127,6 @@ class EvolutionEngine:
         self.data: DataPlan | None = None
         self.evaluator: Evaluator | None = None
         self.reference: Path | None = None
-        self.complexity: ComplexityChecker | None = None
         self.champion: tuple[int, CandidateRecord] | None = None
         self.final_result: FinalistResult | None = None
         self.final_solver: Path | None = None
@@ -165,7 +142,6 @@ class EvolutionEngine:
         self.variant_bases: dict[str, Path] = {}
         self.variant_public: dict[str, EvaluationResult] = {}
         self.variant_validation: dict[str, EvaluationResult] = {}
-        self.integrity_reviews: dict[str, IntegrityReviewDecision] = {}
         self.research_finalists: dict[str, CandidateRecord] = {}
         self.validation_query_count = 0
         self.validation_selection_count = 0
@@ -180,6 +156,11 @@ class EvolutionEngine:
             evaluate_public_variant=service_impl.evaluate_public_variant,
             select_by_validation=service_impl.select_by_validation,
             register_finalist=service_impl.register_finalist,
+        )
+        self.integrity_executor = IntegrityReviewExecutor(
+            run_dir=self.run_dir, interface=self.interface, editable=self.editable,
+            workers=config.workers, reviewer_config=config.reviewer_config,
+            run_agent=self.controller_services.run_trusted_agent, emit=self._emit,
         )
 
     def _population_snapshot(self) -> tuple[tuple[CandidateRecord, ...], ...]:
@@ -197,6 +178,9 @@ class EvolutionEngine:
             ledger=self.trace_ledger,
             emit=self._emit,
             record_usage=self._record_worker_usage,
+            generation_guidance=lambda: build_generation_guidance(
+                self.config.assessment, self.config.execution.feedback_mode
+            ),
         )
 
     def _record_worker_usage(self, request: WorkerRequest, outcome: WorkerOutcome) -> None:
@@ -221,141 +205,6 @@ class EvolutionEngine:
         if self._cancellation_event.is_set():
             raise _RunCancelled("Evolution run cancelled by controller signal.")
 
-    def _review_candidate(
-        self,
-        *,
-        candidate_id: str,
-        candidate: Path,
-        parent: Path,
-        changed: tuple[str, ...],
-        mutation_transcript: Path | None,
-        mutation_worker: WorkerConfig | None,
-    ) -> tuple[IntegrityReviewDecision, Path]:
-        """Run the mandatory semantic gate before any validation query."""
-
-        cached = self.integrity_reviews.get(candidate_id)
-        normalized_root = self.run_dir / "controller" / "integrity_reviews" / candidate_id
-        if cached is not None:
-            return cached, normalized_root / "decision.json"
-
-        transcript = normalized_root / "inputs" / "mutation_transcript.txt"
-        secret_values: dict[str, str] = {}
-        if mutation_worker is not None:
-            secret_values.update(mutation_worker.env)
-            secret_values.update(
-                {name: os.environ[name] for name in mutation_worker.pass_env if name in os.environ}
-            )
-        if mutation_transcript is None:
-            mutation_transcript = normalized_root / "inputs" / "empty_transcript.txt"
-            mutation_transcript.parent.mkdir(parents=True, exist_ok=True)
-            mutation_transcript.write_text(
-                "[controller] no mutation transcript exists for this materialized variant.\n",
-                encoding="utf-8",
-            )
-            mutation_transcript.chmod(0o600)
-        write_sanitized_transcript(
-            mutation_transcript,
-            transcript,
-            secret_values=secret_values,
-        )
-        config = self.config.integrity_review
-        reviewer_worker = config.resolved_worker(self.config.workers)
-        failures: list[str] = []
-        review_scope = {
-            "phase": "explore",
-            "attempt_id": candidate_id,
-            "role": "integrity-reviewer",
-        }
-        self._emit("integrity_review_started", "running", scope=review_scope)
-        for review_attempt in range(1, config.retries + 2):
-            scope = {
-                **review_scope,
-                "job_id": f"{candidate_id}-r{review_attempt:02d}",
-            }
-            self._emit(
-                "integrity_review_attempt_started",
-                "running",
-                scope=scope,
-                data={"review_attempt": review_attempt},
-            )
-            try:
-                decision = self.integrity_reviewer.review(
-                    IntegrityReviewRequest(
-                        candidate_id=candidate_id,
-                        candidate=candidate,
-                        parent=parent,
-                        changed_files=changed,
-                        interface=f"{self.interface.file}:{self.interface.function}",
-                        editable=self.editable,
-                        mutation_transcript=transcript,
-                        reviewer_worker=reviewer_worker,
-                        review_attempt=review_attempt,
-                        timeout_seconds=config.timeout_seconds,
-                        token_budget=config.token_budget,
-                        max_budget_usd=config.max_budget_usd,
-                        run_agent=self.controller_services.run_trusted_agent,
-                    )
-                )
-            except _RunCancelled:
-                raise
-            except Exception as exc:
-                failure = f"{type(exc).__name__}: {exc}"
-                failures.append(failure)
-                self._emit(
-                    "integrity_review_attempt_finished",
-                    "failed",
-                    scope=scope,
-                    data={
-                        "gate": "unavailable",
-                        "review_attempt": review_attempt,
-                        "error": failure,
-                    },
-                )
-                continue
-            attempt_report = normalized_root / f"attempt_{review_attempt:02d}.json"
-            write_private_review(attempt_report, decision)
-            write_private_review(normalized_root / "decision.json", decision)
-            self.integrity_reviews[candidate_id] = decision
-            self._emit(
-                "integrity_review_attempt_finished",
-                "succeeded",
-                scope=scope,
-                data={
-                    "review_attempt": review_attempt,
-                    "verdict": decision.verdict,
-                    "checked": list(decision.checked),
-                    "finding_count": len(decision.findings),
-                    "report": str(attempt_report),
-                },
-            )
-            self._emit(
-                "integrity_review_finished",
-                "succeeded",
-                scope=review_scope,
-                data={"gate": "approved" if decision.verdict == "approve" else "quarantined"},
-            )
-            return decision, normalized_root / "decision.json"
-
-        decision = IntegrityReviewDecision(
-            verdict="quarantine",
-            checked=(),
-            summary="Integrity reviewer was unavailable after all configured attempts.",
-            reason="reviewer_unavailable",
-        )
-        report = normalized_root / "decision.json"
-        write_private_review(report, decision)
-        self.integrity_reviews[candidate_id] = decision
-        self._emit(
-            "integrity_review_finished",
-            "failed",
-            scope=review_scope,
-            data={"gate": "unavailable" if config.strict else "quarantined"},
-        )
-        if config.strict:
-            raise _IntegrityReviewerUnavailable(
-                "Integrity reviewer was unavailable in strict mode: " + "; ".join(failures)
-            )
-        return decision, report
 
     def run(self) -> EvolveResult:
         self._initialize_run_directory()
@@ -370,7 +219,10 @@ class EvolutionEngine:
                     target=self._refresh_status_loop, name="ope-status-refresher", daemon=True
                 )
                 self._refresh_thread.start()
-                reviewer_worker = self.config.integrity_review.resolved_worker(self.config.workers)
+                reviewer_worker = (
+                    self.config.reviewer_config().resolved_worker(self.config.workers)
+                    if self.config.assessment.enabled("integrity", "validation") else None
+                )
                 provenance_workers = self.config.workers.pool
                 if reviewer_worker is not None and reviewer_worker not in provenance_workers:
                     provenance_workers = (*provenance_workers, reviewer_worker)
@@ -559,6 +411,8 @@ class EvolutionEngine:
             "guidance": record.guidance,
             "public_score": record.public_score if attempt.evaluated else None,
             "validation_score": record.validation_score,
+            "assessment_score": record.assessment_score,
+            "assessment": record.assessment,
             "review_verdict": record.review_verdict,
             "review_report": record.review_report,
             "valid": record.valid,
@@ -634,7 +488,7 @@ class EvolutionEngine:
                 raise ValueError(
                     f"Migration references unknown candidate {candidate_id!r}."
                 ) from exc
-            if not record.valid or (candidate_id != "seed" and record.review_verdict != "approve"):
+            if not record.valid or record.assessment_score is None:
                 raise ValueError(f"Migration candidate {candidate_id!r} has not passed admission.")
             if candidate_id in killed:
                 raise ValueError(
@@ -653,35 +507,10 @@ class EvolutionEngine:
         validate_candidate_imports(
             root,
             runtime=self.runtime,
-            forbidden=self.config.evaluation.forbidden_candidate_imports,
+            forbidden=self.config.execution.forbidden_candidate_imports,
         )
 
-    def _assess_complexity(
-        self,
-        root: Path,
-        scope: Mapping[str, object] | None = None,
-    ) -> ComplexityReport | None:
-        if self.complexity is None:
-            return None
-        self._validate_candidate(root)
-        report = self.complexity.assess(root)
-        self._emit(
-            "complexity_checked",
-            "failed" if report.blocked else "succeeded",
-            scope=scope,
-            data=report.summary(),
-        )
-        return report
 
-    def _check_complexity(
-        self,
-        root: Path,
-        scope: Mapping[str, object] | None = None,
-    ) -> ComplexityReport | None:
-        report = self._assess_complexity(root, scope)
-        if report is not None and report.blocked:
-            raise ComplexityLimitExceeded(report)
-        return report
 
     def _select_parent(
         self, population: list[CandidateRecord], rng: random.Random

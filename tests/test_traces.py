@@ -11,7 +11,7 @@ import time
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.shared.config import (
+from optiprofiler_evolve.config import (
     ProviderGatewayConfig,
     SandboxConfig,
     ToolConfig,

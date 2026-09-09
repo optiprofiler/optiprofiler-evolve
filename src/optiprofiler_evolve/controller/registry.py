@@ -11,10 +11,10 @@ import inspect
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from optiprofiler_evolve.shared.config import ComponentConfig
-
+from optiprofiler_evolve.config import ComponentConfig
 
 _OPERATIONS = {
+    "criterion": "assess",
     "phase": "run",
     "step": "run",
     "policy": "propose",

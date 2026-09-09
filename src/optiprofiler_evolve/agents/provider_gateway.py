@@ -22,7 +22,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-
 _PROTOCOL_ROUTES = {
     "anthropic": frozenset(
         {

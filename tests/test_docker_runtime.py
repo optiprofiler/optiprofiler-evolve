@@ -9,14 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from optiprofiler_evolve.evaluation.broker import BrokerConnection
-from optiprofiler_evolve.shared.config import (
-    ProviderGatewayConfig,
-    SandboxConfig,
-    ToolConfig,
-    WorkerConfig,
-    WorkersConfig,
-)
+from optiprofiler_evolve.agents.broker import BrokerConnection
 from optiprofiler_evolve.agents.docker_runtime import (
     DockerInvocationRuntime,
     DockerResource,
@@ -24,6 +17,13 @@ from optiprofiler_evolve.agents.docker_runtime import (
     recover_gateway_trace,
     remove_managed_resources,
     select_gc_resources,
+)
+from optiprofiler_evolve.config import (
+    ProviderGatewayConfig,
+    SandboxConfig,
+    ToolConfig,
+    WorkerConfig,
+    WorkersConfig,
 )
 
 

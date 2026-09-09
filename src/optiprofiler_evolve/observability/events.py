@@ -1,18 +1,21 @@
-"""Append-only event ledger and deterministic state reconstruction."""
+"""Authoritative workflow events and allowlisted public projections."""
 
 from __future__ import annotations
 
 import json
 import queue
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+EventEmitter = Callable[[str, str, Mapping[str, object] | None], None]
+
 
 STATUSES = frozenset({"pending", "running", "succeeded", "failed", "skipped", "cancelled"})
+
 
 _PUBLIC_TRACE_COVERAGE_KEYS = (
     "total",
@@ -555,6 +558,3 @@ def write_run_state(events_path: Path, destination: Path) -> dict[str, Any]:
     temporary.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     temporary.replace(destination)
     return state
-
-
-__all__: list[str] = []

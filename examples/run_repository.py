@@ -2,7 +2,6 @@ from pathlib import Path
 
 from optiprofiler_evolve import evolve
 
-
 HERE = Path(__file__).resolve().parent
 
 result = evolve(

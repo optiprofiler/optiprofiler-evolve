@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from optiprofiler_evolve.shared.config import ToolConfig, WorkerConfig, WorkersConfig
+from optiprofiler_evolve.config import ToolConfig, WorkerConfig, WorkersConfig
 
 
 def build_harness_command(

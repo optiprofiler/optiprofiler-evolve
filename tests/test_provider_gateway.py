@@ -18,9 +18,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import optiprofiler_evolve.agents.provider_gateway as provider_gateway_module
-from optiprofiler_evolve.shared.config import ProviderGatewayConfig, WorkerConfig
 from optiprofiler_evolve.agents.provider_gateway import GatewayRoute, ProviderGatewayServer
 from optiprofiler_evolve.agents.provider_transport import prepare_provider_transport
+from optiprofiler_evolve.config import ProviderGatewayConfig, WorkerConfig
 
 
 class _FakeUpstream:

@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.evaluation.feedback import project_feedback
-from optiprofiler_evolve.shared.models import EvaluationResult
+from optiprofiler_evolve.agents.feedback import project_feedback
+from optiprofiler_evolve.models import EvaluationResult
 
 
 class FeedbackProjectionTests(unittest.TestCase):

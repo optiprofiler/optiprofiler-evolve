@@ -5,15 +5,15 @@ from __future__ import annotations
 from dataclasses import fields
 from typing import TYPE_CHECKING
 
-from optiprofiler_evolve.phases.explore.context import ExploreContext
-from optiprofiler_evolve.phases.hidden.context import HiddenContext, HiddenResult
-from optiprofiler_evolve.phases.prepare.context import PrepareContext, PrepareResult
-from optiprofiler_evolve.phases.report.context import ReportContext, ReportResult
-from optiprofiler_evolve.phases.validate.context import ValidateContext, ValidateResult
-from optiprofiler_evolve.shared.protocols import PhaseContext, PhaseResult
+from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
+from optiprofiler_evolve.phases.explore import ExploreContext
+from optiprofiler_evolve.phases.hidden import HiddenContext, HiddenResult
+from optiprofiler_evolve.phases.prepare import PrepareContext, PrepareResult
+from optiprofiler_evolve.phases.report import ReportContext, ReportResult
+from optiprofiler_evolve.phases.validate import ValidateContext, ValidateResult
 
 if TYPE_CHECKING:
-    from .engine import EvolutionEngine
+    from optiprofiler_evolve.controller.engine import EvolutionEngine
 
 
 def bind_context(engine: EvolutionEngine, name: str, base: PhaseContext) -> PhaseContext:
@@ -28,6 +28,7 @@ def bind_context(engine: EvolutionEngine, name: str, base: PhaseContext) -> Phas
             config=engine.config,
             evaluator_factory=engine.evaluator_factory,
             validate_candidate=engine._validate_candidate,
+            review_candidate=engine.integrity_executor.review,
         )
     if name == "explore":
         if engine.evaluator is None or engine.data is None:
@@ -58,7 +59,6 @@ def bind_context(engine: EvolutionEngine, name: str, base: PhaseContext) -> Phas
             populations=engine._population_snapshot(),
             research_finalists=tuple(engine.research_finalists.values()),
             fixed_finalists=engine._fixed_finalists,
-            assess_complexity=engine._assess_complexity,
         )
     if name == "hidden":
         if engine.champion is None or engine.evaluator is None or engine.data is None:
@@ -68,7 +68,6 @@ def bind_context(engine: EvolutionEngine, name: str, base: PhaseContext) -> Phas
             champion=engine.champion,
             evaluator=engine.evaluator,
             data=engine.data,
-            check_complexity=engine._check_complexity,
         )
     if name == "report":
         if engine.final_result is None or engine.final_solver is None:
@@ -77,7 +76,6 @@ def bind_context(engine: EvolutionEngine, name: str, base: PhaseContext) -> Phas
             **common,
             final_result=engine.final_result,
             final_solver=engine.final_solver,
-            check_complexity=engine._check_complexity,
         )
     return base
 
@@ -87,7 +85,6 @@ def commit_result(engine: EvolutionEngine, result: PhaseResult) -> None:
         engine.data = result.data
         engine.reference = result.reference
         engine.evaluator = result.evaluator
-        engine.complexity = result.complexity
         engine.candidates[result.seed.candidate_id] = result.seed
         engine.populations = [[result.seed] for _ in range(engine.config.evolution.islands)]
         engine._write_checkpoint(0)

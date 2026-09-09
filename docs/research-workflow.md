@@ -9,8 +9,8 @@ prepare -> explore -> validate -> hidden -> report
 Each default exploration attempt runs only `mutate -> smoke ->
 public_evaluate`. Whole-candidate migration, web search, compilers, additional
 audit evidence, feedback injection, and research phases are explicit opt-ins.
-The mandatory controller safety gate and semantic integrity review are not
-removed by this smaller visible pipeline.
+Controller execution safety remains mandatory. Quality standards are configured
+independently; semantic integrity is enabled for formal assessment by default.
 
 For strategy-level research, use the ordered workflow in
 [`examples/experiment-research.yaml`](../examples/experiment-research.yaml):
@@ -52,7 +52,7 @@ variant for every mechanism that can safely be separated.
 
 For each proposed strategy, the controller independently evaluates both the
 finalist and its ablated variant. The default `evaluation_mode: smoke` keeps
-this pass bounded; `public` requests canonical public evaluation. Removing a
+this pass bounded; `public` requests canonical public execution. Removing a
 strategy yields one of three controller-owned conclusions:
 
 - `supported`: removal reduces fitness by at least `min_effect`;
@@ -127,7 +127,7 @@ are preserved as separate evidence.
 Every worker that emits a solver is asked to write
 `.optiprofiler_evolve/solver_explanation.json`. The controller validates and
 moves this untrusted metadata outside the executable solver tree before audit
-and evaluation. Missing or malformed explanations are visible but do not turn
+and execution. Missing or malformed explanations are visible but do not turn
 into a numerical rejection.
 
 The final run contains:

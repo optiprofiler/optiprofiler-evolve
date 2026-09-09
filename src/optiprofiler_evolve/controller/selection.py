@@ -1,11 +1,36 @@
-"""Explicit island-archive retention and parent-sampling strategies."""
+"""Read-only archive retention and parent selection policies."""
 
 from __future__ import annotations
 
 import random
 from collections.abc import Sequence
+from random import Random
+from typing import Protocol
 
-from optiprofiler_evolve.shared.models import CandidateRecord, MetricBundle
+from optiprofiler_evolve.models import CandidateRecord, MetricBundle
+
+class RetentionPolicy(Protocol):
+    """Choose the bounded archive retained by one island."""
+
+    name: str
+
+    def retain(
+        self,
+        candidates: Sequence[CandidateRecord],
+        capacity: int,
+    ) -> tuple[CandidateRecord, ...]: ...
+
+
+class ParentSampler(Protocol):
+    """Choose one parent from an already ordered island archive."""
+
+    name: str
+
+    def select(
+        self,
+        population: Sequence[CandidateRecord],
+        rng: Random,
+    ) -> CandidateRecord: ...
 
 
 class MetricSelectionError(ValueError):
@@ -28,8 +53,7 @@ class ValidationLexicographicRetention:
         ordered = sorted(
             unique.values(),
             key=lambda record: (
-                -record.validation_score,
-                -record.public_score,
+                -record.ranking_score,
                 -record.iteration,
                 record.candidate_id,
             ),
@@ -56,7 +80,7 @@ class TopBiasedValidationWeightedSampler:
             raise ValueError("Cannot sample a parent from an empty island archive.")
         if len(population) == 1 or rng.random() < self.greedy_ratio:
             return population[0]
-        weights = [max(record.validation_score, 1e-6) for record in population]
+        weights = [max(record.ranking_score, 1e-6) for record in population]
         return rng.choices(list(population), weights=weights, k=1)[0]
 
 
@@ -156,6 +180,3 @@ class MetricParetoRetention:
             no_worse = no_worse and left_value >= right_value - self.epsilon
             strictly_better = strictly_better or left_value > right_value + self.epsilon
         return no_worse and strictly_better
-
-
-__all__: list[str] = []

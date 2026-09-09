@@ -9,8 +9,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.shared.config import SandboxConfig, WorkerConfig, WorkersConfig
 from optiprofiler_evolve.agents.docker_runtime import recover_gateway_trace
+from optiprofiler_evolve.config import SandboxConfig, WorkerConfig, WorkersConfig
 from optiprofiler_evolve.observability.traces import (
     TracePaths,
     prepare_trace,

@@ -9,9 +9,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.shared.config import EvolveConfig
-from optiprofiler_evolve.shared.models import EvolveResult
-
+from optiprofiler_evolve.config import EvolveConfig
+from optiprofiler_evolve.models import EvolveResult
 
 ConfigVariant = Callable[[EvolveConfig], EvolveConfig]
 RunFunction = Callable[..., EvolveResult]

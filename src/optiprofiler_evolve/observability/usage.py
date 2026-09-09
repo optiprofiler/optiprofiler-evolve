@@ -6,7 +6,6 @@ import dataclasses
 from collections.abc import Iterable
 from typing import Any
 
-
 _NUMERIC_FIELDS = (
     "calls",
     "input_tokens",

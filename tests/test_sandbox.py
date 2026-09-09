@@ -8,18 +8,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from optiprofiler_evolve.evaluation.broker import BrokerConnection
-from optiprofiler_evolve.shared.config import (
-    SandboxConfig,
-    ToolConfig,
-    WorkerConfig,
-    WorkersConfig,
-)
+from optiprofiler_evolve.agents.broker import BrokerConnection
 from optiprofiler_evolve.agents.docker_runtime import (
     GatewayRuntimeOutcome,
     build_worker_container_command,
 )
 from optiprofiler_evolve.agents.sandbox import run_agent
+from optiprofiler_evolve.config import SandboxConfig, ToolConfig, WorkerConfig, WorkersConfig
 from optiprofiler_evolve.observability.traces import CapturedProcess
 
 
