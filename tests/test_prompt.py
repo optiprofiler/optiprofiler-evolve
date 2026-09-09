@@ -37,6 +37,18 @@ def _prompt_kwargs() -> dict:
 
 
 class PromptTests(unittest.TestCase):
+    def test_complexity_note_only_adds_to_the_contract(self) -> None:
+        kwargs = _prompt_kwargs()
+        without_note = build_worker_prompt(**kwargs)
+        self.assertEqual(without_note, build_worker_prompt(**kwargs, complexity_note=None))
+        self.assertNotIn("Complexity budget", without_note)
+        note = "Complexity budget (warn): synthetic constraint."
+        with_note = build_worker_prompt(**kwargs, complexity_note=note)
+        self.assertEqual(with_note.count(note), 1)
+        self.assertLess(with_note.index("Contract"), with_note.index(note))
+        self.assertLess(with_note.index(note), with_note.index("Evaluation tools"))
+        self.assertEqual(without_note, with_note.replace(note, ""))
+
     def test_prompt_note_renders_only_when_configured(self) -> None:
         kwargs = _prompt_kwargs()
         without_note = build_worker_prompt(**kwargs)

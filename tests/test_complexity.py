@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unittest
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,8 +24,9 @@ from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.events import EventWriter, rebuild_run_state
 from optiprofiler_evolve.projections import project_public_events
 from optiprofiler_evolve.viewers import render_status, render_public_report
-from optiprofiler_evolve.protocols import StepResult, VariantRequest, WorkerOutcome
+from optiprofiler_evolve.protocols import AgentJob, StepResult, VariantRequest, WorkerOutcome
 from optiprofiler_evolve.solver import InterfaceSpec
+from optiprofiler_evolve.trace_ledger import TraceLedger
 
 from test_config import minimal_config
 from test_extensibility import evaluator_factory
@@ -300,6 +302,86 @@ class ComplexityTests(unittest.TestCase):
         engine.run()
         self.assertFalse(engine.candidates["it001-i00-a00"].valid)
         self.assertTrue(all(code == SEED for _, _, code in evaluator.calls))
+
+    def test_worker_receives_configured_complexity_prompt(self):
+        for mode in (None, "warn", "enforce"):
+            with self.subTest(mode=mode):
+                engine = self.engine(mode or "warn", 1.75)
+                engine.run_dir = self.root / f"worker-{mode}"
+                if mode is None:
+                    engine.config = replace(engine.config, complexity=None)
+                prompts = []
+                mutate = engine.worker_adapter.runner
+
+                def capture(**kwargs):
+                    prompts.append(kwargs["prompt"])
+                    return mutate(**kwargs)
+
+                engine.worker_adapter = RunnerAdapter(capture)
+                engine.run()
+                self.assertEqual(len(prompts), 1)
+                prompt = prompts[0]
+                if mode is None:
+                    self.assertNotIn("Complexity budget", prompt)
+                    self.assertNotIn("Current parent:", prompt)
+                    continue
+                self.assertIn(
+                    f"Complexity budget ({mode}): initial branches 1, logical lines 2; "
+                    "each may be at most 1.75 times its initial value.", prompt
+                )
+                self.assertIn("Current parent: Complexity: 100.0 / limit 175", prompt)
+                self.assertIn("Branches: 1 / initial 1 (limit 1.75)", prompt)
+                self.assertIn("Logical lines: 2 / initial 2 (limit 3.5)", prompt)
+                self.assertIn("All candidate Python files count", prompt)
+                self.assertIn("rather than compress formatting or remove documentation", prompt)
+                self.assertIn("In warn mode this is advice only", prompt)
+                self.assertIn(
+                    "In enforce mode an exceeded or unavailable analysis blocks "
+                    "evaluation and admission", prompt
+                )
+                self.assertEqual(prompt.count("Complexity budget ("), 1)
+                self.assertNotIn(engine.complexity.baseline_hash, prompt)
+                self.assertNotIn(str(self.seed), prompt)
+
+    def test_research_job_receives_budget_without_mutating_original_prompt(self):
+        for mode in (None, "warn", "enforce"):
+            with self.subTest(mode=mode):
+                engine = self.engine(mode or "warn", 0.8)
+                engine.run_dir = self.root / f"research-{mode}"
+                if mode is None:
+                    engine.config = replace(engine.config, complexity=None)
+                prompts = []
+
+                def capture(**kwargs):
+                    prompts.append(kwargs["prompt"])
+                    kwargs["transcript"].parent.mkdir(parents=True, exist_ok=True)
+                    kwargs["transcript"].write_text("synthetic research")
+                    return WorkerOutcome(0, kwargs["transcript"])
+
+                engine.worker_adapter = RunnerAdapter(capture)
+                engine._initialize_run_directory()
+                engine.trace_ledger = TraceLedger(
+                    engine.run_dir, run_id="prompt-test", config_hash="test",
+                    adapter_name=engine.worker_adapter.name,
+                )
+                engine._phase_prepare()
+                job = AgentJob(
+                    role="strategy-integrator", job_id="prompt-test", prompt="Integrate strategies."
+                )
+                engine.controller_services.run_trusted_agent(job)
+                self.assertEqual(job.prompt, "Integrate strategies.")
+                self.assertEqual(len(prompts), 1)
+                if mode is None:
+                    self.assertEqual(prompts[0], job.prompt)
+                else:
+                    self.assertTrue(prompts[0].startswith(job.prompt))
+                    self.assertIn(
+                        f"Complexity budget ({mode}): initial branches 1, logical lines 2; "
+                        "each may be at most 0.8 times its initial value.", prompts[0]
+                    )
+                    self.assertEqual(prompts[0].count("Complexity budget ("), 1)
+                    self.assertNotIn(engine.complexity.baseline_hash, prompts[0])
+                    self.assertNotIn(str(self.seed), prompts[0])
 
     def test_warn_candidate_is_admitted_and_reported(self):
         engine = self.engine("warn")
