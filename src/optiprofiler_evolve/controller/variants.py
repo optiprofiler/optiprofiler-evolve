@@ -29,6 +29,7 @@ class VariantMaterializer:
 
     def materialize(self, request: VariantRequest) -> VariantHandle:
         environment = self.environment
+        environment.commits.require_open_selection()
         variant_id = _safe_identifier(request.variant_id, "variant_id")
         if request.tree is not None and request.patches:
             raise ValueError("A variant request may provide a tree or patches, not both.")

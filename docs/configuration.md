@@ -145,6 +145,12 @@ explicitly. The engine's final source/interface/import gate remains mandatory;
 quality criteria have independent enable switches. The workflow is an ordered
 protocol rather than an arbitrary DAG.
 
+The phase list may also be replaced or shortened, including `phases: []`.
+Preflight checks dependencies in the supplied order; it does not reorder stages.
+Omitting report does not prevent a return value, and omitting selection does not
+invent a winner. See [custom workflows](custom-workflows.md) for a two-stage,
+no-LLM example and the safety constraints on optimization workflows.
+
 The optional full harness is shown in
 [`examples/experiment-research.yaml`](../examples/experiment-research.yaml). It
 inserts `direction_scout` before exploration, `strategy_analysis` and

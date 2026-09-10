@@ -21,6 +21,17 @@ from optiprofiler_evolve.solver import InterfaceSpec, copy_initial_source, tree_
 
 
 @dataclass(frozen=True)
+class PreparedArtifact:
+    seed: Path
+    seed_public_evidence: Path
+    solver_contract: Path
+    islands: int
+    interface: str
+    runtime: str
+    editable: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ExperimentFingerprints:
     """Independent identities for data, split, configuration, and solver code."""
 
@@ -190,15 +201,15 @@ class PreparePhase:
             assessment=seed_validation.assessment,
         )
         artifacts = {
-            "prepared": {
-                "seed": str(seed_path),
-                "seed_public_evidence": str(seed_public.output_dir),
-                "solver_contract": str(solver_contract),
-                "islands": context.config.evolution.islands,
-                "interface": f"{context.interface.file}:{context.interface.function}",
-                "runtime": context.runtime,
-                "editable": list(context.editable),
-            }
+            "prepared": PreparedArtifact(
+                seed=seed_path,
+                seed_public_evidence=seed_public.output_dir,
+                solver_contract=solver_contract,
+                islands=context.config.evolution.islands,
+                interface=f"{context.interface.file}:{context.interface.function}",
+                runtime=context.runtime,
+                editable=tuple(context.editable),
+            )
         }
 
         return PrepareResult(

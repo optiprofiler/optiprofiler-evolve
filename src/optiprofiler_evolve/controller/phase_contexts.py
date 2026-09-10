@@ -83,6 +83,7 @@ def hidden_context(bindings, base: PhaseContext) -> PhaseContext:
         champion=environment.state.champion,
         evaluator=environment.state.evaluator,
         data=environment.state.data,
+        begin_holdout=environment.commits.begin_holdout,
     )
 
 

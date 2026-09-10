@@ -34,6 +34,7 @@ def build_run_provenance(
     worker_adapter: object,
     worker_provenance: Mapping[str, object],
     evaluator_factory: object,
+    attempt_steps: Sequence[ComponentConfig],
 ) -> dict[str, Any]:
     """Build the redacted identity written into the first run event."""
 
@@ -41,7 +42,7 @@ def build_run_provenance(
     encoded = json.dumps(resolved, sort_keys=True, separators=(",", ":"), default=str)
     components = {
         "phases": _component_table("phase", config.workflow.phases),
-        "attempt_steps": _component_table("step", config.workflow.attempt_steps),
+        "attempt_steps": _component_table("step", attempt_steps),
         "after_iteration": _component_table("policy", config.workflow.after_iteration),
         "retention": _component_table("retention", (config.evolution.retention,))[0],
         "parent_sampler": _component_table(
@@ -62,7 +63,7 @@ def build_run_provenance(
             "name": config.execution.adapter,
             "declared_deterministic": getattr(evaluator_factory, "deterministic", None),
             **_callable_identity(evaluator_factory),
-        },
+        } if evaluator_factory is not None else None,
     }
     return {
         "schema_version": "1",

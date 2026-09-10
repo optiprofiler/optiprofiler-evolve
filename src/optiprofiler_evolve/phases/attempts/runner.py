@@ -15,7 +15,11 @@ from optiprofiler_evolve.observability.provenance import coordinate_seed
 from optiprofiler_evolve.phases.attempts.capabilities import (
     ControllerAttemptCapabilities as _ControllerAttemptCapabilities,
 )
-from optiprofiler_evolve.phases.attempts.contracts import AttemptContext, StepResult
+from optiprofiler_evolve.phases.attempts.contracts import (
+    AttemptContext,
+    StepResult,
+    validate_attempt_steps,
+)
 from optiprofiler_evolve.solver import copy_solver_tree, tree_hash
 
 
@@ -34,6 +38,8 @@ class AttemptRunner:
         parent: CandidateRecord,
         worker: WorkerConfig,
     ) -> Attempt:
+        self.environment.commits.require_open_selection()
+        validate_attempt_steps(step.name for step in self.environment.attempt_steps)
         attempt_id = f"it{iteration:03d}-i{island:02d}-a{attempt_index:02d}"
         scope = {
             "phase": "explore",

@@ -4,15 +4,21 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from optiprofiler_evolve.config import ToolConfig
+from optiprofiler_evolve.config import EvolveConfig, ToolConfig
 from optiprofiler_evolve.phases.contracts import PhaseContext
+from optiprofiler_evolve.phases.prepare import PreparedArtifact
 
 
-def _prepared(context: PhaseContext) -> Mapping[str, object]:
+def _prepared(context: PhaseContext) -> PreparedArtifact:
     value = context.artifacts.get("prepared")
-    if not isinstance(value, Mapping):
+    if not isinstance(value, PreparedArtifact):
         raise RuntimeError("research phase requires the structured prepared artifact")
     return value
+
+
+def _require_public_performance(config: EvolveConfig, phase: str) -> None:
+    if not config.assessment.enabled("performance", "public"):
+        raise ValueError(f"Phase {phase!r} requires public performance assessment.")
 
 
 def _tool_config(

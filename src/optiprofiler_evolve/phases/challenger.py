@@ -6,6 +6,7 @@ from optiprofiler_evolve.controller.contracts import VariantHandle
 from optiprofiler_evolve.criteria.performance.competitors import competitor_names
 from optiprofiler_evolve.files import write_json
 from optiprofiler_evolve.phases._research import CHALLENGER_SCHEMA
+from optiprofiler_evolve.phases._support import _require_public_performance
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 from optiprofiler_evolve.solver import tree_hash
 
@@ -14,7 +15,7 @@ class ChallengerPhase:
     """Report a post-selection public comparison against a strong solver."""
 
     name = "challenger"
-    requires = frozenset({"final"})
+    requires = frozenset({"final", "final_solver"})
     provides = frozenset({"challenger_report"})
 
     def __init__(self, *, reference: str = "scipy_powell") -> None:
@@ -22,8 +23,11 @@ class ChallengerPhase:
             raise ValueError("challenger.reference must be initial or a registered DFO competitor")
         self.reference = reference
 
+    def validate_config(self, config) -> None:
+        _require_public_performance(config, self.name)
+
     def run(self, context: PhaseContext) -> PhaseResult:
-        final_solver = context.run_dir / "final_solver"
+        final_solver = context.artifacts["final_solver"]
         digest = tree_hash(final_solver)
         handle = VariantHandle(
             variant_id="final-champion",

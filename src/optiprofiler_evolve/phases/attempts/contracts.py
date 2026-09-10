@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -12,6 +12,12 @@ from optiprofiler_evolve.observability.events import EventEmitter
 
 if TYPE_CHECKING:
     from optiprofiler_evolve.models import CandidateRecord, EvaluationResult
+
+
+def validate_attempt_steps(names: Iterable[str]) -> None:
+    missing = {"mutate", "public_evaluate"}.difference(names)
+    if missing:
+        raise ValueError(f"workflow.attempt_steps must include {sorted(missing)!r}.")
 
 
 class AttemptCapabilities(Protocol):

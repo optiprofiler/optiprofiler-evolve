@@ -1,6 +1,6 @@
 # Examples
 
-All examples use the public `evolve(...)` function. They intentionally run one
+All examples use the public `evolve(...)` function. Evolution examples run one
 small iteration and demonstrate the interface rather than solver quality.
 For convenience they explicitly reuse the mutation model as the mandatory
 integrity reviewer. Paper-grade runs should configure a distinct
@@ -9,6 +9,7 @@ at least one review call.
 
 | Goal | Python file | Config | Required environment |
 |---|---|---|---|
+| Two custom metadata phases, no model calls | `custom_workflow.py` | Inline Python | None; see [custom workflows](../docs/custom-workflows.md) |
 | Claude Code quick start | `run.py` | `experiment.yaml` | `OPTIPROFILER_EVOLVE_MODEL`, `ANTHROPIC_API_KEY` |
 | Claude-compatible provider | `run_claude_compatible.py` | `experiment-claude-compatible.yaml` | `OPTIPROFILER_EVOLVE_MODEL`, `OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL`, `OPTIPROFILER_EVOLVE_API_KEY` |
 | Codex quick start | `run_codex.py` | `experiment-codex.yaml` | `OPTIPROFILER_EVOLVE_CODEX_MODEL`, `OPENAI_API_KEY` |
@@ -19,7 +20,7 @@ at least one review call.
 | Self-hosted GitHub Actions launch | `github-actions/run.py` | `experiment.yaml` | Registered `syu-ubuntu` runner, Docker access, repository variable, and provider secret; see `github-actions/evolve-self-hosted.yml` |
 | GitHub Actions from an external solver repository | `external-repository/evolve/run.py` | `external-repository/evolve/experiment.yaml` | Copy the shown repository layout and workflow |
 
-Build the worker and evaluator images once before running an example. See
+Build the worker and evaluator images once before running an evolution example. See
 [Getting started](../docs/getting-started.md) for the commands.
 
 The multi-file example deliberately uses a relative import. Candidate and

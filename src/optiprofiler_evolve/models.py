@@ -6,7 +6,9 @@ import dataclasses
 import hashlib
 import json
 import math
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -254,14 +256,19 @@ class EvolveResult:
     """Return value of :func:`optiprofiler_evolve.evolve`."""
 
     run_dir: Path
-    best_solver: Path
-    best_candidate_id: str
+    best_solver: Path | None
+    best_candidate_id: str | None
     public_score: float | None
     validation_score: float | None
     final_score: float | None
     finalists: tuple[FinalistResult, ...]
     assessment_score: float | None = None
     final_assessment_score: float | None = None
+
+    artifacts: Mapping[str, object] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "artifacts", MappingProxyType(dict(self.artifacts)))
 
 
 @dataclasses.dataclass(frozen=True)

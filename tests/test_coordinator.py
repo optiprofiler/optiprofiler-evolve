@@ -9,6 +9,7 @@ from unittest.mock import Mock
 from optiprofiler_evolve.controller.commits import RunCommits
 from optiprofiler_evolve.controller.coordinator import RunCoordinator
 from optiprofiler_evolve.controller.state import RunState
+from optiprofiler_evolve.errors import RunCancelled
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 
 
@@ -60,7 +61,8 @@ class CoordinatorTests(unittest.TestCase):
     def test_optional_inputs_are_explicit_and_need_not_exist(self):
         observed = []
         phase = self.phase(
-            lambda context: observed.append(dict(context.artifacts)) or PhaseResult()
+            lambda context: observed.append(dict(context.artifacts))
+            or PhaseResult(artifacts={"output": "done"})
         )
         phase.optional_requires = frozenset({"directions"})
         self.coordinator.run_phase(phase, {})
@@ -90,6 +92,20 @@ class CoordinatorTests(unittest.TestCase):
             {},
         )
         self.assertEqual(self.state.artifacts["output"], "skipped")
+
+    def test_missing_declared_outputs_do_not_commit_even_when_skipped(self):
+        for status in ("succeeded", "skipped"):
+            with self.subTest(status=status), self.assertRaisesRegex(RuntimeError, "omitted"):
+                self.coordinator.run_phase(self.phase(lambda _: PhaseResult(status=status)), {})
+            self.assertNotIn("output", self.state.artifacts)
+
+    def test_cancelled_result_preserves_cancellation_and_does_not_publish(self):
+        with self.assertRaises(RunCancelled):
+            self.coordinator.run_phase(
+                self.phase(lambda _: PhaseResult(status="cancelled", artifacts={"output": "bad"})),
+                {},
+            )
+        self.assertNotIn("output", self.state.artifacts)
 
     def test_run_state_instances_do_not_share_mutable_values(self):
         other = RunState()

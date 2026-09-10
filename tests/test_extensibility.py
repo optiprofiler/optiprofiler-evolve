@@ -191,8 +191,9 @@ class ExtensibilityTests(unittest.TestCase):
         self.assertEqual(base.workflow.phases[1].options["mode"], "shared")
         self.assertEqual(disabled.workflow.phases[1].options["mode"], "off")
         self.assertNotIn("direction_scout", [phase.name for phase in removed.workflow.phases])
-        with self.assertRaisesRegex(ValueError, "Core phase"):
-            base.without_phase("explore")
+        self.assertNotIn(
+            "explore", [phase.name for phase in base.without_phase("explore").workflow.phases]
+        )
 
     def test_direction_scout_modes_form_independent_config_variants(self) -> None:
         base = load_config(minimal_config()).with_phase(

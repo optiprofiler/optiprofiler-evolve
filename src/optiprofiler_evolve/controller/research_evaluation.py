@@ -28,6 +28,8 @@ class ResearchEvaluator:
         mode: str = "public_score",
     ) -> EvaluationResult:
         environment = self.environment
+        if reference is None:
+            environment.commits.require_open_selection()
         label = _safe_identifier(label, "evaluation label")
         if tree_hash(handle.path) != handle.tree_hash:
             raise ValueError(f"Variant tree changed after materialization: {handle.variant_id}")

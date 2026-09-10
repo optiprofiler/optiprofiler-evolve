@@ -56,6 +56,7 @@ from optiprofiler_evolve.phases.attempts.runner import AttemptRunner
 from optiprofiler_evolve.phases.contracts import Phase
 from optiprofiler_evolve.solver import (
     InterfaceSpec,
+    tree_hash,
     validate_candidate_imports,
     validate_interface,
     validate_tree_safety,
@@ -84,6 +85,10 @@ class EvolutionRun:
         self.editable = tuple(editable)
         self.config = config
         self.run_dir = run_dir.expanduser().resolve()
+        self.phases: tuple[Phase, ...] = tuple(
+            build("phase", spec) for spec in config.workflow.phases
+        )
+        RunCoordinator.preflight(self.phases, config)
         self.worker_adapter = (
             worker_adapter
             if worker_adapter is not None
@@ -92,12 +97,9 @@ class EvolutionRun:
         self.evaluator_factory = evaluator_factory
         if self.evaluator_factory is None and config.assessment.enabled("performance"):
             self.evaluator_factory = resolve("evaluator", config.execution.adapter)
-        self.phases: tuple[Phase, ...] = tuple(
-            build("phase", spec) for spec in config.workflow.phases
-        )
         self.attempt_steps: tuple[AttemptStep, ...] = tuple(
             build("step", spec) for spec in config.workflow.attempt_steps
-        )
+        ) if any(getattr(phase, "uses_attempts", False) for phase in self.phases) else ()
         self.after_iteration: tuple[AfterIterationPolicy, ...] = tuple(
             build("policy", spec) for spec in config.workflow.after_iteration
         )
@@ -174,6 +176,27 @@ class EvolutionRun:
             raise_if_cancelled=self._raise_if_cancelled,
         )
 
+    def _result(self) -> EvolveResult:
+        champion = self.state.champion[1] if self.state.champion is not None else None
+        final = self.state.final_result
+        if champion is not None:
+            if tree_hash(champion.path) != champion.tree_hash:
+                raise ValueError("Champion changed after formal assessment.")
+            if self.config.data.split.lockbox_required and final is None:
+                raise RuntimeError("A required lockbox must be evaluated before returning a champion.")
+        return EvolveResult(
+            run_dir=self.run_dir,
+            best_solver=(self.state.final_solver or champion.path) if champion else None,
+            best_candidate_id=champion.candidate_id if champion else None,
+            public_score=champion.public_score if champion else None,
+            validation_score=champion.validation_score if champion else None,
+            final_score=final.final_score if final else None,
+            finalists=(final,) if final else (),
+            assessment_score=champion.assessment_score if champion else None,
+            final_assessment_score=final.final_assessment_score if final else None,
+            artifacts=self.state.artifacts,
+        )
+
     def _llm_client(self, request: WorkerRequest) -> LLMClient:
         if self.trace_ledger is None:
             raise RuntimeError("Trace ledger is not initialized.")
@@ -233,6 +256,7 @@ class EvolutionRun:
                     worker_adapter=self.worker_adapter,
                     worker_provenance=self.worker_adapter.provenance(provenance_workers),
                     evaluator_factory=self.evaluator_factory,
+                    attempt_steps=self.config.workflow.attempt_steps if self.attempt_steps else (),
                 )
                 self.trace_ledger = TraceLedger(
                     self.run_dir,
@@ -245,15 +269,14 @@ class EvolutionRun:
                 self._emit("run_started", "running", data=provenance)
                 self.coordinator.run()
                 self._raise_if_cancelled()
-                if self.state.result is None:
-                    raise RuntimeError("Workflow completed without producing EvolveResult.")
+                result = self._result()
                 self._emit(
                     "run_finished",
                     "succeeded",
-                    data={"best_candidate_id": self.state.result.best_candidate_id},
+                    data={"best_candidate_id": result.best_candidate_id},
                 )
                 run_succeeded = True
-                return self.state.result
+                return result
         except _RunCancelled as exc:
             self._emit("run_finished", "cancelled", data={"error": str(exc)})
             raise

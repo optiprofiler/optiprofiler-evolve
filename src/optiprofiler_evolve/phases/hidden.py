@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from optiprofiler_evolve.criteria.performance.contracts import Evaluator
 from optiprofiler_evolve.data import DataPlan
 from optiprofiler_evolve.models import CandidateRecord, FinalistResult
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
-from optiprofiler_evolve.solver import copy_solver_tree, tree_hash
+from optiprofiler_evolve.solver import copy_solver_tree
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,7 @@ class HiddenContext(PhaseContext):
     champion: tuple[int, CandidateRecord]
     evaluator: Evaluator
     data: DataPlan
+    begin_holdout: Callable[[tuple[int, CandidateRecord]], None]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -29,13 +31,12 @@ class HiddenPhase:
     """Execute the hidden stage through its bounded controller context."""
 
     name = "hidden"
-    requires = frozenset(["champion"])
-    provides = frozenset(["final"])
+    requires = frozenset(["prepared", "champion"])
+    provides = frozenset(["final", "final_solver"])
 
     def run(self, context: HiddenContext) -> HiddenResult:
         island, champion = context.champion
-        if tree_hash(champion.path) != champion.tree_hash:
-            raise ValueError("Champion changed after formal assessment.")
+        context.begin_holdout(context.champion)
         final_result = _evaluate_hidden_champion(
             context.run_dir, island, champion, context.evaluator, context.data
         )
@@ -44,7 +45,8 @@ class HiddenPhase:
         final_solver = context.run_dir / "final_solver"
         copy_solver_tree(champion.path, final_solver)
         return HiddenResult(
-            artifacts={"final": final_result}, final_result=final_result, final_solver=final_solver,
+            artifacts={"final": final_result, "final_solver": final_solver},
+            final_result=final_result, final_solver=final_solver,
             status="skipped" if final_result.assessment_status == "skipped" else "succeeded",
         )
 

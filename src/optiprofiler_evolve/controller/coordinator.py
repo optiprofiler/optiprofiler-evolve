@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
-from optiprofiler_evolve.config import ComponentConfig
+from optiprofiler_evolve.config import ComponentConfig, EvolveConfig
 from optiprofiler_evolve.controller.commits import RunCommits
 from optiprofiler_evolve.controller.contracts import ControllerServices
 from optiprofiler_evolve.controller.state import RunState
@@ -13,6 +13,27 @@ from optiprofiler_evolve.phases.contracts import Phase, PhaseContext
 
 
 class RunCoordinator:
+    @staticmethod
+    def preflight(phases: tuple[Phase, ...], config: EvolveConfig) -> None:
+        names: set[str] = set()
+        available: set[str] = set()
+        for phase in phases:
+            if phase.name in names:
+                raise ValueError(f"Duplicate phase name {phase.name!r}.")
+            names.add(phase.name)
+            missing = phase.requires.difference(available)
+            if missing:
+                raise ValueError(
+                    f"Phase {phase.name!r} requires missing artifacts {sorted(missing)!r}."
+                )
+            validate = getattr(phase, "validate_config", None)
+            if validate is not None:
+                validate(config)
+            available.update(phase.provides)
+        if config.data.split.lockbox_required and "champion" in available:
+            if "final" not in available or not config.assessment.enabled("performance", "hidden"):
+                raise ValueError("A required lockbox needs hidden performance evaluation.")
+
     def __init__(
         self,
         *,
@@ -69,15 +90,20 @@ class RunCoordinator:
             )
             factory = self.contexts.get(phase.name)
             result = phase.run(factory(context) if factory is not None else context)
+            if result.status == "cancelled":
+                raise RunCancelled(f"Phase {phase.name!r} was cancelled.")
+            if result.status == "failed":
+                raise RuntimeError(f"Phase {phase.name!r} failed.")
             undeclared = set(result.artifacts).difference(phase.provides)
             if undeclared:
                 raise RuntimeError(
                     f"Phase {phase.name!r} produced undeclared artifacts {sorted(undeclared)!r}."
                 )
-            if result.status == "cancelled":
-                raise RunCancelled(f"Phase {phase.name!r} was cancelled.")
-            if result.status == "failed":
-                raise RuntimeError(f"Phase {phase.name!r} failed.")
+            missing = phase.provides.difference(result.artifacts)
+            if missing:
+                raise RuntimeError(
+                    f"Phase {phase.name!r} omitted declared artifacts {sorted(missing)!r}."
+                )
             self.commits.commit_phase_result(result)
             self.emit(
                 "phase_finished",

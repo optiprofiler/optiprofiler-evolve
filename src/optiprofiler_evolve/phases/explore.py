@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from random import Random
 
-from optiprofiler_evolve.config import EvolutionConfig, WorkerConfig, WorkersConfig
+from optiprofiler_evolve.config import EvolutionConfig, EvolveConfig, WorkerConfig, WorkersConfig
 from optiprofiler_evolve.errors import RunCancelled as _RunCancelled
 from optiprofiler_evolve.files import read_json_object
 from optiprofiler_evolve.models import Attempt, CandidateRecord
@@ -18,6 +18,7 @@ from optiprofiler_evolve.phases.attempts.contracts import (
     AfterIterationPolicy,
     IterationView,
     PopulationEdit,
+    validate_attempt_steps,
 )
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 
@@ -50,6 +51,10 @@ class ExplorePhase:
     requires = frozenset(["prepared"])
     optional_requires = frozenset({"directions"})
     provides = frozenset(["populations"])
+    uses_attempts = True
+
+    def validate_config(self, config: EvolveConfig) -> None:
+        validate_attempt_steps(item.name for item in config.workflow.attempt_steps)
 
     def run(self, context: ExploreContext) -> PhaseResult:
         context.set_directions(_direction_assignments(context.artifacts.get("directions")))

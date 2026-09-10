@@ -314,9 +314,9 @@ the package.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `workflow.phases[].name` | registered name | `prepare`, `explore`, `validate`, `hidden`, `report` | Ordered run-level phases with declared artifact requirements and outputs. Core phases are mandatory in the alpha. |
+| `workflow.phases[].name` | registered name | `prepare`, `explore`, `validate`, `hidden`, `report` | Ordered run-level phases with declared inputs/outputs. The list may be empty; required inputs must be provided earlier. |
 | `workflow.phases[].options` | mapping | `{}` | Constructor options for one phase. |
-| `workflow.attempt_steps[].name` | registered name | `mutate`, `smoke`, `public_evaluate` | Ordered steps executed for each candidate attempt. `mutate` and `public_evaluate` are mandatory. |
+| `workflow.attempt_steps[].name` | registered name | `mutate`, `smoke`, `public_evaluate` | Ordered candidate-attempt steps. `mutate` and `public_evaluate` are mandatory when attempts execute; unused steps are not constructed without an attempt phase. |
 | `workflow.attempt_steps[].options` | mapping | `{}` | Constructor options for one attempt step. |
 | `workflow.after_iteration[].name` | registered name | none | Optional policies evaluated after the iteration barrier. They propose edits; only the engine applies them. |
 | `workflow.after_iteration[].options` | mapping | `{}` | Constructor options for one after-iteration policy. |
@@ -327,6 +327,13 @@ Use immutable config helpers such as `without_step(...)`, `with_step(...)`,
 place. For example, one matrix can derive scout `off`, `shared`, and
 `per_island` variants with `with_phase_options`. Removing the `static_audit` step changes reported pipeline evidence, but
 does not remove the engine's mandatory final safety and edit-scope gate.
+
+`without_phase` may remove a built-in stage too. This does not remove its
+dependents: deleting prepare while retaining explore fails preflight. Empty and
+custom-only lists are supported without report or attempt steps. Champion
+selection still closes admission; a required lockbox cannot be omitted or have
+hidden performance disabled in a champion-returning run. See
+[custom workflows](custom-workflows.md) for return semantics and extension code.
 
 `PopulationEdit.budget` is reserved but not implemented in the alpha. A custom
 policy returning a nonempty budget edit fails explicitly; it is not silently
@@ -340,7 +347,8 @@ validate, hidden, challenger, report
 ```
 
 Its phase options live under `workflow.phases[].options` and are validated by
-the phase constructor before a run directory is created:
+the phase constructor and optional `validate_config(config)` hook before a run
+directory is created:
 
 | Phase | Option | Default | Meaning |
 |---|---|---:|---|

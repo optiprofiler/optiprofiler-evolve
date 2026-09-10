@@ -24,6 +24,7 @@ class FinalistRegistrar:
         metadata: Mapping[str, object],
     ) -> str:
         environment = self.environment
+        environment.commits.require_open_selection()
         if handle.variant_id not in environment.state.variant_handles:
             raise ValueError("Only a gated controller variant can be registered as a finalist.")
         if tree_hash(handle.path) != handle.tree_hash:

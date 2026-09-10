@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 from optiprofiler_evolve.agents.contracts import AgentJob
@@ -49,7 +48,7 @@ class DirectionScoutPhase:
 
     def run(self, context: PhaseContext) -> PhaseResult:
         prepared = _prepared(context)
-        island_count = int(prepared["islands"])
+        island_count = prepared.islands
         guided = self.guided_islands or tuple(range(max(1, island_count // 2)))
         if any(value < 0 or value >= island_count for value in guided):
             raise ValueError("direction_scout.guided_islands contains an invalid island")
@@ -84,9 +83,9 @@ class DirectionScoutPhase:
                         job_id=f"direction-{suffix}",
                         prompt=prompt,
                         inputs={
-                            "seed": Path(str(prepared["seed"])),
-                            "public_evidence": Path(str(prepared["seed_public_evidence"])),
-                            "solver_contract.json": Path(str(prepared["solver_contract"])),
+                            "seed": prepared.seed,
+                            "public_evidence": prepared.seed_public_evidence,
+                            "solver_contract.json": prepared.solver_contract,
                         },
                         expected_outputs=("direction_cards.json",),
                         worker_index=self.worker_index,

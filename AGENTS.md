@@ -33,9 +33,12 @@ agent, or problem libraries while working here. They are independent packages.
   host home, or the Docker socket.
 - Public evaluation may guide workers. Validation is controller-only. Hidden is
   evaluated once after the champion is fixed and never feeds back.
-- Core workflow order remains `prepare -> explore -> validate -> hidden ->
-  report`. Optional research phases use the declared phase contracts; do not add
-  a generic DAG compiler.
+- The default workflow remains `prepare -> explore -> validate -> hidden ->
+  report`. Custom ordered lists, including empty lists, use declared artifact
+  contracts and preflight validation; do not add a generic DAG compiler.
+- Selecting a champion closes candidate admission and reselection. Hidden is
+  single-use even on failure; a required lockbox cannot be omitted when returning
+  a champion. Application constructs `EvolveResult`, independently of report.
 - A worker harness is a real Codex or Claude Code agent process, not a raw text
   completion. Provider support depends on the CLI's API dialect and tool loop.
 - Keep credentials in environment variables. Never write them into YAML, CLI

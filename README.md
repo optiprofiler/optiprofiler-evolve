@@ -36,6 +36,11 @@ scout, per-island strategy attribution with executable leave-one-out ablations,
 bounded cross-island recombination, and a post-selection strong-challenger
 report. These are configured phases, not additional public APIs.
 
+Owner code can also supply shortened or custom ordered workflows, including a
+[two-stage metadata example without LLM calls](docs/custom-workflows.md).
+All successful workflows return `EvolveResult`; a workflow without champion
+selection returns artifacts without inventing a winner.
+
 MATLAB entrypoints are detected from `.m` files but the MATLAB evaluator is not
 implemented yet. Deliberately adversarial candidate code is also outside the
 current threat model; see [Security](docs/security.md).

@@ -14,6 +14,12 @@ changed deliberately with matching tests.
 
 - The outer workflow is an ordered list of phases with explicit named
   `requires` and `provides` artifacts.
+- The default is `prepare -> explore -> validate -> hidden -> report`, not a
+  mandatory phase list. Custom lists may be empty. Preflight checks dependencies
+  in supplied order, unique resolved names and optional phase configuration hooks
+  before creating a run directory or infrastructure; it never sorts the list.
+- Available `optional_requires` inputs are passed without requiring a producer.
+  Successful and skipped phases must return exactly their declared outputs.
 - The built-in `explore` phase owns the iteration/island/attempt barrier loop.
 - A candidate attempt is an ordered list of steps.
 - After-iteration policies read one immutable snapshot and propose bounded
@@ -35,6 +41,17 @@ changed deliberately with matching tests.
 - Validation and hidden results cannot enter a worker prompt. Controller-only
   validation may rank and retain candidates; hidden evaluates one
   validation-selected champion once and never affects the evolution loop.
+- Champion selection closes admission, finalist registration and reselection.
+  The controller checks the fixed champion identity and source hash before
+  authorizing hidden, and consumes that authorization before evaluation. Failure
+  cannot authorize a retry. A required lockbox needs hidden performance evaluation.
+- One `RunState` persists across phases; there are no per-phase state subclasses
+  or full-system snapshots. `prepared` is a frozen phase-owned data artifact.
+- Application constructs `EvolveResult` after successful workflow completion.
+  Without a champion, winner and score fields are `None`; without hidden, final
+  fields are absent (`None`/empty tuple). Report only produces report evidence.
+  Returned artifacts are a detached, top-level read-only mapping, not a deep
+  snapshot or a resume format. Exceptions and cancellation still propagate.
 
 ## 4. Extension contracts
 
@@ -113,7 +130,8 @@ The supported extension slots are `Phase`, `AttemptStep`,
 
 ## 6. Reproducibility
 
-Every run records:
+Every run records config, provenance, events and trace coverage. When the
+corresponding stages execute, it also records:
 
 - the canonical redacted resolved config and its hash;
 - package, Python, platform, component identity, component source hashes, worker

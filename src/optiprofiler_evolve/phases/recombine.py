@@ -10,7 +10,7 @@ from typing import Any
 from optiprofiler_evolve.controller.contracts import VariantHandle, VariantRequest
 from optiprofiler_evolve.files import read_json_object, write_json
 from optiprofiler_evolve.phases._research import RECOMBINATION_SCHEMA
-from optiprofiler_evolve.phases._support import _prepared
+from optiprofiler_evolve.phases._support import _prepared, _require_public_performance
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 from optiprofiler_evolve.solver import tree_hash
 
@@ -37,6 +37,9 @@ class RecombinePhase:
         self.max_combinations = int(max_combinations)
         self.beam_width = int(beam_width)
 
+    def validate_config(self, config) -> None:
+        _require_public_performance(config, self.name)
+
     def run(self, context: PhaseContext) -> PhaseResult:
         bundles_payload = read_json_object(Path(str(context.artifacts["island_bundles"])))
         bundles = bundles_payload.get("bundles", [])
@@ -57,7 +60,7 @@ class RecombinePhase:
         )
         base_path = Path(str(base["candidate_path"]))
         base_island = int(base["island"])
-        seed_hash = tree_hash(Path(str(_prepared(context)["seed"])))
+        seed_hash = tree_hash(_prepared(context).seed)
 
         portable: list[dict[str, Any]] = []
         excluded: list[dict[str, Any]] = []

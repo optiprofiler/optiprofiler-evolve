@@ -113,42 +113,6 @@ class WorkflowConfig:
         _validate_unique_components(self.phases, "workflow.phases")
         _validate_unique_components(self.attempt_steps, "workflow.attempt_steps")
         _validate_unique_components(self.after_iteration, "workflow.after_iteration")
-        phase_names = [item.name for item in self.phases]
-        for required in ("prepare", "explore", "validate", "hidden", "report"):
-            if required not in phase_names:
-                raise ValueError(f"workflow.phases must include the core phase {required!r}.")
-        positions = {name: phase_names.index(name) for name in phase_names}
-        core_order = [positions[name] for name in ("prepare", "explore", "validate", "hidden", "report")]
-        if core_order != sorted(core_order):
-            raise ValueError(
-                "Core workflow phases must stay ordered as prepare, explore, validate, hidden, report."
-            )
-        if "direction_scout" in positions and positions["direction_scout"] > positions["explore"]:
-            raise ValueError("direction_scout must run before explore.")
-        if "strategy_analysis" in positions and not (
-            positions["explore"] < positions["strategy_analysis"] < positions["validate"]
-        ):
-            raise ValueError("strategy_analysis must run between explore and validate.")
-        if "strategy_transfer" in positions:
-            if "strategy_analysis" not in positions:
-                raise ValueError("strategy_transfer requires strategy_analysis.")
-            if not positions["strategy_analysis"] < positions["strategy_transfer"] < positions["validate"]:
-                raise ValueError(
-                    "strategy_transfer must run after strategy_analysis and before validate."
-                )
-        if "recombine" in positions:
-            if "strategy_analysis" not in positions:
-                raise ValueError("recombine requires strategy_analysis.")
-            if not positions["strategy_analysis"] < positions["recombine"] < positions["validate"]:
-                raise ValueError("recombine must run after strategy_analysis and before validate.")
-        if "challenger" in positions and not (
-            positions["hidden"] < positions["challenger"] < positions["report"]
-        ):
-            raise ValueError("challenger must run after hidden and before report.")
-        step_names = {item.name for item in self.attempt_steps}
-        for required in ("mutate", "public_evaluate"):
-            if required not in step_names:
-                raise ValueError(f"workflow.attempt_steps must include {required!r}.")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -781,14 +745,6 @@ class EvolveConfig:
                 reviewer = self.reviewer_config(profile).resolved_worker(self.workers)
                 if reviewer is not None:
                     workers.append(reviewer)
-        for phase in self.workflow.phases:
-            if phase.name in {"strategy_analysis", "strategy_transfer", "recombine", "challenger"}:
-                if not self.assessment.enabled("performance", "public"):
-                    raise ValueError(f"Phase {phase.name!r} requires public performance assessment.")
-            if phase.name == "strategy_analysis":
-                profile = phase.options.get("evaluation_mode", "smoke")
-                if not self.assessment.enabled("performance", profile):
-                    raise ValueError(f"strategy_analysis requires {profile} performance assessment.")
         gateway_workers = [worker for worker in workers if worker.provider_gateway is not None]
         if gateway_workers and self.workers.adapter != "cli":
             raise ValueError(
@@ -858,10 +814,7 @@ class EvolveConfig:
         return dataclasses.replace(self, assessment=dataclasses.replace(self.assessment, criteria=criteria))
 
     def without_phase(self, name: str) -> EvolveConfig:
-        """Return a config with one optional outer phase removed."""
-
-        if name in {"prepare", "explore", "validate", "hidden", "report"}:
-            raise ValueError(f"Core phase {name!r} cannot be removed.")
+        """Remove a phase; dependency validation happens before execution."""
         phases = tuple(phase for phase in self.workflow.phases if phase.name != name)
         if len(phases) == len(self.workflow.phases):
             raise KeyError(f"Phase {name!r} is not configured.")

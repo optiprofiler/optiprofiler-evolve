@@ -11,7 +11,7 @@ from optiprofiler_evolve.agents.explanations import capture_solver_explanation
 from optiprofiler_evolve.controller.contracts import VariantHandle, VariantRequest
 from optiprofiler_evolve.files import read_json_object, write_json
 from optiprofiler_evolve.phases._research import STRATEGY_TRANSFER_SCHEMA
-from optiprofiler_evolve.phases._support import _tool_config
+from optiprofiler_evolve.phases._support import _require_public_performance, _tool_config
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 from optiprofiler_evolve.solver import copy_solver_tree, tree_hash
 
@@ -50,6 +50,9 @@ class StrategyTransferPhase:
         self.max_budget_usd = max_budget_usd
         self.tools = _tool_config(tools, network=True, web_search=False)
         self.prompt_version = prompt_version
+
+    def validate_config(self, config) -> None:
+        _require_public_performance(config, self.name)
 
     def run(self, context: PhaseContext) -> PhaseResult:
         payload = read_json_object(Path(str(context.artifacts["island_bundles"])))

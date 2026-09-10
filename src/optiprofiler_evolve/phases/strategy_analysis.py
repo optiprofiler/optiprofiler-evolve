@@ -19,7 +19,12 @@ from optiprofiler_evolve.phases._research import (
     STRATEGY_SCHEMA,
     normalize_strategy_cards,
 )
-from optiprofiler_evolve.phases._support import _prepared, _tool_config, _tool_payload
+from optiprofiler_evolve.phases._support import (
+    _prepared,
+    _require_public_performance,
+    _tool_config,
+    _tool_payload,
+)
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 from optiprofiler_evolve.solver import source_diff, tree_hash
 
@@ -68,10 +73,15 @@ class StrategyAnalysisPhase:
         self.tools = _tool_config(tools, network=True, web_search=False)
         self.prompt_version = prompt_version
 
+    def validate_config(self, config) -> None:
+        _require_public_performance(config, self.name)
+        if not config.assessment.enabled("performance", self.evaluation_mode):
+            raise ValueError(f"strategy_analysis requires {self.evaluation_mode} performance assessment.")
+
     def run(self, context: PhaseContext) -> PhaseResult:
         populations = _populations(context.artifacts["populations"])
         prepared = _prepared(context)
-        seed = Path(str(prepared["seed"]))
+        seed = prepared.seed
         analysis_root = context.run_dir / "research" / "analysis"
         card_paths: list[Path] = []
         bundles: list[dict[str, Any]] = []

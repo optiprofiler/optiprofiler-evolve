@@ -982,7 +982,7 @@ class ResearchHarnessTests(unittest.TestCase):
             )
             engine._initialize_run_directory()
             prepared = engine.coordinator.run_phase(PreparePhase(), {})["prepared"]
-            seed = Path(str(prepared["seed"]))
+            seed = prepared.seed
             portable = root / "run" / "research" / "analysis" / "island-1" / "portable"
             portable.mkdir(parents=True)
             first = portable / "s1.patch"
@@ -1077,7 +1077,7 @@ class ResearchHarnessTests(unittest.TestCase):
             )
             engine._initialize_run_directory()
             prepared = engine.coordinator.run_phase(PreparePhase(), {})["prepared"]
-            seed = Path(str(prepared["seed"]))
+            seed = prepared.seed
             bundles = root / "run" / "research" / "analysis" / "island_bundles.json"
             bundles.parent.mkdir(parents=True)
             bundles.write_text(

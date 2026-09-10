@@ -12,7 +12,6 @@ from optiprofiler_evolve.data import DataPlan
 from optiprofiler_evolve.models import (
     CandidateRecord,
     EvaluationResult,
-    EvolveResult,
     FinalistResult,
 )
 
@@ -31,7 +30,7 @@ class RunState:
     champion: tuple[int, CandidateRecord] | None = None
     final_result: FinalistResult | None = None
     final_solver: Path | None = None
-    result: EvolveResult | None = None
+    holdout_started: bool = False
     direction_assignments: dict[int, dict[str, object]] = field(default_factory=dict)
     variant_handles: dict[str, VariantHandle] = field(default_factory=dict)
     variant_bases: dict[str, Path] = field(default_factory=dict)

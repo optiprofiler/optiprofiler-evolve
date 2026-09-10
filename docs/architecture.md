@@ -137,12 +137,14 @@ proposals.
 Every core and optional stage has its own class in `phases/<name>.py`.
 Its specific context and result types live in the same module.
 The core classes contain the actual stage algorithms rather than dispatching
-back to an engine method. Prepare, Validate, Hidden and Report return typed
+back to an engine method. Prepare, Validate and Hidden return typed
 staged results; the controller commits them after checking the declared
 artifacts. Explore owns the iteration barrier and receives immutable population
 snapshots plus named admission, policy and checkpoint callbacks. Core inputs
 are frozen stage-specific contexts; optional phases retain the smaller shared
 `PhaseContext`. Neither receives the engine itself or a generic state setter.
+Report returns only its report artifact; application builds the public return
+value even when report is omitted.
 
 The attempt context contains only its coordinate, private workspace, parent
 summary, prior step results, public capabilities, and event emitter. It does not
@@ -219,8 +221,36 @@ Each phase sees only its `requires` artifacts and available `optional_requires`
 artifacts. Optional inputs do not impose ordering or require their producer to
 run; scout directions are an example. Context factories are registered mappings,
 not action dispatchers. Failed/cancelled phase results are never committed;
-skipped phases may publish typed results and declared skip evidence, including
-the final result when a holdout is disabled.
+successful and skipped phases must publish exactly their declared outputs.
+
+The default five-phase order is unchanged, but configured workflows may contain
+any ordered list, including no phases. After constructing components, preflight
+checks unique resolved phase names and required inputs against preceding outputs.
+Optional `validate_config(config)` hooks check phase-specific configuration using
+the constructed options. No directory or run infrastructure exists yet. The
+coordinator does not reorder phases or invent missing producers.
+
+Ordinary custom phases need only the `Phase` protocol and `PhaseResult`; they do
+not need controller registration or new state classes. Core context factories
+and typed commit branches remain explicit because they grant authority that an
+artifact alone cannot grant. The shared `prepared` artifact is a frozen
+`PreparedArtifact` with typed paths and solver metadata, not an evaluator or
+data-split handle. See [custom workflows](custom-workflows.md) for an example.
+
+One `RunState` persists throughout a run. Once validation fixes the champion,
+controller commit and service entries reject further admission, population edits,
+finalist registration and reselection. Hidden checks the fixed identity and tree
+hash and consumes a single-use authorization before evaluation, even if it fails.
+Removing hidden is allowed unless a champion-returning run requires a lockbox.
+Post-selection public challenger comparisons remain evidence-only.
+
+Application returns `EvolveResult` after any successful workflow. It never guesses
+a winner from a seed or population: an unselected champion means nullable winner
+and score fields. A selected champion without hidden retains its candidate path
+and formal assessment, but has no final score or finalists. Hidden's exported
+solver takes precedence when present. `artifacts` is a detached top-level
+read-only mapping, not a deep state snapshot; exceptions and cancellation are
+not converted into partial success.
 
 File formats and paths remain owned by their subsystems. This refactor does not
 add generic path dispatch, wrapper registries around dictionaries, another
