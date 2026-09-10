@@ -100,7 +100,7 @@ algorithmic runtime complexity or proof against dynamically generated code.
 | `execution.cpus` | positive number | `2.0` | CPU limit passed to the evaluator container; ignored by `unsafe_local`. |
 | `execution.memory` | Docker memory string | `4g` | Evaluator-container memory limit; ignored by `unsafe_local`. |
 | `execution.pids_limit` | integer at least `16` | `512` | Evaluator-container process limit; ignored by `unsafe_local`. |
-| `execution.feedback_mode` | `score_only`, `structured_numeric`, or `full_artifacts` | `score_only` | Worker-visible projection of controller-owned benchmark evidence. `structured_numeric` requires the formal Core `agent_report/1` validator. |
+| `execution.feedback_mode` | `score_only` or `full_artifacts` | `score_only` | Worker-visible projection of controller-owned benchmark evidence. `full_artifacts` also copies allowlisted benchmark artifacts and an artifact index. |
 | `assessment.criteria.performance.options.reference` | registered competitor name | `initial` | Fixed reference solver paired with every candidate benchmark. Use `initial` for seed-relative evolution; reserve a strong solver for post-selection comparison. |
 | `assessment.criteria.performance.options.fitness_source` | `solver_scores` or `profile_scores_mean` | `solver_scores` | Population fitness source. `profile_scores_mean` computes each entry as `(candidate-reference+1)/2`, clips it to `[0, 1]`, and averages the complete OptiProfiler profile tensor. |
 | `execution.forbidden_candidate_imports` | list of dotted Python module names | `[]` | Reject candidate source that uses these imports. This is an auditable experiment ablation, not a security boundary. |

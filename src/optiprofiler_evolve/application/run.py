@@ -450,6 +450,3 @@ def _controller_cancellation(event: threading.Event) -> Iterator[None]:
     finally:
         for item, handler in previous.items():
             signal.signal(item, handler)
-
-
-__all__: list[str] = []

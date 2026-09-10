@@ -17,7 +17,7 @@ EventEmitter = Callable[[str, str, Mapping[str, object] | None], None]
 STATUSES = frozenset({"pending", "running", "succeeded", "failed", "skipped", "cancelled"})
 
 
-_PUBLIC_TRACE_COVERAGE_KEYS = (
+PUBLIC_TRACE_COVERAGE_KEYS = (
     "total",
     "capture_complete",
     "capture_degraded",
@@ -193,8 +193,6 @@ def rebuild_run_state(path: Path) -> dict[str, Any]:
 
         if kind == "run_started":
             _start_lifecycle(run, status, boundary)
-        elif kind == "complexity_checked":
-            run["complexity"] = dict(data)
         elif kind == "run_finished":
             _finish_lifecycle(run, status, boundary)
             candidate_id = data.get("best_candidate_id")
@@ -286,10 +284,7 @@ def rebuild_run_state(path: Path) -> dict[str, Any]:
                     (
                         "returncode",
                         "timed_out",
-                        "trace_available",
-                        "trace_bytes",
-                        "trace_truncated",
-                        "trace_crash_inferred",
+                        "cancelled",
                     ),
                 )
             elif kind in {"integrity_review_started", "integrity_review_finished"}:
@@ -340,16 +335,13 @@ def rebuild_run_state(path: Path) -> dict[str, Any]:
                     (
                         "returncode",
                         "timed_out",
-                        "trace_available",
-                        "trace_bytes",
-                        "trace_truncated",
-                        "trace_crash_inferred",
+                        "cancelled",
                     ),
                 )
 
         if kind == "trace_coverage":
             trace_coverage = {"status": status}
-            _copy_scalars(trace_coverage, data, _PUBLIC_TRACE_COVERAGE_KEYS)
+            _copy_scalars(trace_coverage, data, PUBLIC_TRACE_COVERAGE_KEYS)
 
     phase_list = sorted(phases.values(), key=lambda item: phase_order[item["name"]])
     attempt_list = sorted(

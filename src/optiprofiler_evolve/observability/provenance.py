@@ -165,6 +165,3 @@ def _image_identity(image: str | None) -> Mapping[str, object] | None:
         if completed.returncode == 0:
             identity = completed.stdout.strip() or None
     return {"reference": image, "digest": identity}
-
-
-__all__: list[str] = []

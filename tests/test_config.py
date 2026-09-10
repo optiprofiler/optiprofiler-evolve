@@ -43,21 +43,16 @@ class ConfigTests(unittest.TestCase):
             load_config(raw)
 
     def test_feedback_modes_are_explicit_and_legacy_names_are_rejected(self) -> None:
-        for mode in ("score_only", "structured_numeric", "full_artifacts"):
+        for mode in ("score_only", "full_artifacts"):
             raw = minimal_config()
             raw["execution"]["feedback_mode"] = mode
             self.assertEqual(load_config(raw).evaluation_config().feedback_mode, mode)
 
-        for legacy in ("summary", "agent"):
+        for mode in ("summary", "agent", "everything", "structured_numeric"):
             raw = minimal_config()
-            raw["execution"]["feedback_mode"] = legacy
+            raw["execution"]["feedback_mode"] = mode
             with self.assertRaisesRegex(ValueError, "feedback_mode"):
                 load_config(raw)
-
-        raw = minimal_config()
-        raw["execution"]["feedback_mode"] = "everything"
-        with self.assertRaisesRegex(ValueError, "feedback_mode"):
-            load_config(raw)
 
     def test_required_lockbox_rejects_a_configuration_without_hidden_data(self) -> None:
         raw = minimal_config()

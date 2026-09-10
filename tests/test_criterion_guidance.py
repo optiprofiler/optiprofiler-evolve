@@ -52,10 +52,11 @@ class CriterionGuidanceTests(unittest.TestCase):
 
     def test_performance_artifact_instructions_follow_available_public_feedback(self):
         config = AssessmentConfig(criteria={"performance": CriterionConfig()})
-        for mode in ("score_only", "structured_numeric", "full_artifacts"):
+        for mode in ("score_only", "full_artifacts"):
             with self.subTest(mode=mode):
                 prompt = build_generation_guidance(config, mode)
-                self.assertEqual("history plots" in prompt, mode == "full_artifacts")
+                self.assertIn("history plots", prompt)
+                self.assertIn("render_pdf", prompt)
         formal_only = AssessmentConfig(criteria=config.criteria, profiles={
             "public": {"performance": {"enabled": False}},
             "smoke": {"performance": {"enabled": False}},
@@ -63,6 +64,7 @@ class CriterionGuidanceTests(unittest.TestCase):
         prompt = build_generation_guidance(formal_only, "full_artifacts")
         self.assertIn("Performance:", prompt)
         self.assertNotIn("history plots", prompt)
+        self.assertNotIn("render_pdf", prompt)
         self.assertNotIn("returned by the enabled public checks", prompt)
 
     def test_profile_rules_are_distinct_but_identical_guidance_is_not_repeated(self):

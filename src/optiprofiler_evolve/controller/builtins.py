@@ -76,6 +76,3 @@ def register_builtin_components() -> None:
 def _register(kind: str, name: str, factory: Callable[..., Any]) -> None:
     if name not in registered(kind):
         register(kind, name, factory)
-
-
-__all__: list[str] = []

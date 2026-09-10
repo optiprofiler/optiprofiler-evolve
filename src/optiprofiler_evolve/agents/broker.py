@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.agents.feedback import AgentReportValidator, project_feedback
+from optiprofiler_evolve.agents.feedback import project_feedback
 from optiprofiler_evolve.criteria.performance.evaluator import Evaluator
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.solver import copy_solver_tree
@@ -80,7 +80,6 @@ class EvaluationBroker:
         max_public_calls: int,
         candidate_validator: Callable[[Path], None] | None = None,
         feedback_mode: str = "full_artifacts",
-        agent_report_validator: AgentReportValidator | None = None,
     ) -> None:
         self.workspace = workspace.resolve()
         self.evaluator = evaluator
@@ -89,7 +88,6 @@ class EvaluationBroker:
         self.artifacts = self.control_dir / "artifacts"
         self.candidate_validator = candidate_validator
         self.feedback_mode = feedback_mode
-        self.agent_report_validator = agent_report_validator
         self.quotas = {"smoke": max_smoke_calls, "public": max_public_calls}
         self.counts = {"smoke": 0, "public": 0}
         self.token = secrets.token_urlsafe(32)
@@ -180,8 +178,6 @@ class EvaluationBroker:
                 return
             self.counts[mode] += 1
             call = self.counts[mode]
-            if self.candidate_validator is not None:
-                self.candidate_validator(self.workspace)
             output = self.artifacts / "evaluations" / mode / f"{call:03d}"
             result = self._evaluate_and_publish(mode, output)
             payload = _worker_result_payload(result)
@@ -236,7 +232,6 @@ class EvaluationBroker:
                 publication,
                 result,
                 mode=self.feedback_mode,
-                validate_agent_report=self.agent_report_validator,
             )
             output.parent.mkdir(parents=True, exist_ok=True)
             publication.replace(output)
@@ -293,6 +288,3 @@ def _worker_result_payload(result: EvaluationResult) -> dict[str, Any]:
         "success": result.success,
         "error": result.error,
     }
-
-
-__all__: list[str] = []

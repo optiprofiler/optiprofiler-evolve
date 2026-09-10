@@ -69,6 +69,3 @@ def build_harness_command(
         return command
 
     raise ValueError(f"Unsupported worker harness: {worker.harness!r}")
-
-
-__all__: list[str] = []

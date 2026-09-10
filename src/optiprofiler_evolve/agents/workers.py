@@ -57,6 +57,3 @@ def _cli_version(command: str) -> str | None:
         return None
     output = completed.stdout.strip().splitlines()
     return output[0][:300] if output else None
-
-
-__all__: list[str] = []

@@ -2,7 +2,7 @@
 
 This module contains no HTML. It reads run-directory evidence within strict
 bounds and never resolves outside the run directory. Rendering and page
-orchestration live in :mod:`.owner_views`.
+orchestration live in :mod:`observability.views.owner`.
 """
 
 from __future__ import annotations
@@ -346,6 +346,3 @@ def read_json(path: Path) -> object:
 def compact_text(value: object) -> str:
     text = str(value)
     return text if len(text) <= 200 else text[:200] + "…"
-
-
-__all__: list[str] = []

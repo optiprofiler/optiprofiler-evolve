@@ -1,4 +1,10 @@
-"""Small Agent identity, input-copy and diagnostic helpers."""
+"""Agent-job identity validation, role input copies and invocation diagnostics.
+
+These helpers serve the agent-invocation path: job/worker identity checks, role
+input preparation, worker-exit diagnostics and trace scope labels. They are owned
+here (the agent layer) rather than scattered over the caller modules that invoke
+agents on behalf of controller, phases and observability.
+"""
 
 from __future__ import annotations
 

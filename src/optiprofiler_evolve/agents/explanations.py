@@ -223,6 +223,3 @@ def _validate_code_binding(
             f"code binding lines [{start}, {end}] exceed {file_name!r} "
             f"with {line_count} lines"
         )
-
-
-__all__: list[str] = []

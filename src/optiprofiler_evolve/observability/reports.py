@@ -51,7 +51,15 @@ def write_final_report(
         "| Candidate | Island | Public | Validation | Hidden | Status |",
         "|---|---:|---:|---:|---:|---|",
     ]
-    for item in finalists:
+    # Rank finalists by their controller-only final score; unscored (skipped)
+    # finalists are listed last in caller order.
+    for item in sorted(
+        finalists,
+        key=lambda value: (
+            value.final_score is None,
+            -value.final_score if value.final_score is not None else 0.0,
+        ),
+    ):
         lines.append(
             f"| `{item.candidate_id}` | {item.island} | "
             f"{_score(item.public_score)} | {_score(item.validation_score)} | "

@@ -331,6 +331,3 @@ Write only `review.json` with this exact shape:
 
 An approval may have no findings. A quarantine must contain at least one finding with evidence pointing to an existing file under `candidate/` or `parent/`. Do not modify either tree.
 """
-
-
-__all__: list[str] = []

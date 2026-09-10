@@ -254,6 +254,3 @@ def _selected_worker_values(worker: WorkerConfig) -> Mapping[str, str]:
 
 def _merge_errors(left: str | None, right: str) -> str:
     return f"{left}; {right}" if left else right
-
-
-__all__: list[str] = []

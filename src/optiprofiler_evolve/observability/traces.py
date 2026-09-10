@@ -868,6 +868,3 @@ def _set_private_mode(path: Path, mode: int) -> None:
         path.chmod(mode)
     except OSError:
         pass
-
-
-__all__: list[str] = []

@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from optiprofiler_evolve.data import DataPlan
 from optiprofiler_evolve.solver import InterfaceSpec
 
-WORKER_PROMPT_VERSION = "solver-worker/4"
+WORKER_PROMPT_VERSION = "solver-worker/5"
 
 
 def build_worker_prompt(
@@ -19,6 +19,7 @@ def build_worker_prompt(
     data: DataPlan,
     iteration: int,
     island: int,
+    parent_score: float | None,
     controller_memory: str | None,
     token_budget: int | None,
     max_smoke_calls: int,
@@ -31,6 +32,7 @@ def build_worker_prompt(
 
     memory = controller_memory or "No cross-worker summary is available for this job."
     budget = str(token_budget) if token_budget is not None else "provider/default"
+    parent_fitness = f"{parent_score:.6f}" if parent_score is not None else "unavailable"
     if forbidden_candidate_imports:
         dependency_policy = (
             "- This ablation forbids candidate imports from these existing solver APIs: "
@@ -60,7 +62,7 @@ def build_worker_prompt(
 You are improving a derivative-free optimization solver.
 
 Your job is to inspect and directly edit the solver repository in /workspace. Make a
-coherent algorithmic improvement according to the configured assessment criteria. You may add,
+coherent algorithmic improvement, not merely a blind hyperparameter sweep. You may add,
 delete, or reorganize files inside the editable scope. Leave the best working version in
 /workspace when you finish; do not return a patch as your only output.
 
@@ -73,20 +75,20 @@ Contract
 - Required OptiProfiler entrypoint: {interface.file}:{interface.function}
 - Editable paths/globs: {json.dumps(list(editable))}
 - Iteration: {iteration}; island: {island}
+- Parent public fitness: {parent_fitness}; higher is better
 - Advisory token budget: {budget}
 {dependency_policy}
 
 Evaluation tools
-- Run `smoke_test` for the configured rapid public checks (at most
+- Run `smoke_test` for rapid checks on a small public subset (at most
   {max_smoke_calls} calls in this job).
-- Run `evaluate` for the configured full public assessment (at most
+- Run `evaluate` for the canonical full public fitness (at most
   {max_public_calls} calls in this job).
 - Each call permanently consumes one job-local quota slot, including a failed
   evaluation. If a tool reports `evaluation quota exhausted` or
   `retryable: false`, waiting cannot restore it: do not sleep or retry. Keep the
   best current solver and finish the job.
-- Read the result.json, feedback.md, and available evidence paths printed by those tools.
-  Only enabled standards are checked; do not expect scores or artifacts for disabled ones.
+- Read the result.json, feedback.md, and benchmark_artifacts paths printed by those tools.
 - Put rendered pages, downloads, scratch data, and other diagnostic outputs under `/tmp`,
   not `/workspace`. Before finishing, remove any diagnostic file accidentally created
   outside the declared editable paths; otherwise the strict scope audit rejects the
@@ -100,10 +102,10 @@ Evaluation tools
 
 Required work order
 1. Read the solver files needed to understand the current algorithm.
-2. Run `smoke_test` once to establish a baseline when quota is available.
+2. Run `smoke_test` once to establish a baseline.
 3. Make a concrete solver edit before doing further exploratory experiments.
-4. Run `smoke_test` again, then use `evaluate` when ready and quota permits.
-5. Inspect the returned assessment feedback, make any justified final edit,
+4. Run `smoke_test` again, then use `evaluate` when the candidate is ready.
+5. Inspect the structured and visual benchmark artifacts, make any justified final edit,
    and finish with a bounded smoke check when quota remains.
 6. Before finishing, write `.optiprofiler_evolve/solver_explanation.json`. It must use
    schema `solver_explanation/1` and contain: a concise `summary`; a `pseudocode` list;
@@ -143,6 +145,3 @@ def _experiment_note(prompt_note: str | None) -> str:
         "This note constrains how you spend the work budget. It does not change "
         "the contract above, the evaluation tools, or any isolation rule.\n"
     )
-
-
-__all__: list[str] = []

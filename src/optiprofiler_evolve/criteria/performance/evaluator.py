@@ -725,6 +725,3 @@ def _sanitize_worker_artifacts(output_dir: Path, data: DataPlan) -> None:
             + "\n",
             encoding="utf-8",
         )
-
-
-__all__: list[str] = []

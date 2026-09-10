@@ -18,13 +18,15 @@ class ComplexityCriterion(Criterion):
     @classmethod
     def generation_guidance(cls, request: GuidanceRequest) -> str:
         ratio = float(request.options.get("max_ratio", 1.2))
+        # Baseline worker-task wording. Absolute seed counts stay public-tool
+        # evidence instead of a second analysis pass while building the prompt.
         return (
-            f"Complexity budget ({request.mode}): branches and logical lines may each be at most "
-            f"{ratio:g} times their initial values. All candidate Python files count. "
-            "The score is 1 / (1 + r), where r is the larger initial-relative ratio. "
-            "Simplify the algorithm rather than compress formatting or remove documentation. "
-            "Enabled public checks provide numeric baseline totals and candidate diagnostics; "
-            "use those to locate avoidable branches and duplication."
+            f"Complexity budget ({request.mode}): branches and logical lines may each be at "
+            f"most {ratio:g} times their initial values. All candidate Python files count. "
+            "smoke_test/evaluate return diagnostics. Simplify the algorithm rather than "
+            "compress formatting or remove documentation. In warn mode this is advice only, "
+            "not grounds for semantic quarantine. In enforce mode an exceeded or unavailable "
+            "analysis blocks evaluation and admission."
         )
 
     def __init__(self, checker: ComplexityChecker) -> None:

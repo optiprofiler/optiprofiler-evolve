@@ -307,7 +307,6 @@
           "type": "string",
           "enum": [
             "score_only",
-            "structured_numeric",
             "full_artifacts"
           ],
           "default": "score_only"
@@ -890,7 +889,6 @@
           "type": "string",
           "enum": [
             "score_only",
-            "structured_numeric",
             "full_artifacts"
           ],
           "default": "score_only"

@@ -78,6 +78,3 @@ def _sum_if_complete(records: tuple[UsageRecord, ...], name: str) -> int | float
     if any(value is None for value in values):
         return None
     return sum(values)  # type: ignore[arg-type]
-
-
-__all__: list[str] = []

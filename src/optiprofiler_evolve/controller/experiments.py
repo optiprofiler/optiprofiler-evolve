@@ -137,6 +137,3 @@ def _write_summary(path: Path, summary: Mapping[str, Any]) -> None:
         encoding="utf-8",
     )
     temporary.replace(path)
-
-
-__all__: list[str] = []

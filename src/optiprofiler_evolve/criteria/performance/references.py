@@ -36,6 +36,3 @@ def _reference_budget_factor(config: EvaluationConfig) -> float:
     if factor <= 0:
         raise ValueError("benchmark.max_eval_factor must be positive.")
     return factor
-
-
-__all__: list[str] = []

@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.agents.contracts import SolverJob
+from optiprofiler_evolve.agents.contracts import AgentJob
 from optiprofiler_evolve.controller.contracts import VariantHandle, VariantRequest
 from optiprofiler_evolve.criteria.performance.evidence import EvidenceReader
 from optiprofiler_evolve.files import read_json_object, safe_relative_path, write_json
@@ -124,7 +124,7 @@ class StrategyAnalysisPhase:
             }
             try:
                 result = context.services.run_trusted_agent(
-                    SolverJob(
+                    AgentJob(
                         role="strategy-analyst",
                         job_id=f"analysis-island-{island}",
                         prompt=_strategy_prompt(
@@ -272,9 +272,7 @@ class StrategyAnalysisPhase:
                     "island": island,
                     "finalist": finalist.candidate_id,
                     "strategy_count": len(cards),
-                    "verified_count": sum(
-                        card.get("ablation", {}).get("conclusion") == "supported" for card in cards
-                    ),
+                    "verified_count": supported_count,
                     "error": analyst_error,
                 },
             )

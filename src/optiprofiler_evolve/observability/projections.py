@@ -7,7 +7,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.observability.events import STATUSES, read_events
+from optiprofiler_evolve.observability.events import (
+    PUBLIC_TRACE_COVERAGE_KEYS,
+    STATUSES,
+    read_events,
+)
 
 _PUBLIC_SCOPE_KEYS = frozenset(
     {
@@ -27,10 +31,6 @@ _PUBLIC_SCOPE_KEYS = frozenset(
 # fields stay controller-private, including errors, artifact paths, model names,
 # validation scores, prompts, transcripts, and native traces.
 _PUBLIC_DATA_KEYS: Mapping[str, frozenset[str]] = {
-    "complexity_checked": frozenset({
-        "mode", "status", "max_ratio", "branch_ratio", "size_ratio",
-        "complexity_ratio", "complexity_percent", "score", "blocked",
-    }),
     "run_started": frozenset(),
     "run_finished": frozenset({"best_candidate_id"}),
     "phase_started": frozenset(),
@@ -49,13 +49,10 @@ _PUBLIC_DATA_KEYS: Mapping[str, frozenset[str]] = {
             "valid",
             "worker_returncode",
             "worker_timed_out",
+            "worker_cancelled",
             "accepted",
             "verdict",
             "outcome",
-            "trace_available",
-            "trace_bytes",
-            "trace_truncated",
-            "trace_crash_inferred",
         }
     ),
     "step_started": frozenset(),
@@ -65,10 +62,7 @@ _PUBLIC_DATA_KEYS: Mapping[str, frozenset[str]] = {
         {
             "returncode",
             "timed_out",
-            "trace_available",
-            "trace_bytes",
-            "trace_truncated",
-            "trace_crash_inferred",
+            "cancelled",
         }
     ),
     "role_agent_started": frozenset(),
@@ -76,33 +70,14 @@ _PUBLIC_DATA_KEYS: Mapping[str, frozenset[str]] = {
         {
             "returncode",
             "timed_out",
-            "trace_available",
-            "trace_bytes",
-            "trace_truncated",
-            "trace_crash_inferred",
+            "cancelled",
         }
     ),
     "integrity_review_started": frozenset(),
     "integrity_review_finished": frozenset({"gate"}),
     "provider_gateway_started": frozenset(),
     "provider_gateway_finished": frozenset({"outcome", "request_count"}),
-    "trace_coverage": frozenset(
-        {
-            "total",
-            "capture_complete",
-            "capture_degraded",
-            "capture_interrupted",
-            "outcome_completed",
-            "outcome_failed",
-            "outcome_timed_out",
-            "outcome_cancelled",
-            "outcome_interrupted",
-            "gateway_total",
-            "gateway_completed",
-            "gateway_failed",
-            "gateway_interrupted",
-        }
-    ),
+    "trace_coverage": frozenset(PUBLIC_TRACE_COVERAGE_KEYS),
     "directions_ready": frozenset({"mode", "card_count", "status"}),
     "island_analysis_finished": frozenset(
         {"island", "finalist", "strategy_count", "verified_count"}
@@ -166,6 +141,3 @@ def _is_public_value(value: object) -> bool:
     if isinstance(value, (list, tuple)):
         return all(_is_public_value(item) for item in value)
     return False
-
-
-__all__: list[str] = []

@@ -67,6 +67,3 @@ def dfo_default(*, worker: WorkerConfig | None = None) -> EvolveConfig:
             worker_image="optiprofiler-evolve-worker:latest",
         ),
     )
-
-
-__all__: list[str] = []

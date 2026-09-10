@@ -55,7 +55,7 @@ class ComponentConfig:
     def __post_init__(self) -> None:
         if not self.name or not self.name.replace("-", "_").isidentifier():
             raise ValueError(f"Invalid component name: {self.name!r}")
-        object.__setattr__(self, "options", _freeze_value(self.options))
+        object.__setattr__(self, "options", freeze_value(self.options))
 
     @classmethod
     def from_component(cls, component: object, *, name: str | None = None) -> ComponentConfig:
@@ -214,7 +214,7 @@ class DataConfig:
     split: SplitConfig = dataclasses.field(default_factory=SplitConfig)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "selection", _freeze_value(self.selection))
+        object.__setattr__(self, "selection", freeze_value(self.selection))
 
     def validate(self) -> None:
         if not self.library or not self.library.isidentifier():
@@ -251,8 +251,8 @@ class EvaluationConfig(EvaluationExecutionConfig):
     fitness_source: str = "solver_scores"
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "benchmark", _freeze_value(self.benchmark))
-        object.__setattr__(self, "smoke_overrides", _freeze_value(self.smoke_overrides))
+        object.__setattr__(self, "benchmark", freeze_value(self.benchmark))
+        object.__setattr__(self, "smoke_overrides", freeze_value(self.smoke_overrides))
 
     def validate(self) -> None:
         if self.backend not in {"docker", "unsafe_local"}:
@@ -267,12 +267,10 @@ class EvaluationConfig(EvaluationExecutionConfig):
             )
         if self.feedback_mode not in {
             "score_only",
-            "structured_numeric",
             "full_artifacts",
         }:
             raise ValueError(
-                "evaluation.feedback_mode must be 'score_only', "
-                "'structured_numeric', or 'full_artifacts'."
+                "evaluation.feedback_mode must be 'score_only' or 'full_artifacts'."
             )
         if not self.adapter or not self.adapter.replace("-", "_").isidentifier():
             raise ValueError("evaluation.adapter must be a registered component name.")
@@ -399,7 +397,7 @@ class WorkerConfig:
     provider_gateway: ProviderGatewayConfig | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "env", _freeze_value(self.env))
+        object.__setattr__(self, "env", freeze_value(self.env))
 
     def validate(self) -> None:
         if self.harness not in {"codex", "claude"}:
@@ -645,7 +643,7 @@ class CriterionConfig:
             raise ValueError("Criterion mode must be warn or enforce.")
         if not isinstance(self.options, Mapping):
             raise ValueError("Criterion options must be a mapping.")
-        object.__setattr__(self, "options", _freeze_value(self.options))
+        object.__setattr__(self, "options", freeze_value(self.options))
 
 
 def _default_criteria() -> Mapping[str, CriterionConfig]:
@@ -668,8 +666,8 @@ class AssessmentConfig:
             )
             for name, value in self.criteria.items()
         }
-        object.__setattr__(self, "criteria", _freeze_value(criteria))
-        object.__setattr__(self, "profiles", _freeze_value(self.profiles))
+        object.__setattr__(self, "criteria", freeze_value(criteria))
+        object.__setattr__(self, "profiles", freeze_value(self.profiles))
         for profile, overrides in self.profiles.items():
             if profile not in {"smoke", "public", "validation", "hidden"}:
                 raise ValueError(f"Unknown assessment profile: {profile!r}")
@@ -692,7 +690,7 @@ class AssessmentConfig:
             result[name] = dataclasses.replace(
                 spec, enabled=spec.enabled and enabled, options=options, **override
             )
-        return _freeze_value(result)
+        return freeze_value(result)
 
     def enabled(self, name: str, profile: str | None = None) -> bool:
         profiles = (profile,) if profile else ("smoke", "public", "validation", "hidden")
@@ -1091,13 +1089,13 @@ def _is_secret_name(name: str) -> bool:
     )
 
 
-def _freeze_value(value: Any) -> Any:
+def freeze_value(value: Any) -> Any:
     if isinstance(value, FrozenDict):
         return value
     if isinstance(value, Mapping):
-        return FrozenDict({str(key): _freeze_value(item) for key, item in value.items()})
+        return FrozenDict({str(key): freeze_value(item) for key, item in value.items()})
     if isinstance(value, (list, tuple)):
-        return tuple(_freeze_value(item) for item in value)
+        return tuple(freeze_value(item) for item in value)
     return value
 
 

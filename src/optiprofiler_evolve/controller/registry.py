@@ -61,7 +61,13 @@ def registered(kind: str) -> Mapping[str, Callable[..., Any]]:
 
 
 def build(kind: str, spec: ComponentConfig) -> Any:
-    """Instantiate one config reference or return its trusted component object."""
+    """Instantiate one config reference or return its trusted component object.
+
+    A spec wrapping an already-created component instance is returned as-is
+    when the object exposes the operation declared for its kind in
+    ``_OPERATIONS`` (for example ``run`` for a worker or ``assess`` for a
+    criterion); any other kind of factory is called with the spec options.
+    """
 
     if kind not in _REGISTRIES:
         raise ValueError(f"Unknown component kind: {kind!r}")
@@ -76,6 +82,3 @@ def build(kind: str, spec: ComponentConfig) -> Any:
             raise ValueError("Options cannot be applied to an already-created component object.")
         return target
     return target(**dict(spec.options))
-
-
-__all__: list[str] = []

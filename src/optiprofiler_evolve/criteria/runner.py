@@ -8,7 +8,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
-from optiprofiler_evolve.config import CriterionConfig, _freeze_value, plain_data
+from optiprofiler_evolve.config import CriterionConfig, freeze_value, plain_data
 from optiprofiler_evolve.criteria.contracts import AssessmentRequest, Criterion, CriterionResult
 from optiprofiler_evolve.errors import RunCancelled
 from optiprofiler_evolve.files import write_json
@@ -26,8 +26,8 @@ class AssessmentResult:
     criteria: Mapping[str, Mapping[str, object]]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "results", _freeze_value(self.results))
-        object.__setattr__(self, "criteria", _freeze_value(self.criteria))
+        object.__setattr__(self, "results", freeze_value(self.results))
+        object.__setattr__(self, "criteria", freeze_value(self.criteria))
 
     def as_dict(self) -> dict[str, object]:
         return {"schema": "assessment/1", **plain_data(self)}
@@ -84,22 +84,30 @@ class AssessmentRunner:
         }
         digest = hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()
         results: dict[str, CriterionResult] = {}
-        blocked = False
-        source_valid = True
         # Binding order is controller-owned: inexpensive/source constraints precede execution.
+        unchanged = tree_hash(request.candidate) == request.tree_hash
+        blocked = not unchanged
+        # The snapshot is hashed once before the criterion loop and once after it.
+        # Criteria are trusted not to mutate the tree between those two points, so
+        # the whole candidate is not re-hashed before every criterion.
         for name in dict.fromkeys((*self.criteria, *config)):
             if name not in config:
                 continue
             spec = config[name]
-            if not spec.enabled or blocked:
+            if not spec.enabled:
+                results[name] = CriterionResult("skipped", error="disabled")
+                continue
+            if blocked:
                 results[name] = CriterionResult(
-                    "skipped", error="disabled" if not spec.enabled else "prior constraint failed"
+                    "skipped",
+                    error=(
+                        "prior constraint failed"
+                        if unchanged
+                        else "Candidate changed before assessment."
+                    ),
                 )
                 continue
             try:
-                source_valid = tree_hash(request.candidate) == request.tree_hash
-                if not source_valid:
-                    raise ValueError("Candidate changed before assessment.")
                 result = self.criteria[name].assess(replace(
                     request, options=spec.options, output_dir=request.output_dir / name
                 ))
@@ -107,16 +115,19 @@ class AssessmentRunner:
                 raise
             except Exception as exc:
                 result = CriterionResult("failed", error=f"{type(exc).__name__}: {exc}")
-            # Source immutability is mandatory even for advisory, zero-weight criteria.
-            source_valid = source_valid and tree_hash(request.candidate) == request.tree_hash
-            if not source_valid:
-                result = CriterionResult("failed", error="Candidate changed during assessment.")
             results[name] = result
-            blocked = not source_valid or spec.mode == "enforce" and (
+            blocked = spec.mode == "enforce" and (
                 result.status != "succeeded" or not result.satisfied
             )
+        # Source immutability is mandatory even for advisory, zero-weight criteria.
+        unchanged = unchanged and tree_hash(request.candidate) == request.tree_hash
+        if not unchanged:
+            results = {
+                name: CriterionResult("failed", error="Candidate changed during assessment.")
+                for name in results
+            }
         total, accepted = ScoreAggregator.aggregate(results, config)
-        if not source_valid:
+        if not unchanged:
             total, accepted = None, False
         settings = {
             name: {"enabled": spec.enabled, "weight": spec.weight, "mode": spec.mode,

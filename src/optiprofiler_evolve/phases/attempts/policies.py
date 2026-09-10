@@ -44,6 +44,3 @@ class EarlyStopPolicy:
         )
         stop = view.iteration >= self.min_iteration and best >= self.score
         return PopulationEdit(stop=stop, reason="target score reached" if stop else None)
-
-
-__all__: list[str] = []

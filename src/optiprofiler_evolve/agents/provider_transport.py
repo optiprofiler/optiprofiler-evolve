@@ -154,6 +154,3 @@ def _assert_credential_absent(worker: WorkerConfig, credential: str) -> None:
     surfaces = [*worker.env.values(), *worker.args]
     if any(credential in value for value in surfaces):
         raise RuntimeError("Provider credential remained on a worker-visible surface.")
-
-
-__all__: list[str] = []

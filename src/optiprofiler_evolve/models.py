@@ -273,6 +273,3 @@ class Attempt:
     worker_outcome: WorkerOutcome
     step_results: tuple[StepResult, ...]
     evaluated: bool = False
-
-
-__all__: list[str] = []

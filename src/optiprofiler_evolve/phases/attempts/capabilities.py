@@ -76,6 +76,7 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
             data=environment.state.data,
             iteration=self._iteration,
             island=self._island,
+            parent_score=self._parent.public_score,
             controller_memory=environment.memory_for(self._island),
             token_budget=environment.config.workers.token_budget,
             max_smoke_calls=environment.config.execution.max_smoke_calls_per_worker,

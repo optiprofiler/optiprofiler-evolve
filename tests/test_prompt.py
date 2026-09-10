@@ -27,6 +27,7 @@ def _prompt_kwargs() -> dict:
         "data": data,
         "iteration": 1,
         "island": 0,
+        "parent_score": 0.5,
         "controller_memory": None,
         "token_budget": 1000,
         "max_smoke_calls": 2,
@@ -38,9 +39,10 @@ def _prompt_kwargs() -> dict:
 class PromptTests(unittest.TestCase):
     def test_stage_prompt_does_not_own_criterion_instructions(self) -> None:
         prompt = build_worker_prompt(**_prompt_kwargs())
-        for text in ("Complexity budget", "render_pdf", "history plots", "public fitness"):
+        for text in ("Complexity budget", "render_pdf", "history plots", "Semantic integrity"):
             self.assertNotIn(text, prompt)
-        self.assertIn("configured full public assessment", prompt)
+        self.assertIn("canonical full public fitness", prompt)
+        self.assertIn("- Parent public fitness: 0.500000; higher is better", prompt)
 
     def test_prompt_note_renders_only_when_configured(self) -> None:
         kwargs = _prompt_kwargs()
@@ -98,6 +100,7 @@ class PromptTests(unittest.TestCase):
             data=data,
             iteration=1,
             island=0,
+            parent_score=0.5,
             controller_memory=None,
             token_budget=1000,
             max_smoke_calls=3,

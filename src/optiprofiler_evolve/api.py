@@ -64,6 +64,3 @@ def evolve(
         run_dir=resolved_run_dir,
     )
     return engine.run()
-
-
-__all__: list[str] = []

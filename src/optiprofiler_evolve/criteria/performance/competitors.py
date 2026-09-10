@@ -269,6 +269,3 @@ def {function_name}(fun, x0, *args):
         result = {call}
     return np.asarray(result.x, dtype=float)
 '''
-
-
-__all__: list[str] = []

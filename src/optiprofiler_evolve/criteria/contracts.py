@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from optiprofiler_evolve.config import _freeze_value
+from optiprofiler_evolve.config import freeze_value
 
 Profile = Literal["smoke", "public", "validation", "hidden"]
 
@@ -27,7 +27,7 @@ class GuidanceRequest:
     def __post_init__(self) -> None:
         if not self.profiles or any(p not in {"smoke", "public", "validation"} for p in self.profiles):
             raise ValueError("Generation guidance cannot use hidden assessment settings.")
-        object.__setattr__(self, "options", _freeze_value(self.options))
+        object.__setattr__(self, "options", freeze_value(self.options))
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,7 @@ class AssessmentRequest:
     input_fingerprint: str = ""
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "options", _freeze_value(self.options))
+        object.__setattr__(self, "options", freeze_value(self.options))
 
 
 @dataclass(frozen=True)
@@ -63,7 +63,7 @@ class CriterionResult:
             raise ValueError("Unexecuted or failed criteria cannot claim a score or verdict.")
         if self.status == "succeeded" and self.satisfied is None:
             raise ValueError("Completed criteria must report their constraint verdict.")
-        object.__setattr__(self, "metrics", _freeze_value(self.metrics))
+        object.__setattr__(self, "metrics", freeze_value(self.metrics))
 
 
 class Criterion(ABC):

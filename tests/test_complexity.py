@@ -17,7 +17,7 @@ from test_extensibility import evaluator_factory
 from worker_helpers import RunnerAdapter
 
 from optiprofiler_evolve.agents.broker import EvaluationBroker
-from optiprofiler_evolve.agents.contracts import SolverJob, WorkerOutcome
+from optiprofiler_evolve.agents.contracts import AgentJob, WorkerOutcome
 from optiprofiler_evolve.agents.feedback import project_feedback
 from optiprofiler_evolve.application.run import EvolutionRun
 from optiprofiler_evolve.config import SandboxConfig, load_config
@@ -219,7 +219,7 @@ class ComplexityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "analysis failed"):
             self.checker()
 
-    def test_public_projection_withholds_private_complexity_details(self):
+    def test_unwired_complexity_event_never_enters_public_projection(self):
         report = self.checker().assess(self.candidate)
         private = self.root / "events.jsonl"
         writer = EventWriter(private)
@@ -238,16 +238,17 @@ class ComplexityTests(unittest.TestCase):
         public = self.root / "public_events.jsonl"
         project_public_events(private, public)
         state = rebuild_run_state(public)
-        self.assertEqual(state["run"]["complexity"]["status"], "exceeded")
+        self.assertNotIn("complexity", state["run"])
         page = self.root / "public.html"
         render_status(public, page)
         render_public_report(state, self.root / "PUBLIC_REPORT.md")
         for path in (public, page, self.root / "PUBLIC_REPORT.md"):
             text = path.read_text()
+            self.assertNotIn("complexity_checked", text)
             self.assertNotIn("SECRET", text)
             self.assertNotIn("/private/path", text)
             self.assertNotIn("0.91234", text)
-        self.assertIn("Latest source complexity", page.read_text())
+            self.assertNotIn("Latest source complexity", text)
 
     def test_analysis_failures_and_timeouts_follow_mode(self):
         for mode in ("warn", "enforce"):
@@ -275,9 +276,8 @@ class ComplexityTests(unittest.TestCase):
         report = self.checker().assess(self.candidate)
         source = self.root / "evidence"
         source.mkdir()
-        (source / "agent_report.json").write_text("{}")
         result = EvaluationResult("public", 0.5, 0.5, 0.5, 1, source)
-        for mode in ("score_only", "structured_numeric", "full_artifacts"):
+        for mode in ("score_only", "full_artifacts"):
             destination = self.root / mode
             project_feedback(
                 source,
@@ -285,7 +285,6 @@ class ComplexityTests(unittest.TestCase):
                 result,
                 mode=mode,
                 complexity=report,
-                validate_agent_report=lambda value: None,
             )
             payload = json.loads((destination / "complexity.json").read_text())
             self.assertNotIn("hotspots", payload["baseline"])
@@ -390,8 +389,8 @@ class ComplexityTests(unittest.TestCase):
                     self.assertNotIn("Current parent:", prompt)
                     continue
                 self.assertIn(
-                    f"Complexity budget ({mode}): branches and logical lines may each be at most "
-                    "1.75 times their initial values.", prompt
+                    f"Complexity budget ({mode}): branches and logical lines may each be at "
+                    "most 1.75 times their initial values.", prompt
                 )
                 self.assertNotIn("Current parent:", prompt)
                 self.assertIn("All candidate Python files count", prompt)
@@ -400,7 +399,7 @@ class ComplexityTests(unittest.TestCase):
                 self.assertNotIn(engine.state.evaluator.complexity.baseline_hash, prompt)
                 self.assertNotIn(str(self.seed), prompt)
 
-    def test_research_job_receives_budget_without_mutating_original_prompt(self):
+    def test_research_role_prompt_keeps_no_criterion_guidance(self):
         for mode in (None, "warn", "enforce"):
             with self.subTest(mode=mode):
                 engine = self.engine(mode or "warn", 1.75, run_name=f"research-{mode}",
@@ -420,23 +419,17 @@ class ComplexityTests(unittest.TestCase):
                     adapter_name=engine.worker_adapter.name,
                 )
                 engine.coordinator.run_phase(PreparePhase(), {})
-                job = SolverJob(
+                job = AgentJob(
                     role="strategy-integrator", job_id="prompt-test", prompt="Integrate strategies."
                 )
                 engine.controller_services.run_trusted_agent(job)
                 self.assertEqual(job.prompt, "Integrate strategies.")
                 self.assertEqual(len(prompts), 1)
-                if mode is None:
-                    self.assertNotIn("Complexity budget", prompts[0])
-                else:
-                    self.assertTrue(prompts[0].startswith(job.prompt))
-                    self.assertIn(
-                        f"Complexity budget ({mode}): branches and logical lines may each be at most "
-                        "1.75 times their initial values.", prompts[0]
-                    )
-                    self.assertEqual(prompts[0].count("Complexity budget ("), 1)
-                    self.assertNotIn(engine.state.evaluator.complexity.baseline_hash, prompts[0])
-                    self.assertNotIn(str(self.seed), prompts[0])
+                # Research roles are not solver proposal/edit jobs, so the worker
+                # task card and the role prompt stay exactly as authored.
+                self.assertEqual(prompts[0], job.prompt)
+                self.assertNotIn("Complexity budget", prompts[0])
+                self.assertNotIn("Assessment criteria", prompts[0])
 
     def test_warn_candidate_is_admitted_and_reported(self):
         engine = self.engine("warn")

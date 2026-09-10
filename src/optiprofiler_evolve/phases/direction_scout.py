@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.agents.contracts import SolverJob
+from optiprofiler_evolve.agents.contracts import AgentJob
 from optiprofiler_evolve.files import read_json_object, write_json
 from optiprofiler_evolve.phases._research import DIRECTION_SCHEMA, normalize_direction_cards
 from optiprofiler_evolve.phases._support import _prepared, _tool_config, _tool_payload
@@ -79,7 +79,7 @@ class DirectionScoutPhase:
             )
             try:
                 result = context.services.run_trusted_agent(
-                    SolverJob(
+                    AgentJob(
                         role="direction-scout",
                         job_id=f"direction-{suffix}",
                         prompt=prompt,

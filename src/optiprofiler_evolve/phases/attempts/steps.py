@@ -75,6 +75,3 @@ class FeedbackStep:
             metrics={"evidence_artifact_count": len(artifacts)},
             artifacts=artifacts,
         )
-
-
-__all__: list[str] = []

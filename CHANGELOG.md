@@ -2,10 +2,38 @@
 
 ## Unreleased
 
+- Restore the worker task card text to its pre-refactor wording: the parent
+  public fitness line, the "blind hyperparameter sweep" and benchmark-evidence
+  phrasing, the evaluation-tool descriptions, and the required work order match
+  the baseline prompt again (`solver-worker/5`). The benchmark-artifact reading
+  paragraph also returns verbatim, now owned by the public performance standard
+  and included whenever public performance checks exist, and the complexity
+  standard again states its warn/enforce consequences. Research roles
+  (direction-scout, strategy-analyst, strategy-integrator) are ordinary agent
+  jobs again, so their prompts stay exactly as authored instead of receiving the
+  worker-oriented criterion guidance.
+
 - The fixed seed now receives a controller-local baseline integrity approval
   (the seed equals its parent and has no mutation transcript), so prepare no
   longer invokes the reviewer agent and a reviewer outage cannot abort a run
   before exploration; reviewer budget is spent only on actual submissions.
+
+- Removed the never-functional `execution.feedback_mode=structured_numeric`
+  (no internal `agent_report/1` producer or validator): the mode is gone from
+  config, schema, projection code and docs, and an unscored evaluation can no
+  longer silently fall through to the `full_artifacts` publication branch.
+- Removed the un-wired `complexity_checked` event path (events, public
+  allowlist, run-state and page rendering) that no production code emitted; the
+  public/owner pages no longer promise a live "Latest source complexity" block.
+- Unify public event allowlists on one source (`PUBLIC_TRACE_COVERAGE_KEYS`),
+  add the emitted `worker_cancelled`/`cancelled` fields to public attempt and
+  worker projections, and drop never-emitted `trace_*` allowlist keys.
+- Assessment runners now hash the candidate snapshot once before and once after
+  the criterion loop instead of before and after every criterion.
+- Feedback-mode fall-through, dead `_freeze_value` private cross-package import,
+  broker double candidate validation, reports finalist ordering and a duplicate
+  supported-strategy count are fixed; the owner CSS/JS assets are extracted to
+  `observability/views/_owner_assets.py`, and empty `__all__` tails are removed.
 
 - Owner console workflow is now a continuous pan/zoom canvas (Fit, zoom in,
   zoom out; drag or scroll to pan) so long research pipelines keep unbroken
