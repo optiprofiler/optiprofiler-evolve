@@ -551,15 +551,17 @@ class _GatewayHandler(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.end_headers()
             count = 0
-            while chunk := response.read1(_CHUNK_BYTES):
-                collector.feed(chunk)
-                self.wfile.write(chunk)
-                self.wfile.flush()
-                count += len(chunk)
-                state.response_bytes = count
-            if response.length not in {None, 0}:
-                raise http.client.IncompleteRead(b"", response.length)
-            state.usage = collector.finish()
+            try:
+                while chunk := response.read1(_CHUNK_BYTES):
+                    collector.feed(chunk)
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                    count += len(chunk)
+                    state.response_bytes = count
+                if response.length not in {None, 0}:
+                    raise http.client.IncompleteRead(b"", response.length)
+            finally:
+                state.usage = collector.finish()
             self.close_connection = True
             return response.status, count
         finally:

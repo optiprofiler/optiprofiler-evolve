@@ -196,8 +196,6 @@ def _direction_assignments(artifact: object) -> dict[int, dict[str, object]]:
     if artifact is None:
         return {}
     path = Path(str(artifact))
-    if not path.is_file():
-        return {}
     payload = read_json_object(path)
     cards = {
         str(card.get("card_id")): dict(card)
@@ -207,9 +205,11 @@ def _direction_assignments(artifact: object) -> dict[int, dict[str, object]]:
     assignments: dict[int, dict[str, object]] = {}
     raw_assignment = payload.get("assignment", {})
     if not isinstance(raw_assignment, Mapping):
-        return assignments
+        raise ValueError("Direction assignments must be a mapping.")
     for island, card_id in raw_assignment.items():
-        if card_id is None or str(card_id) not in cards:
+        if card_id is None:
             continue
+        if str(card_id) not in cards:
+            raise ValueError(f"Direction assignment references missing card {card_id!r}.")
         assignments[int(island)] = cards[str(card_id)]
     return assignments

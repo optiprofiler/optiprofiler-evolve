@@ -64,7 +64,7 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
                                        candidate_id=self._attempt_id, parent=self._parent.path),
             max_smoke_calls=environment.config.execution.max_smoke_calls_per_worker,
             max_public_calls=environment.config.execution.max_public_calls_per_worker,
-            candidate_validator=self._ensure_candidate_safe,
+            candidate_validator=self._audit_edit_scope,
             feedback_mode=environment.config.execution.feedback_mode,
             emit=lambda kind, status, data: environment.emit(
                 kind, status, scope=self._scope(), data=data,
@@ -176,11 +176,9 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
         return outcome
 
     def audit_candidate(self) -> tuple[str, ...]:
-        self._environment.validate_candidate(self._workspace)
-        changed = changed_files(self._parent.path, self._workspace)
+        changed = self._audit_edit_scope(self._workspace)
         if not changed:
             raise ValueError("Worker produced no solver changes.")
-        validate_edit_scope(changed, self._environment.editable)
         self.changed = changed
         return changed
 
@@ -196,12 +194,7 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
         if count > 1:
             directory_name = f"{directory_name}-{count:03d}"
         evaluated_hash = tree_hash(self._workspace)
-        evaluation_mode = (
-            "public" if mode == "public_score"
-            and self._environment.config.execution.feedback_mode == "full_artifacts"
-            and any(phase.name == "strategy_analysis"
-                    for phase in self._environment.config.workflow.phases) else mode
-        )
+        evaluation_mode = self._environment.public_evaluation_mode if mode == "public_score" else mode
         result = self._environment.state.assessor.evaluate(
             self._workspace,
             evaluation_mode,
@@ -212,11 +205,11 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
             self.public_evaluation = (evaluated_hash, result)
         return result
 
-    def _ensure_candidate_safe(self, root: Path) -> None:
+    def _audit_edit_scope(self, root: Path) -> tuple[str, ...]:
         self._environment.validate_candidate(root)
         changed = changed_files(self._parent.path, root)
-        if changed:
-            validate_edit_scope(changed, self._environment.editable)
+        validate_edit_scope(changed, self._environment.editable)
+        return changed
 
     def _scope(self) -> Mapping[str, object]:
         return {

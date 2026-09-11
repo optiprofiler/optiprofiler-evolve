@@ -9,6 +9,7 @@ import os
 import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -35,20 +36,25 @@ class EvalReportBundle:
     main: Mapping[str, Any]
     companion: Mapping[str, Any]
 
+    @cached_property
+    def _records(self) -> Mapping[str, Mapping[str, Mapping[str, Any]]]:
+        return {name: {record["id"]: record for record in self.companion[name]}
+                for name in ("histories", "plots", "target_work")}
+
     def history(self, history_id: str) -> Mapping[str, Any]:
         """Return a borrowed history record; callers must not mutate it."""
 
-        return _record(self.companion["histories"], history_id, "history")
+        return _record(self._records["histories"], history_id, "history")
 
     def plot(self, plot_id: str) -> Mapping[str, Any]:
         """Return a borrowed prepared-plot record; callers must not mutate it."""
 
-        return _record(self.companion["plots"], plot_id, "plot")
+        return _record(self._records["plots"], plot_id, "plot")
 
     def target_work(self, target_work_id: str) -> Mapping[str, Any]:
         """Return a borrowed target-work record; callers must not mutate it."""
 
-        return _record(self.companion["target_work"], target_work_id, "target work")
+        return _record(self._records["target_work"], target_work_id, "target work")
 
 
 def load_eval_report(
@@ -199,8 +205,8 @@ def private_eval_report_paths(report_path: Path) -> frozenset[Path]:
     return frozenset((report_path, companion))
 
 
-def _record(values: list[Mapping[str, Any]], identity: str, label: str) -> Mapping[str, Any]:
-    for value in values:
-        if value["id"] == identity:
-            return value
-    raise KeyError(f"Unknown {label} ID: {identity!r}")
+def _record(values: Mapping[str, Mapping[str, Any]], identity: str, label: str) -> Mapping[str, Any]:
+    try:
+        return values[identity]
+    except KeyError:
+        raise KeyError(f"Unknown {label} ID: {identity!r}") from None

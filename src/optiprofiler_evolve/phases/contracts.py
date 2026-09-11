@@ -43,6 +43,8 @@ class Phase(Protocol):
 
     Optional extensions are ``optional_requires: frozenset[str]`` (default empty)
     and ``validate_config(config: EvolveConfig) -> None`` (default no-op).
+    ``requires_public_artifacts = True`` asks application composition to retain
+    full formal public evidence when the configured feedback mode permits it.
     Access these through the adapters below so minimal structural phases work.
     An optional producer may be absent, but if configured must precede its consumer.
     """

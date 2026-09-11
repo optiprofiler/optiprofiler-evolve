@@ -425,7 +425,7 @@ def _scoped_data_manifest(data: DataPlan, mode: str) -> dict[str, Any]:
         "hidden": list(problems) if mode == "hidden" else [],
         "smoke": list(problems) if mode == "smoke" else [],
         "split_seed": data.split_seed,
-        "manifest_hash": data.manifest_hash,
+        "split_fingerprint": data.split_fingerprint,
         "custom_problem_libraries_path": data.custom_problem_libraries_path,
         "aliases": aliases,
     }

@@ -116,6 +116,12 @@ class MetricParetoRetention:
             return ()
         ordered = list(self.scalar_fallback.retain(candidates, len(candidates)))
         bundles = self._comparable_bundles(ordered)
+        if len(self.objectives) == 1 and self.epsilon == 0:
+            def objective_value(candidate: CandidateRecord) -> float:
+                metric = bundles[candidate.candidate_id].metric(self.objectives[0])
+                return float(metric.value) * (-1 if metric.direction == "max" else 1)
+
+            return tuple(sorted(ordered, key=objective_value)[:capacity])
         retained: list[CandidateRecord] = []
         remaining = list(ordered)
         while remaining and len(retained) < capacity:

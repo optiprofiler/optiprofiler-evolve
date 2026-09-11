@@ -14,6 +14,7 @@ from optiprofiler_evolve.criteria.integrity.reviewer import IntegrityReviewDecis
 
 
 class IntegrityCriterion(Criterion):
+    assessment_order = 10
     version = "integrity-review/1"
 
     @classmethod

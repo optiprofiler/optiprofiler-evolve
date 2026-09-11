@@ -124,6 +124,9 @@ def reviewer_config() -> dict:
 
 
 class EngineTests(unittest.TestCase):
+    def setUp(self):
+        FakeEvaluator.calls = []
+
     def test_full_feedback_does_not_render_formal_candidate_plots_without_strategy_analysis(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

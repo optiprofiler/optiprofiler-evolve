@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from optiprofiler_evolve.observability.events import read_events, rebuild_run_state
+from optiprofiler_evolve.observability.events import read_events, state_from_events
 from optiprofiler_evolve.observability.views._evidence import (
     DIFF_PREVIEW_LINES,
     PHASE_EVENT_LIMIT,
@@ -83,7 +83,7 @@ def render_owner_views(events_path: Path, run_dir: Path, *, final: bool = False)
     """Render the owner index, per-attempt and per-role pages, atomically."""
 
     events = read_events(events_path)
-    state = rebuild_run_state(events_path)
+    state = state_from_events(events)
     details = _collect_private_details(events)
     now = _parse_ts(state.get("updated_at"))
 
@@ -197,6 +197,7 @@ def _collect_private_details(events: list[dict[str, Any]]) -> dict[str, Any]:
                 )
             elif kind == "integrity_review_finished":
                 record["gate"] = data.get("gate")
+                record["gate_profile"] = data.get("profile")
                 if data.get("report"):
                     record.setdefault("review_reports", {})[data["profile"]] = data["report"]
         job_id = scope.get("job_id")
@@ -226,8 +227,9 @@ def _render_owner_index(
     }
     matrix = _render_matrix(state.get("matrix"), attempts_by_id, now)
     population_policy = _render_population_policy(run_dir)
-    score_timeline = _render_score_timeline(state, details, run_dir)
-    lineage = _render_lineage(state, details, run_dir)
+    points = _score_points(state, details, run_dir)
+    score_timeline = _render_score_timeline(points)
+    lineage = _render_lineage(points)
     attempts = _render_owner_attempt_groups(state.get("attempts"), details, now, run_dir=run_dir)
     roles = _render_owner_roles(state.get("roles"), now, details=details)
     coverage = _render_coverage(state.get("trace_coverage"))
@@ -575,12 +577,9 @@ def _render_score_chart(
     )
 
 
-def _render_score_timeline(
-    state: Mapping[str, Any], details: Mapping[str, Any], run_dir: Path
-) -> str:
+def _render_score_timeline(points: list[dict[str, Any]]) -> str:
     """Render owner-only candidate metrics from authoritative run evidence."""
 
-    points = _score_points(state, details, run_dir)
     scored = [
         score
         for point in points
@@ -962,8 +961,7 @@ def _render_lineage_graph(
     return '<div class="lineage-chart">' + "".join(svg) + "</div>"
 
 
-def _render_lineage(state: Mapping[str, Any], details: Mapping[str, Any], run_dir: Path) -> str:
-    points = _score_points(state, details, run_dir)
+def _render_lineage(points: list[dict[str, Any]]) -> str:
     islands = _ordered_islands(points)
     if not islands:
         return '<p class="empty">No island lineage has been recorded yet.</p>'
@@ -1906,7 +1904,7 @@ def _attempt_review_section(
 ) -> str:
     gate = private.get("gate") or "pending"
     reports = review_reports(private, run_dir)
-    decision_path = reports.get("validation") or next(reversed(reports.values()), None)
+    decision_path = reports.get(private.get("gate_profile"))
     decision_html = '<p class="missing">Decision file unavailable.</p>'
     if decision_path is not None and decision_path.is_file():
         decision = read_json(decision_path)

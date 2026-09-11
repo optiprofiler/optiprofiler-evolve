@@ -104,8 +104,9 @@ class ComplexityCriterion(Criterion):
             f"Complexity budget ({request.mode}): branches and logical lines may each be at "
             f"most {ratio:g} times their initial values. All candidate Python files count. "
             f"{diagnostics}Simplify the algorithm rather than "
-            "compress formatting or remove documentation. In warn mode this is advice only, "
-            "not grounds for semantic quarantine. In enforce mode an exceeded or unavailable "
+            "compress formatting or remove documentation. Warn mode does not block an exceeded "
+            "budget. Missing positive-weight evidence still makes the total unavailable "
+            "and prevents admission. In enforce mode an exceeded or unavailable "
             "analysis blocks evaluation and admission."
         )
 

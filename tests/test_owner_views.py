@@ -164,7 +164,6 @@ def _attempt_rows(run_dir: Path, *, terminal: bool = True, accepted: bool = True
                         "guidance": "card-7",
                         "public_score": 0.75,
                         "validation_score": float(VALIDATION_CANARY),
-                        "review_verdict": "approve" if accepted else "quarantine",
                         "valid": accepted,
                         "accepted": accepted,
                         "error": None,

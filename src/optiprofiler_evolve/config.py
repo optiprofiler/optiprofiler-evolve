@@ -24,7 +24,7 @@ _V = TypeVar("_V")
 
 
 class FrozenDict(Mapping[_K, _V], Generic[_K, _V]):
-    """A shallow read-only mapping for configuration and public results."""
+    """A read-only mapping; configuration boundaries recursively freeze nested values."""
 
     def __init__(self, value: Mapping[_K, _V] | None = None) -> None:
         self._data = dict(value or {})
@@ -208,24 +208,9 @@ class EvaluationExecutionConfig:
     adapter: str = "optiprofiler"
 
 
-@dataclasses.dataclass(frozen=True)
-class EvaluationConfig(EvaluationExecutionConfig):
-    """Resolved backend request; quality options come from a criterion profile."""
-
-    benchmark: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    smoke_overrides: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    reference: str = "initial"
-    fitness_source: str = "solver_scores"
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "benchmark", freeze_value(self.benchmark))
-        object.__setattr__(self, "smoke_overrides", freeze_value(self.smoke_overrides))
-
     def validate(self) -> None:
         if self.backend not in {"docker", "unsafe_local"}:
             raise ValueError("evaluation.backend must be 'docker' or 'unsafe_local'.")
-        if self.backend == "docker" and not self.docker_image:
-            raise ValueError("evaluation.docker_image is required for Docker evaluation.")
         if self.timeout_seconds < 1:
             raise ValueError("evaluation.timeout_seconds must be positive.")
         if self.cpus <= 0 or self.pids_limit < 16 or not self.memory:
@@ -241,6 +226,32 @@ class EvaluationConfig(EvaluationExecutionConfig):
             )
         if not self.adapter or not self.adapter.replace("-", "_").isidentifier():
             raise ValueError("evaluation.adapter must be a registered component name.")
+        for name in self.forbidden_candidate_imports:
+            if not name or any(not part.isidentifier() for part in name.split(".")):
+                raise ValueError(
+                    "evaluation.forbidden_candidate_imports must contain dotted "
+                    "Python module names."
+                )
+        if self.max_smoke_calls_per_worker < 0 or self.max_public_calls_per_worker < 0:
+            raise ValueError("Evaluation call quotas cannot be negative.")
+
+@dataclasses.dataclass(frozen=True)
+class EvaluationConfig(EvaluationExecutionConfig):
+    """Resolved backend request; quality options come from a criterion profile."""
+
+    benchmark: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    smoke_overrides: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    reference: str = "initial"
+    fitness_source: str = "solver_scores"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "benchmark", freeze_value(self.benchmark))
+        object.__setattr__(self, "smoke_overrides", freeze_value(self.smoke_overrides))
+
+    def validate(self) -> None:
+        super().validate()
+        if self.backend == "docker" and not self.docker_image:
+            raise ValueError("evaluation.docker_image is required for Docker evaluation.")
         if self.reference != "initial" and self.reference not in competitor_names():
             raise ValueError(
                 "evaluation.reference must be 'initial' or a registered DFO competitor."
@@ -250,14 +261,6 @@ class EvaluationConfig(EvaluationExecutionConfig):
                 "evaluation.fitness_source must be 'solver_scores' or "
                 "'profile_scores_mean'."
             )
-        for name in self.forbidden_candidate_imports:
-            if not name or any(not part.isidentifier() for part in name.split(".")):
-                raise ValueError(
-                    "evaluation.forbidden_candidate_imports must contain dotted "
-                    "Python module names."
-                )
-        if self.max_smoke_calls_per_worker < 0 or self.max_public_calls_per_worker < 0:
-            raise ValueError("Evaluation call quotas cannot be negative.")
         forbidden = {"load", "solvers_to_load"}
         configured = forbidden.intersection(self.benchmark) | forbidden.intersection(
             self.smoke_overrides
@@ -631,7 +634,7 @@ class AssessmentConfig:
         criteria = {
             name: value if isinstance(value, CriterionConfig) else _from_mapping(
                 CriterionConfig,
-                {"weight": defaults.get(name, CriterionConfig()).weight, **value},
+                {**plain_data(defaults.get(name, CriterionConfig())), **value},
                 f"assessment.criteria.{name}",
             )
             for name, value in self.criteria.items()
@@ -738,8 +741,8 @@ class EvolveConfig:
     def validate(self) -> None:
         self.assessment.validate()
         self.workers.validate()
-        if self.assessment.enabled("performance"):
-            self.data.validate()
+        self.data.validate()
+        self.execution.validate()
         workers = list(self.workers.pool)
         references = set()
         for profile in ("smoke", "public", "validation", "hidden"):
@@ -800,7 +803,8 @@ class EvolveConfig:
         def redact(value: Any) -> None:
             if isinstance(value, dict):
                 for key, item in value.items():
-                    if _is_secret_name(key) and key not in {"token_budget", "credential_env", "auth_mode"}:
+                    if (_is_secret_name(key) and not isinstance(item, (int, float, bool))
+                            and key not in {"token_budget", "credential_env", "auth_mode"}):
                         value[key] = "<redacted>"
                     else:
                         redact(item)
@@ -913,18 +917,6 @@ class EvolveConfig:
         return dataclasses.replace(
             self,
             workflow=dataclasses.replace(self.workflow, attempt_steps=ordered),
-        )
-
-    def with_worker(self, harness: str, *, model: str | None = None) -> EvolveConfig:
-        """Return a single-worker variant while preserving common worker budgets."""
-
-        if not self.workers.pool:
-            raise ValueError("Cannot replace an empty worker pool.")
-        template = self.workers.pool[0]
-        worker = dataclasses.replace(template, harness=harness, model=model or template.model)
-        return dataclasses.replace(
-            self,
-            workers=dataclasses.replace(self.workers, pool=(worker,)),
         )
 
     def with_evaluator(self, adapter: str) -> EvolveConfig:

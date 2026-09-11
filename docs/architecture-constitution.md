@@ -67,9 +67,10 @@ The supported extension slots are `Phase`, `AttemptStep`,
 - A trusted custom component can be supplied directly without editing framework
   files.
 - A package built-in needs its implementation, one explicit registry entry, and
-  tests. It must not require a coordinator branch.
+  tests. Ordinary extensions must not require a coordinator branch. Core phases
+  that change controller authority also need explicit context/result bindings.
 - Each core and optional phase has a concrete class in `phases/<name>.py`,
-  alongside its specific context and result types. Helpers belong to their
+  alongside any core-specific context and result types. Helpers belong to their
   owning subsystem, not a catch-all shared package. A directory must represent
   a real multi-module subsystem, not merely wrap one class or one file.
   Core context factories are registered by the controller; optional extensions
@@ -217,7 +218,7 @@ components.
 Do not introduce a god context, nested override mini-language, auto-discovery
 framework, public executor hierarchy, or second authoritative database. A new
 abstraction must remove demonstrated duplication or enable a concrete ablation
-that the current five extension contracts cannot express.
+that the supported extension contracts cannot express.
 
 ## 10. Dependency direction
 

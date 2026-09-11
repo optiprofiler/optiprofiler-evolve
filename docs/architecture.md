@@ -11,13 +11,13 @@ evolve(...)
        for each iteration
          launch configured attempts for every island
          run each private attempt pipeline
-           mutate -> audit -> smoke -> public evaluate -> feedback
+           mutate -> smoke -> public_evaluate
          run enabled formal criteria, including integrity review by default
          controller evaluates enabled performance criteria on validation
          wait at the iteration barrier
-         engine accepts/rejects and ranks each island by its formal weighted score
+         controller accepts/rejects and ranks each island by its formal weighted score
          after-iteration policies propose migration/budget/stop edits
-         engine applies accepted proposals and checkpoints state
+         controller applies accepted proposals and checkpoints state
   -> validate
        select one champion using controller-only validation
   -> hidden
@@ -54,7 +54,7 @@ policies, and backend adapters:
 |---|---|---|
 | `Phase` | One ordered run-level stage with named `requires` and `provides` artifacts | Only through an engine-owned core operation |
 | `AttemptStep` | Mutate, inspect, or evaluate one private candidate attempt | No |
-| `AfterIterationPolicy` | Read an immutable population snapshot and propose kill/migrate/budget/stop edits | No; the engine applies proposals |
+| `AfterIterationPolicy` | Read an immutable population snapshot and propose kill/migrate/budget/stop edits | No; the controller applies proposals |
 | `RetentionPolicy` | Choose the ordered bounded archive retained by one island | No; the engine validates and applies the choice |
 | `ParentSampler` | Choose one parent from an island archive | No |
 | `CandidateReviewer` | Approve or quarantine a public-gated tree before validation | No |
@@ -69,8 +69,8 @@ be added only after a real external plugin package needs them.
 
 Every model invocation enters `agents/llm.py` through
 `LLMClient.run(AgentJob) -> AgentJobResult`. The controller first binds a
-`WorkerRequest` containing the selected provider, private workspace, tools,
-broker, resource limits and cancellation event. The client supplies the job
+`WorkerRequest` containing the selected provider, private workspace, tools directory,
+broker, prompt, transcript, resource limits and cancellation event. The client supplies the job
 prompt, creates trace inputs, invokes the injected `WorkerAdapter` once,
 finalizes evidence, and collects declared outputs. Job text cannot select a
 different host workspace or grant additional capabilities.
@@ -135,7 +135,7 @@ return immutable `StepResult` values. Policies return immutable `PopulationEdit`
 proposals.
 
 Every core and optional stage has its own class in `phases/<name>.py`.
-Its specific context and result types live in the same module.
+Core-specific context and result types live in the same module; optional phases use PhaseContext and PhaseResult.
 The core classes contain the actual stage algorithms rather than dispatching
 back to an engine method. Prepare, Validate and Hidden return typed
 staged results; the controller commits them after checking the declared
@@ -160,7 +160,7 @@ identity and options are recorded in provenance. The default components are
 golden-tested against the former in-engine implementation; research variants do
 not silently change the baseline experiment.
 
-Mandatory edit-scope and candidate-safety checks remain in the engine even when
+Mandatory edit-scope and candidate-safety checks remain in controller attempt execution even when
 the optional `static_audit` evidence step is removed for an ablation.
 
 ## Module boundaries
@@ -201,7 +201,7 @@ Package initializers do not register components or launch work. Internal import
 paths changed with this layout and have no compatibility forwarding modules.
 The public `evolve` API and documented `serve`/`docker_gc` command entrypoints
 remain unchanged. Provenance records the new component module names and source
-hashes honestly; experiment configuration is unchanged. Complexity reports use
+hashes honestly. Configuration changes and migration guidance are recorded in CHANGELOG.md. Complexity reports use
 `source_complexity/2`: `score` is the criterion score and `complexity_percent`
 is the baseline-relative percentage.
 
@@ -261,6 +261,8 @@ and tree hash before execution; an existing marker forbids another query, even
 if the in-memory flag was lost. Later checkpoints also include `hidden_started`.
 This is durable consumption evidence, not support for resuming interrupted runs.
 Removing hidden is allowed unless a champion-returning run requires a lockbox.
+The built-in report requires hidden's final artifacts, so remove or replace that
+consumer too when omitting hidden.
 Post-selection public challenger comparisons remain evidence-only.
 
 Application returns `EvolveResult` after any successful workflow. It never guesses
@@ -291,10 +293,12 @@ unmatched last broker call. Transfer jobs use `SolverJob` and receive the same
 criterion rules as exploration jobs, with tool instructions restricted to each
 invocation's controller-bound capabilities. The role-start event hashes the
 effective prompt after this guidance is appended, matching the adapter input.
-When strategy analysis and full-artifact feedback are configured, the final
+When a phase declares `requires_public_artifacts = True` and full-artifact
+feedback is configured, the final
 public candidate evaluation retains configured benchmark artifacts, so the
 analyst receives evidence for the actual admitted tree without another benchmark
-call. Other workflows keep score-only formal candidate evaluations; worker broker
+call. Strategy analysis declares this requirement; application binds it once.
+Other workflows keep score-only formal candidate evaluations; worker broker
 calls still honor the requested feedback format.
 Complexity analysis caches only source measurements. Each criterion invocation
 applies its profile policy once and persists `complexity/complexity.json` beside

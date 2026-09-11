@@ -5,8 +5,7 @@ from __future__ import annotations
 from optiprofiler_evolve.controller.contracts import VariantHandle
 from optiprofiler_evolve.criteria.performance.competitors import competitor_names
 from optiprofiler_evolve.files import write_json
-from optiprofiler_evolve.phases._research import CHALLENGER_SCHEMA
-from optiprofiler_evolve.phases._support import _require_public_performance
+from optiprofiler_evolve.phases._research import CHALLENGER_SCHEMA, _require_public_performance
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 from optiprofiler_evolve.solver import tree_hash
 

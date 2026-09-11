@@ -605,10 +605,10 @@ class ProviderGatewayTests(unittest.TestCase):
         def truncate(handler: BaseHTTPRequestHandler, _body: bytes) -> None:
             handler.send_response(200)
             handler.send_header("Content-Type", "text/event-stream")
-            handler.send_header("Content-Length", "128")
+            handler.send_header("Content-Length", "1024")
             handler.send_header("Connection", "close")
             handler.end_headers()
-            handler.wfile.write(b"data: partial\n\n")
+            handler.wfile.write(b'data: {"type":"message_start","message":{"usage":{"input_tokens":123}}}\n\n')
             handler.wfile.flush()
             handler.close_connection = True
 
@@ -633,6 +633,7 @@ class ProviderGatewayTests(unittest.TestCase):
             self.assertEqual(record["status"], 200)
             self.assertEqual(record["outcome"], "stream_interrupted")
             self.assertEqual(record["error_type"], "IncompleteRead")
+            self.assertEqual(record["usage"]["input_tokens"], 123)
             self.assertGreater(record["response_bytes"], 0)
 
     def test_does_not_follow_upstream_redirects(self) -> None:

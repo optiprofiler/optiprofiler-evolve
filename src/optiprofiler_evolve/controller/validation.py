@@ -31,16 +31,17 @@ class ValidationSelector:
             raise ValueError("Validation selection limit must be positive.")
         environment.commits.begin_validation_selection()
         unique = tuple(dict.fromkeys(str(value) for value in candidate_ids))
-        ranked: list[tuple[float, str]] = []
+        ranked: list[tuple[float, float, str]] = []
         new_queries = 0
         for candidate_id in unique:
             record = environment.state.candidates.get(candidate_id)
             if record is not None:
                 if not record.valid:
                     continue
-                if record.assessment_score is None or tree_hash(record.path) != record.tree_hash:
-                    continue
-                ranked.append((record.ranking_score, candidate_id))
+                if tree_hash(record.path) != record.tree_hash:
+                    raise ValueError(f"Candidate changed after admission: {candidate_id}")
+                ranked.append((record.ranking_score, record.public_score if record.public_score is not None
+                               else float("-inf"), candidate_id))
                 continue
             handle = environment.state.variant_handles.get(candidate_id)
             if handle is None:
@@ -77,12 +78,13 @@ class ValidationSelector:
                 new_queries += 1
             if not result.success or result.assessment_score is None:
                 continue
-            ranked.append((result.assessment_score, candidate_id))
+            ranked.append((result.assessment_score, public.score if public.score is not None
+                           else float("-inf"), candidate_id))
         selected = tuple(
             candidate_id
-            for _score, candidate_id in sorted(
+            for _score, _public_score, candidate_id in sorted(
                 ranked,
-                key=lambda item: (-item[0], item[1]),
+                key=lambda item: (-item[0], -item[1], item[2]),
             )[:limit]
         )
         query = {

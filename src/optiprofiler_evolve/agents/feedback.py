@@ -237,11 +237,13 @@ def _write_artifact_index(destination: Path, copied: list[Path]) -> None:
     for path in copied:
         relative = path.relative_to(destination).as_posix()
         media_type, _encoding = mimetypes.guess_type(path.name)
+        with path.open("rb") as handle:
+            digest = hashlib.file_digest(handle, "sha256").hexdigest()
         entries.append(
             {
                 "path": relative,
                 "bytes": path.stat().st_size,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "sha256": digest,
                 "media_type": media_type or "application/octet-stream",
             }
         )

@@ -26,7 +26,6 @@ class DataPlan:
     hidden: tuple[str, ...]
     smoke: tuple[str, ...]
     split_seed: int
-    manifest_hash: str
     universe_fingerprint: str = ""
     split_fingerprint: str = ""
     lockbox_required: bool = False
@@ -50,7 +49,7 @@ class DataPlan:
         """Return only information that may be shown to coding workers."""
 
         return {
-            "experiment": self.manifest_hash[:12],
+            "experiment": self.split_fingerprint[:12],
             "public_problem_count": len(self.public),
             "smoke_problem_count": len(self.smoke),
             "budget_note": "each problem enforces a fixed evaluation budget",
@@ -135,7 +134,6 @@ def resolve_data_plan(config: DataConfig) -> DataPlan:
         split_seed=split.seed,
         universe_fingerprint=universe_fingerprint,
         split_fingerprint=split_fingerprint,
-        manifest_hash=split_fingerprint,
         lockbox_required=split.lockbox_required,
         custom_problem_libraries_path=config.custom_problem_libraries_path,
         aliases=aliases,

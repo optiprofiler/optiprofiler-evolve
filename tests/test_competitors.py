@@ -62,7 +62,7 @@ class CompetitorRegistryTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        names = schema["$defs"]["EvaluationConfig"]["properties"]["reference"]["enum"]
+        names = schema["$defs"]["performance_options"]["properties"]["reference"]["enum"]
         self.assertEqual(names, ["initial", *competitor_names()])
 
     def test_default_evaluator_image_installs_both_powell_family_packages(self) -> None:

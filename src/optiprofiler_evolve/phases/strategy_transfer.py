@@ -10,8 +10,12 @@ from optiprofiler_evolve.agents.contracts import SolverJob
 from optiprofiler_evolve.agents.explanations import capture_solver_explanation
 from optiprofiler_evolve.controller.contracts import VariantHandle, VariantRequest
 from optiprofiler_evolve.files import read_json_object, write_json
-from optiprofiler_evolve.phases._research import STRATEGY_TRANSFER_SCHEMA
-from optiprofiler_evolve.phases._support import _require_public_performance, _tool_config
+from optiprofiler_evolve.phases._research import (
+    STRATEGY_TRANSFER_SCHEMA,
+    _require_public_performance,
+    _tool_config,
+    supported_strategy_cards,
+)
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 from optiprofiler_evolve.solver import copy_solver_tree, tree_hash
 
@@ -264,31 +268,20 @@ class StrategyTransferPhase:
 
     def _supported_cards(self, context: PhaseContext) -> list[dict[str, Any]]:
         supported: list[dict[str, Any]] = []
-        for path in context.artifacts["strategy_cards"]:
-            payload = read_json_object(Path(str(path)))
-            island = int(payload["island"])
-            raw_cards = payload.get("cards", [])
-            if not isinstance(raw_cards, list):
-                continue
-            for card in raw_cards:
-                if not isinstance(card, Mapping):
-                    continue
-                ablation = card.get("ablation")
-                if not isinstance(ablation, Mapping) or ablation.get("conclusion") != "supported":
-                    continue
-                supported.append(
-                    {
-                        "strategy_id": str(card["strategy_id"]),
-                        "source_island": island,
-                        "claim": str(card.get("claim", ""))[:4000],
-                        "mechanism": str(card.get("mechanism", ""))[:4000],
-                        "pseudocode": list(card.get("pseudocode", []))[:30],
-                        "applicability": list(card.get("applicability", []))[:20],
-                        "risks": list(card.get("risks", []))[:20],
-                        "measured_effect": ablation.get("mean_effect_when_present"),
-                        "evaluation_mode": ablation.get("evaluation_mode", "public"),
-                    }
-                )
+        for _path, island, card in supported_strategy_cards(context.artifacts["strategy_cards"]):
+            supported.append(
+                {
+                    "strategy_id": str(card["strategy_id"]),
+                    "source_island": island,
+                    "claim": str(card.get("claim", ""))[:4000],
+                    "mechanism": str(card.get("mechanism", ""))[:4000],
+                    "pseudocode": list(card.get("pseudocode", []))[:30],
+                    "applicability": list(card.get("applicability", []))[:20],
+                    "risks": list(card.get("risks", []))[:20],
+                    "measured_effect": card["ablation"].get("mean_effect_when_present"),
+                    "evaluation_mode": card["ablation"].get("evaluation_mode", "public"),
+                }
+            )
         return sorted(
             supported,
             key=lambda item: (

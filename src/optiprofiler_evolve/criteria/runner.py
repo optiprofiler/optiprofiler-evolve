@@ -19,7 +19,7 @@ from optiprofiler_evolve.solver import tree_hash
 class AssessmentResult:
     profile: str
     tree_hash: str
-    config_hash: str
+    signature: str
     results: Mapping[str, CriterionResult]
     total: float | None
     accepted: bool

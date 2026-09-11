@@ -46,7 +46,7 @@ See [Algorithm assessment](assessment.md) for scoring, privacy and migration.
 |---|---|---|---|
 | `assessment.criteria` | mapping of named criteria | performance and integrity enabled, complexity disabled | Complete criterion map when supplied; omitted standards do not run. |
 | `assessment.profiles` | mapping | `{}` | One-level overrides for smoke, public, validation and hidden. Integrity defaults to validation only. |
-| `assessment.criteria.<name>.enabled` | boolean | `true` | Master switch; disabled standards allocate no backend resources. |
+| `assessment.criteria.<name>.enabled` | boolean | `true`; complexity `false` | Master switch; disabled standards allocate no backend resources. |
 | `assessment.criteria.<name>.weight` | finite nonnegative number | `0` for integrity, `1` otherwise | Independent contribution to the weighted average; zero means constraints/diagnostics only. |
 | `assessment.criteria.<name>.mode` | warn or enforce | enforce; complexity default warn | Whether an unmet constraint blocks acceptance. |
 | `assessment.criteria.<name>.options` | mapping | `{}` | Standard-specific settings, overridden by key rather than recursively. |
@@ -193,6 +193,7 @@ names cannot drift apart.
 | `workers.pool[].args` | list of strings | `[]` | Extra CLI arguments appended to the harness command. |
 | `workers.pool[].env` | string mapping | `{}` | Explicit environment values or `${ENV_NAME}` references passed to the worker. |
 | `workers.pool[].pass_env` | list of names | `[]` | Host environment variables copied into the worker; missing names fail early. |
+| `workers.pool[].provider_gateway` | object or null | `null` | Optional gateway configuration; direct mode still requires the documented opt-in. |
 | `workers.pool[].provider_gateway.upstream_base_url` | HTTPS base URL | **required for gateway mode** | Controller-owned provider origin. It is never supplied to the worker. A base path such as `/v1` or `/anthropic` is allowed. |
 | `workers.pool[].provider_gateway.credential_env` | environment name | **required for gateway mode** | Name of the one resolved credential delivered to the gateway sidecar, not the worker. |
 | `workers.pool[].provider_gateway.protocol` | `auto`, `anthropic`, or `openai_responses` | `auto` | Fixed wire protocol. `auto` maps Claude to Anthropic Messages and Codex to OpenAI Responses. |
@@ -462,3 +463,11 @@ gateway URL. Direct Docker provider access requires both unsafe opt-ins and is
 recorded in provenance. See
 [Model providers and agent workers](providers.md) and the checked-in compatible
 provider examples for complete small runs.
+
+### Early stop policy
+
+`workflow.after_iteration` accepts `{name: early_stop, options: {min_iteration: 2,
+score: 0.8}}`. After the indicated iteration, it stops exploration when any
+population member's validation performance score reaches the threshold. It does
+not skip validation, hidden, or report phases. This threshold is not the weighted
+assessment total. Defaults are `min_iteration: 1` and `score: 1.0`.

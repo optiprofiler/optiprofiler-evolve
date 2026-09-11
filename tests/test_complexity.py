@@ -186,7 +186,8 @@ class ComplexityTests(unittest.TestCase):
         with patch.object(checker, "_analyze", side_effect=analyze):
             with ThreadPoolExecutor(max_workers=2) as pool:
                 reports = list(pool.map(checker.measure, (self.candidate, other)))
-        self.assertEqual(reports, [analyze_source(self.candidate), analyze_source(other)])
+        self.assertEqual([(report.decision_complexity, report.logical_lines) for report in reports],
+                         [(2, 4), (2, 5)])
 
     def test_concurrent_identical_sources_publish_a_valid_cached_report(self):
         checker = self.checker()
@@ -221,8 +222,8 @@ class ComplexityTests(unittest.TestCase):
         with patch.object(checker, "_analyze", wraps=checker._analyze) as analyzer:
             report = self.report(checker, self.candidate)
             analyzer.assert_called_once()
-        self.assertEqual(report.score, 1 / (1 + max(report.ratios)))
-        self.assertEqual(report.summary()["complexity_percent"], 100 * max(report.ratios))
+        self.assertAlmostEqual(report.score, 1 / 3)
+        self.assertEqual(report.summary()["complexity_percent"], 200)
 
     def test_analysis_programming_errors_propagate(self):
         checker = self.checker()

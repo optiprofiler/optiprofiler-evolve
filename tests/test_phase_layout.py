@@ -28,6 +28,8 @@ class PhaseLayoutTests(unittest.TestCase):
             "criteria": ("controller", "application", "api", "phases"),
             "observability": ("controller", "application", "api", "phases", "criteria"),
             "controller": ("application", "api"),
+            "phases": ("application", "api"),
+            "application": ("api",),
         }
         violations = []
         for layer, targets in forbidden.items():

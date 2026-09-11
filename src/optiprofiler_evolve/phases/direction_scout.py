@@ -7,8 +7,13 @@ from typing import Any
 
 from optiprofiler_evolve.agents.contracts import AgentJob
 from optiprofiler_evolve.files import read_json_object, write_json
-from optiprofiler_evolve.phases._research import DIRECTION_SCHEMA, normalize_direction_cards
-from optiprofiler_evolve.phases._support import _prepared, _tool_config, _tool_payload
+from optiprofiler_evolve.phases._research import (
+    DIRECTION_SCHEMA,
+    _prepared,
+    _tool_config,
+    _tool_payload,
+    normalize_direction_cards,
+)
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 
 

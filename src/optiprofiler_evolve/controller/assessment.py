@@ -48,7 +48,7 @@ class CandidateAssessor:
         self._evaluators: dict[tuple[str, Path | None], Evaluator] = {}
         self._evaluator_lock = Lock()
         self.input_fingerprint = hashlib.sha256(
-            f"{tree_hash(seed)}:{data.manifest_hash}:{interface}:{runtime}".encode()
+            f"{tree_hash(seed)}:{data.split_fingerprint}:{interface}:{runtime}".encode()
         ).hexdigest()
         self.complexity = None
         if config.assessment.enabled("complexity"):
@@ -98,9 +98,8 @@ class CandidateAssessor:
         # Bind inexpensive/source constraints before benchmark execution.
         backends = CriterionBackends(benchmark, review, self.complexity)
         criteria = {}
-        for name in dict.fromkeys(("complexity", "integrity", "performance", *specs)):
-            if name not in specs or not specs[name].enabled:
-                continue
+        enabled = [name for name, spec in specs.items() if spec.enabled]
+        for name in sorted(enabled, key=lambda name: self.criterion_factories[name].assessment_order):
             criteria[name] = self.criterion_factories[name].bind(backends, mode=specs[name].mode)
         report = AssessmentRunner(criteria).run(
             AssessmentRequest(candidate, tree_hash(candidate), profile, output_dir,

@@ -9,8 +9,12 @@ from typing import Any
 
 from optiprofiler_evolve.controller.contracts import VariantHandle, VariantRequest
 from optiprofiler_evolve.files import read_json_object, write_json
-from optiprofiler_evolve.phases._research import RECOMBINATION_SCHEMA
-from optiprofiler_evolve.phases._support import _prepared, _require_public_performance
+from optiprofiler_evolve.phases._research import (
+    RECOMBINATION_SCHEMA,
+    _prepared,
+    _require_public_performance,
+    supported_strategy_cards,
+)
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 from optiprofiler_evolve.solver import tree_hash
 
@@ -64,37 +68,30 @@ class RecombinePhase:
 
         portable: list[dict[str, Any]] = []
         excluded: list[dict[str, Any]] = []
-        for path in context.artifacts["strategy_cards"]:
-            payload = read_json_object(Path(str(path)))
-            island = int(payload["island"])
-            for card in payload.get("cards", []):
-                if not isinstance(card, Mapping):
-                    continue
-                if card.get("ablation", {}).get("conclusion") != "supported":
-                    continue
-                patch = card.get("portable_patch")
-                if not isinstance(patch, Mapping) or not patch.get("ref"):
-                    continue
-                strategy_id = str(card["strategy_id"])
-                if island == base_island:
-                    excluded.append(
-                        {"strategy_id": strategy_id, "reason": "already represented by base island"}
-                    )
-                    continue
-                if patch.get("base") != "seed" or patch.get("base_tree_hash") != seed_hash:
-                    excluded.append(
-                        {"strategy_id": strategy_id, "reason": "portable base declaration mismatch"}
-                    )
-                    continue
-                portable.append(
-                    {
-                        "strategy_id": strategy_id,
-                        "island": island,
-                        "patch": Path(str(path)).parent / str(patch["ref"]),
-                        "declared_base": patch.get("base", "seed"),
-                        "declared_base_tree_hash": patch.get("base_tree_hash", ""),
-                    }
+        for path, island, card in supported_strategy_cards(context.artifacts["strategy_cards"]):
+            patch = card.get("portable_patch")
+            if not isinstance(patch, Mapping) or not patch.get("ref"):
+                continue
+            strategy_id = str(card["strategy_id"])
+            if island == base_island:
+                excluded.append(
+                    {"strategy_id": strategy_id, "reason": "already represented by base island"}
                 )
+                continue
+            if patch.get("base") != "seed" or patch.get("base_tree_hash") != seed_hash:
+                excluded.append(
+                    {"strategy_id": strategy_id, "reason": "portable base declaration mismatch"}
+                )
+                continue
+            portable.append(
+                {
+                    "strategy_id": strategy_id,
+                    "island": island,
+                    "patch": path.parent / str(patch["ref"]),
+                    "declared_base": patch.get("base", "seed"),
+                    "declared_base_tree_hash": patch.get("base_tree_hash", ""),
+                }
+            )
         portable = sorted(portable, key=lambda item: (item["island"], item["strategy_id"]))[
             : self.max_strategies
         ]

@@ -36,7 +36,6 @@ class DataPlanTests(unittest.TestCase):
 
         self.assertEqual(first.universe_fingerprint, second.universe_fingerprint)
         self.assertNotEqual(first.split_fingerprint, second.split_fingerprint)
-        self.assertEqual(first.manifest_hash, first.split_fingerprint)
 
     def test_split_is_deterministic_disjoint_and_smoke_is_public(self) -> None:
         config = DataConfig(
@@ -45,7 +44,7 @@ class DataPlanTests(unittest.TestCase):
         )
         first = resolve_data_plan(config)
         second = resolve_data_plan(config)
-        self.assertEqual(first.manifest_hash, second.manifest_hash)
+        self.assertEqual(first.split_fingerprint, second.split_fingerprint)
         self.assertEqual(first.public, second.public)
         self.assertEqual(first.validation, second.validation)
         self.assertEqual(first.hidden, second.hidden)
@@ -81,9 +80,9 @@ class DataPlanTests(unittest.TestCase):
         self.assertIn("HIDDEN", trusted)
         self.assertIn("VALIDATION", trusted)
         public_manifest = json.loads(visible)
-        self.assertEqual(public_manifest["experiment"], plan.manifest_hash[:12])
+        self.assertEqual(public_manifest["experiment"], plan.split_fingerprint[:12])
         self.assertNotIn("library", public_manifest)
-        self.assertNotIn("manifest_hash", public_manifest)
+        self.assertNotIn("split_fingerprint", public_manifest)
 
     def test_explicit_smoke_must_stay_inside_public(self) -> None:
         config = DataConfig(

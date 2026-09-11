@@ -17,6 +17,7 @@ class HiddenContext(PhaseContext):
     champion: tuple[int, CandidateRecord]
     assessor: CandidateAssessment
     begin_hidden: Callable[[], None]
+    has_hidden_data: bool
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -43,7 +44,7 @@ class HiddenPhase:
         island, champion = context.champion
         context.begin_hidden()
         final_result = _evaluate_hidden_champion(
-            context.run_dir, island, champion, context.assessor
+            context.run_dir, island, champion, context.assessor, context.has_hidden_data
         )
         if not final_result.success:
             raise RuntimeError(f"Controller-only hidden evaluation failed: {final_result.error}")
@@ -60,6 +61,7 @@ def _evaluate_hidden_champion(
     island: int,
     record: CandidateRecord,
     assessor: CandidateAssessment,
+    has_hidden_data: bool,
 ) -> FinalistResult:
     output_dir = run_dir / "controller" / "final_evaluations" / record.candidate_id
     result = assessor.evaluate(record.path, "hidden", output_dir)
@@ -69,11 +71,12 @@ def _evaluate_hidden_champion(
         island=island,
         public_score=record.public_score,
         validation_score=record.validation_score,
-        final_score=result.score,
+        final_score=result.score if has_hidden_data else record.validation_score,
         output_dir=output_dir,
         success=result.success,
         error=result.error,
         assessment_score=record.assessment_score,
-        final_assessment_score=result.assessment_score,
+        final_assessment_score=(record.assessment_score if skipped and not has_hidden_data
+                                else result.assessment_score),
         assessment_status="skipped" if skipped else "succeeded" if result.success else "failed",
     )

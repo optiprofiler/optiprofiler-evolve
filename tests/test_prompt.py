@@ -17,7 +17,7 @@ def _prompt_kwargs() -> dict:
         hidden=(),
         smoke=("P1",),
         split_seed=1,
-        manifest_hash="test",
+        split_fingerprint="test",
         aliases={"P1": "P_OPAQUE"},
     )
     return {
@@ -90,7 +90,7 @@ class PromptTests(unittest.TestCase):
             hidden=(),
             smoke=("P1",),
             split_seed=1,
-            manifest_hash="test",
+            split_fingerprint="test",
             aliases={"P1": "P_OPAQUE"},
         )
         prompt = build_worker_prompt(

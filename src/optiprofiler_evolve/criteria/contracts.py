@@ -97,6 +97,7 @@ class Criterion(ABC):
     """A higher-is-better score and an independent constraint verdict."""
 
     version = "1"
+    assessment_order = 0
     guidance_fields: tuple[str, ...] = ()
 
     @classmethod

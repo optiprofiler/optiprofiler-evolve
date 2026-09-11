@@ -27,6 +27,7 @@ class UsageRecord:
     cache_read_tokens: int | None = None
     cache_write_tokens: int | None = None
     cost_usd: float | None = None
+    lower_bounds: dict[str, int | float] = dataclasses.field(default_factory=dict)
     schema: str = dataclasses.field(default="usage_record/1", init=False)
     incomplete: bool = dataclasses.field(init=False)
     missing_fields: tuple[str, ...] = dataclasses.field(init=False)
@@ -68,7 +69,16 @@ def aggregate_usage(records: Iterable[UsageRecord]) -> UsageRecord:
         name: _sum_if_complete(items, name)
         for name in _NUMERIC_FIELDS
     }
-    return UsageRecord(source="aggregate", **values)
+    lower_bounds = {}
+    for name, total in values.items():
+        if total is not None:
+            continue
+        observed = [getattr(item, name) if getattr(item, name) is not None
+                    else item.lower_bounds.get(name) for item in items]
+        known = [value for value in observed if value is not None]
+        if known:
+            lower_bounds[name] = sum(known)
+    return UsageRecord(source="aggregate", lower_bounds=lower_bounds, **values)
 
 
 def _sum_if_complete(records: tuple[UsageRecord, ...], name: str) -> int | float | None:

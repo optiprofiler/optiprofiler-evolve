@@ -163,7 +163,12 @@ def read_events(path: Path) -> list[dict[str, Any]]:
 def rebuild_run_state(path: Path) -> dict[str, Any]:
     """Build the versioned, shareable run state from a public event ledger."""
 
-    events = read_events(path)
+    return state_from_events(read_events(path))
+
+
+def state_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Reduce an already-read ledger; callers retain its public/private boundary."""
+
     run: dict[str, Any] = {
         "status": "pending",
         "started": None,

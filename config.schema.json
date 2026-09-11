@@ -110,25 +110,6 @@
     "workers"
   ],
   "$defs": {
-    "ComplexityConfig": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "mode": {
-          "type": "string",
-          "enum": [
-            "warn",
-            "enforce"
-          ],
-          "default": "warn"
-        },
-        "max_ratio": {
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "default": 1.2
-        }
-      }
-    },
     "DataConfig": {
       "type": "object",
       "additionalProperties": false,
@@ -225,170 +206,6 @@
           "default": []
         }
       }
-    },
-    "EvaluationConfig": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "benchmark": {
-          "type": "object",
-          "default": {},
-          "additionalProperties": true,
-          "not": {
-            "anyOf": [
-              {
-                "required": [
-                  "load"
-                ]
-              },
-              {
-                "required": [
-                  "solvers_to_load"
-                ]
-              }
-            ]
-          }
-        },
-        "smoke_overrides": {
-          "type": "object",
-          "default": {},
-          "additionalProperties": true,
-          "not": {
-            "anyOf": [
-              {
-                "required": [
-                  "load"
-                ]
-              },
-              {
-                "required": [
-                  "solvers_to_load"
-                ]
-              }
-            ]
-          }
-        },
-        "backend": {
-          "type": "string",
-          "enum": [
-            "docker",
-            "unsafe_local"
-          ],
-          "default": "docker"
-        },
-        "docker_image": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "timeout_seconds": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 3600
-        },
-        "cpus": {
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "default": 2.0
-        },
-        "memory": {
-          "type": "string",
-          "minLength": 1,
-          "default": "4g"
-        },
-        "pids_limit": {
-          "type": "integer",
-          "minimum": 16,
-          "default": 512
-        },
-        "feedback_mode": {
-          "type": "string",
-          "enum": [
-            "score_only",
-            "full_artifacts"
-          ],
-          "default": "score_only"
-        },
-        "reference": {
-          "type": "string",
-          "enum": [
-            "initial",
-            "scipy_nelder_mead",
-            "scipy_powell",
-            "scipy_cobyla",
-            "scipy_cobyqa",
-            "pdfo",
-            "pdfo_uobyqa",
-            "pdfo_newuoa",
-            "pdfo_bobyqa",
-            "pdfo_lincoa",
-            "pdfo_cobyla",
-            "prima",
-            "prima_uobyqa",
-            "prima_newuoa",
-            "prima_bobyqa",
-            "prima_lincoa",
-            "prima_cobyla"
-          ],
-          "default": "initial"
-        },
-        "fitness_source": {
-          "type": "string",
-          "enum": [
-            "solver_scores",
-            "profile_scores_mean"
-          ],
-          "default": "solver_scores"
-        },
-        "forbidden_candidate_imports": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
-          },
-          "uniqueItems": true,
-          "default": []
-        },
-        "max_smoke_calls_per_worker": {
-          "type": "integer",
-          "minimum": 0,
-          "default": 20
-        },
-        "max_public_calls_per_worker": {
-          "type": "integer",
-          "minimum": 0,
-          "default": 5
-        },
-        "adapter": {
-          "type": "string",
-          "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",
-          "default": "optiprofiler"
-        }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "backend": {
-                "const": "docker"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "docker_image"
-            ],
-            "properties": {
-              "docker_image": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          }
-        }
-      ]
     },
     "EvolutionConfig": {
       "type": "object",
@@ -559,7 +376,14 @@
           "default": []
         },
         "provider_gateway": {
-          "$ref": "#/$defs/ProviderGatewayConfig"
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ProviderGatewayConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

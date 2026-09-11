@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.files import safe_relative_path
+from optiprofiler_evolve.config import EvolveConfig, ToolConfig
+from optiprofiler_evolve.files import read_json_object, safe_relative_path
+from optiprofiler_evolve.phases.contracts import PhaseContext
+from optiprofiler_evolve.phases.prepare import PreparedArtifact
 
 DIRECTION_SCHEMA = "direction_cards/1"
 
@@ -156,3 +160,65 @@ def _mapping_list(value: object, *, maximum: int) -> list[Mapping[str, Any]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         return []
     return [item for item in value[:maximum] if isinstance(item, Mapping)]
+
+
+def _prepared(context: PhaseContext) -> PreparedArtifact:
+    value = context.artifacts.get("prepared")
+    if not isinstance(value, PreparedArtifact):
+        raise RuntimeError("research phase requires the structured prepared artifact")
+    return value
+
+
+def _require_public_performance(config: EvolveConfig, phase: str) -> None:
+    if not config.assessment.enabled("performance", "public"):
+        raise ValueError(f"Phase {phase!r} requires public performance assessment.")
+
+
+def _tool_config(
+    value: Mapping[str, object] | None,
+    *,
+    network: bool,
+    web_search: bool,
+) -> ToolConfig:
+    defaults: dict[str, object] = {
+        "preset": "research",
+        "network": network,
+        "web_search": web_search,
+        "shell": True,
+        "python": True,
+        "git": True,
+        "compilers": False,
+        "package_install": False,
+        "communication": "none",
+    }
+    defaults.update(dict(value or {}))
+    tools = ToolConfig(**defaults)
+    tools.validate()
+    return tools
+
+
+def _tool_payload(tools: ToolConfig) -> dict[str, object]:
+    return {
+        "preset": tools.preset,
+        "web_search": tools.web_search,
+        "network": tools.network,
+        "shell": tools.shell,
+        "python": tools.python,
+        "git": tools.git,
+        "compilers": tools.compilers,
+        "package_install": tools.package_install,
+        "communication": tools.communication,
+    }
+
+
+def supported_strategy_cards(paths: Sequence[object]) -> Iterator[tuple[Path, int, Mapping[str, Any]]]:
+    """Read only controller-supported strategies for transfer and recombination."""
+    for path in paths:
+        payload = read_json_object(Path(str(path)))
+        island = int(payload["island"])
+        for card in payload.get("cards", []):
+            if not isinstance(card, Mapping):
+                continue
+            ablation = card.get("ablation")
+            if isinstance(ablation, Mapping) and ablation.get("conclusion") == "supported":
+                yield Path(str(path)), island, card

@@ -17,13 +17,11 @@ from optiprofiler_evolve.phases._research import (
     BUNDLE_SCHEMA,
     DIRECTION_SCHEMA,
     STRATEGY_SCHEMA,
-    normalize_strategy_cards,
-)
-from optiprofiler_evolve.phases._support import (
     _prepared,
     _require_public_performance,
     _tool_config,
     _tool_payload,
+    normalize_strategy_cards,
 )
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 from optiprofiler_evolve.solver import source_diff, tree_hash
@@ -33,6 +31,7 @@ class StrategyAnalysisPhase:
     """Extract per-island strategy hypotheses and test executable removals."""
 
     name = "strategy_analysis"
+    requires_public_artifacts = True
     requires = frozenset({"prepared", "populations"})
     optional_requires = frozenset({"directions"})
     provides = frozenset({"strategy_cards", "island_bundles"})

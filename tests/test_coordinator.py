@@ -134,15 +134,13 @@ class CoordinatorTests(unittest.TestCase):
 
     def test_coordinator_does_not_import_execution_implementations(self):
         source = inspect.getsource(inspect.getmodule(RunCoordinator))
-        for forbidden in (
-            "docker",
-            "LLMClient",
-            "broker",
-            "radon",
-            "IntegrityReview",
-            "render_status",
-        ):
-            self.assertNotIn(forbidden, source)
+        imports = [node.module or "" for node in ast.walk(ast.parse(source))
+                   if isinstance(node, ast.ImportFrom)]
+        imports += [alias.name for node in ast.walk(ast.parse(source))
+                    if isinstance(node, ast.Import) for alias in node.names]
+        for name in imports:
+            self.assertFalse(name.startswith(("optiprofiler_evolve.agents",
+                                              "optiprofiler_evolve.criteria", "radon", "docker")))
 
     def test_production_state_writes_belong_to_commits(self):
         package = Path(inspect.getfile(RunCoordinator)).parents[1]
@@ -157,3 +155,7 @@ class CoordinatorTests(unittest.TestCase):
                 )
                 for target in targets:
                     self.assertNotIn(".state.", ast.unparse(target), str(path))
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                    if node.func.attr in {"update", "append", "extend", "clear", "pop", "setdefault",
+                                          "remove", "insert", "add", "discard"}:
+                        self.assertNotIn(".state.", ast.unparse(node.func), str(path))

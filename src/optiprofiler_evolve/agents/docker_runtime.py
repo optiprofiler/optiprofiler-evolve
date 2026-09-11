@@ -1004,26 +1004,33 @@ def _parse_docker_time(value: object) -> datetime:
 def _read_gateway_usage(path: Path, *, request_count: int) -> UsageRecord:
     generation_records: list[UsageRecord] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_bytes().splitlines()
     except OSError:
         lines = []
     for line in lines:
         try:
             record = json.loads(line)
-        except json.JSONDecodeError:
-            return UsageRecord.from_values(
-                source="provider_gateway",
-                calls=request_count,
-            )
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            generation_records.append(UsageRecord.unavailable("provider_gateway"))
+            continue
         if not isinstance(record, Mapping):
+            generation_records.append(UsageRecord.unavailable("provider_gateway"))
             continue
         if record.get("path") not in {"/v1/messages", "/v1/responses"}:
             continue
-        generation_records.append(_usage_record_from_mapping(record.get("usage")))
+        usage = _usage_record_from_mapping(record.get("usage"))
+        if record.get("outcome") == "stream_interrupted":
+            usage = UsageRecord(source="provider_gateway", lower_bounds={
+                name: value for name, value in usage.as_dict().items()
+                if name in {"input_tokens", "output_tokens", "cache_read_tokens",
+                            "cache_write_tokens", "cost_usd"} and value is not None
+            })
+        generation_records.append(usage)
     aggregate = aggregate_usage(generation_records)
     return UsageRecord.from_values(
         source="provider_gateway",
         calls=request_count,
+        lower_bounds=aggregate.lower_bounds,
         input_tokens=aggregate.input_tokens,
         output_tokens=aggregate.output_tokens,
         cache_read_tokens=aggregate.cache_read_tokens,

@@ -78,7 +78,7 @@ class OptiProfilerEvaluationTests(unittest.TestCase):
                 hidden=(),
                 smoke=("ROSENBR",),
                 split_seed=0,
-                manifest_hash="test",
+                split_fingerprint="test",
                 aliases={"ROSENBR": "P_OPAQUE"},
             )
             config = EvaluationConfig(
@@ -130,7 +130,7 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
                 hidden=(),
                 smoke=("PUBLIC",),
                 split_seed=0,
-                manifest_hash="test",
+                split_fingerprint="test",
                 aliases={"PUBLIC": "P_PUBLIC"},
             )
             evaluator = DockerOptiProfilerEvaluator(
@@ -161,7 +161,7 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
                 hidden=(),
                 smoke=("SECRET_NAME",),
                 split_seed=0,
-                manifest_hash="test",
+                split_fingerprint="test",
                 aliases={"SECRET_NAME": "P_OPAQUE"},
             )
             leaked = root / "SECRET_NAME" / "details.txt"
@@ -209,7 +209,7 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
                 hidden=(),
                 smoke=("SECRET_NAME",),
                 split_seed=0,
-                manifest_hash="test",
+                split_fingerprint="test",
                 aliases={"SECRET_NAME": "P_OPAQUE"},
             )
             evaluator = DockerOptiProfilerEvaluator(
@@ -249,7 +249,7 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
             hidden=("HIDDEN",),
             smoke=("PUBLIC",),
             split_seed=0,
-            manifest_hash="test",
+            split_fingerprint="test",
             aliases={
                 "PUBLIC": "P_PUBLIC",
                 "VALIDATION": "P_VALIDATION",
@@ -276,7 +276,7 @@ class DockerRequestStagingTests(unittest.TestCase):
             hidden=(),
             smoke=("SECRET_NAME",),
             split_seed=0,
-            manifest_hash="test",
+            split_fingerprint="test",
             aliases={"SECRET_NAME": "P_OPAQUE"},
         )
         reference = root / "reference"

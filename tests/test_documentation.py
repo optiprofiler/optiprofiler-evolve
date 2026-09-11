@@ -28,6 +28,19 @@ class DocumentationTests(unittest.TestCase):
         jsonschema.Draft202012Validator(schema).validate(raw)
         self.assertEqual(plain_data(load_config(raw)), raw)
 
+    def test_reference_defaults_match_resolved_values(self):
+        reference = (ROOT / "docs/config-reference.md").read_text()
+        rows = {parts[1].strip().strip("`"): parts[3].strip()
+                for line in reference.splitlines() if line.startswith("| `")
+                for parts in [line.split("|")] if len(parts) >= 5}
+        config = EvolveConfig()
+        for field in ("iterations", "islands", "population_per_island", "migration_interval"):
+            self.assertEqual(rows[f"evolution.{field}"], f"`{getattr(config.evolution, field)}`")
+        self.assertEqual(rows["assessment.criteria.complexity.mode"],
+                         f"`{config.assessment.criteria['complexity'].mode}`")
+        self.assertEqual(rows["execution.feedback_mode"], f"`{config.execution.feedback_mode}`")
+        self.assertEqual(rows["workers.pool[].provider_gateway"], "`null`")
+
     def test_schema_and_reference_cover_every_config_field(self) -> None:
         schema = json.loads((ROOT / "config.schema.json").read_text(encoding="utf-8"))
         expected = _dataclass_paths(EvolveConfig)
@@ -50,6 +63,11 @@ class DocumentationTests(unittest.TestCase):
             "OPTIPROFILER_EVOLVE_OPENAI_BASE_URL": "https://example.invalid/v1",
         }
         with patch.dict(os.environ, environment):
+            for example in (ROOT / "examples").rglob("*.yaml"):
+                payload = yaml.safe_load(example.read_text())
+                if isinstance(payload, dict) and "workers" in payload:
+                    validator.validate(payload)
+                    load_config(example)
             claude_path = ROOT / "examples" / "experiment.yaml"
             compatible_path = ROOT / "examples" / "experiment-claude-compatible.yaml"
             codex_path = ROOT / "examples" / "experiment-codex.yaml"

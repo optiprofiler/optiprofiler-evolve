@@ -181,3 +181,11 @@ replaces, the raw reviewer stream.
 The double-opt-in `unsafe_approve` test/ablation component performs no agent
 invocation, so it records only the normalized decision and is excluded from
 agent-trace coverage counts.
+
+Docker cleanup accepts `--run RUN_ID` to restrict selection to one run and
+`--include-active` to also select running containers or attached networks.
+Selection remains a dry run unless `--apply` is supplied.
+
+Usage records keep unknown exact totals as `null`. Their `lower_bounds` mapping
+retains known token/cost subtotals when a stream or audit record is incomplete;
+these values must not be presented as the final bill.

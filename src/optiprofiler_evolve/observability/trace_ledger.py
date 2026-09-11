@@ -11,6 +11,7 @@ from typing import Any
 
 from optiprofiler_evolve.agents.docker_runtime import recover_gateway_trace
 from optiprofiler_evolve.config import SandboxConfig, WorkerConfig, WorkersConfig
+from optiprofiler_evolve.files import read_json_object as _read_json_object
 from optiprofiler_evolve.observability.traces import (
     TracePaths,
     prepare_trace,
@@ -355,13 +356,6 @@ def _gateway_index_payload(trace_root: Path) -> dict[str, object] | None:
         "exit_code": payload.get("exit_code"),
         "upstream_hash": payload.get("upstream_hash"),
     }
-
-
-def _read_json_object(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"Expected a JSON object in {path}")
-    return payload
 
 
 def _write_private_json_atomic(path: Path, payload: Mapping[str, object]) -> None:

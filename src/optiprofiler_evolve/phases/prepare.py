@@ -124,7 +124,7 @@ class PreparePhase:
     def run(self, context: PrepareContext) -> PrepareResult:
         enabled = context.config.assessment.enabled("performance")
         data = resolve_data_plan(context.config.data) if enabled else DataPlan(
-            "disabled", {}, (), (), (), (), (), 0, "performance-disabled",
+            "disabled", {}, (), (), (), (), (), 0,
             universe_fingerprint="disabled", split_fingerprint="disabled",
         )
         ptype_value = data.selection.get("ptype")

@@ -40,8 +40,11 @@ jobs:
       - run: >-
           docker run --rm --entrypoint python optiprofiler-evolve-evaluator:ci -c
           'import optiprofiler, optiprofiler_evolve, pdfo, prima, yaml;
-          from optiprofiler_evolve.shared.competitors import competitor_names;
+          from optiprofiler_evolve.criteria.performance.competitors import competitor_names;
           assert {"pdfo_newuoa", "prima_newuoa"} <= set(competitor_names("u"))'
+      - run: >-
+          docker run --rm -v "$PWD/tests:/tests:ro" --entrypoint python
+          optiprofiler-evolve-evaluator:ci -m unittest discover -s /tests -p test_competitors.py -v
       - run: docker run --rm optiprofiler-evolve-gateway:ci --help
       - run: python -m pip install -e .
       - run: >-

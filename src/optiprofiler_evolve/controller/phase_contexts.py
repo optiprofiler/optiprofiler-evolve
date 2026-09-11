@@ -82,6 +82,7 @@ def context_factories(
         return HiddenContext(
             **_common_inputs(base), champion=champion, assessor=assessor,
             begin_hidden=environment.commits.begin_hidden,
+            has_hidden_data=bool(environment.state.data.hidden),
         )
 
     def report_context(base: PhaseContext) -> ReportContext:

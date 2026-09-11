@@ -142,6 +142,11 @@ class EvolutionRun:
             runtime=self.runtime,
             editable=self.editable,
             config=config,
+            public_evaluation_mode=(
+                "public" if config.execution.feedback_mode == "full_artifacts"
+                and any(getattr(phase, "requires_public_artifacts", False) for phase in self.phases)
+                else "public_score"
+            ),
             run_dir=self.run_dir,
             state=self.state,
             commits=self.commits,

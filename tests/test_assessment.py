@@ -177,6 +177,10 @@ class AssessmentTests(unittest.TestCase):
         self.assertFalse(config.assessment.enabled("integrity"))
 
     def test_profile_weights_and_hidden_results_do_not_change_the_formal_score(self):
+        from unittest.mock import patch
+
+        from optiprofiler_evolve.controller.registry import _REGISTRIES
+        self.enterContext(patch.dict(_REGISTRIES["criterion"]))
         register("criterion", "constant_a", ConstantCriterion, replace=True)
         register("criterion", "constant_b", ConstantCriterion, replace=True)
         raw = minimal_config()

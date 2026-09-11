@@ -59,7 +59,7 @@ def dfo_default(*, worker: WorkerConfig | None = None) -> EvolveConfig:
                 "benchmark": {"max_eval_factor": 20, "n_jobs": 1, "score_only": True},
                 "smoke_overrides": {"max_eval_factor": 5},
             }),
-            "integrity": CriterionConfig(options={"allow_same_model": True}),
+            "integrity": CriterionConfig(weight=0.0, options={"allow_same_model": True}),
             "complexity": CriterionConfig(enabled=False, mode="warn"),
         }),
         sandbox=SandboxConfig(

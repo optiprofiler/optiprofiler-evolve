@@ -16,9 +16,9 @@ criterion-specific prompt slots or unconditional performance-artifact demands.
 
 `SolverJob`, a subtype of `AgentJob`, identifies solver proposal/edit tasks.
 `LLMClient` combines their task text with controller-bound criterion guidance
-exactly once and records that effective prompt in the invocation trace. Scout,
-analysis, transfer and explorer jobs share this path. Independent review jobs
-remain ordinary `AgentJob` instances and never request generation guidance.
+exactly once and records that effective prompt in the invocation trace. Transfer and explorer SolverJobs receive this guidance. Scout, analyst and
+independent review jobs share the LLM invocation boundary but remain ordinary
+AgentJobs and do not receive generation guidance.
 This does not add an LLM call to performance or complexity assessment.
 
 Guidance describes the enabled smoke/public rules and publicly advertised
@@ -165,3 +165,9 @@ Assessment receives the controller-bound snapshot and configured options;
 generation receives only the public rule projection described above.
 Registration never discovers packages automatically. Existing execution
 adapters remain separate from criteria.
+
+Criterion implementations may declare `assessment_order` (default 0). Lower
+values execute first; integrity uses 10 and performance uses 100. Equal values
+retain configuration order. Binding stays criterion-owned, including trusted
+extensions. `assessment.json.signature` hashes rules, versions, profile and input
+identity; it is distinct from the run configuration hash.

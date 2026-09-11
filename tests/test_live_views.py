@@ -25,14 +25,15 @@ class LiveViewsTests(unittest.TestCase):
         )
         logger.exception.assert_called_once()
 
-    def test_programming_errors_are_not_converted_to_io_failures(self):
+    def test_programming_errors_are_reported_without_aborting_the_run(self):
         with patch(
             "optiprofiler_evolve.observability.live_views.project_public_events",
             side_effect=AttributeError("bug"),
         ):
-            with self.assertRaisesRegex(AttributeError, "bug"):
-                self.views.refresh()
-        self.views.emit.assert_not_called()
+            self.views.refresh()
+        self.views.emit.assert_called_once_with(
+            "public_view_refresh_failed", "failed", data={"error": "AttributeError: bug"},
+        )
 
     def test_background_failures_keep_the_traceback(self):
         with patch.object(self.views, "_stop") as stop:

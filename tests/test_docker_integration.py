@@ -308,7 +308,7 @@ class DockerEvaluatorIntegrationTests(unittest.TestCase):
                 hidden=(),
                 smoke=("ROSENBR",),
                 split_seed=0,
-                manifest_hash="ci-smoke",
+                split_fingerprint="ci-smoke",
                 aliases={"ROSENBR": "P_OPAQUE_CI"},
             )
             evaluator = DockerOptiProfilerEvaluator(

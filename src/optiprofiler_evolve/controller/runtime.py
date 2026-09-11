@@ -19,6 +19,7 @@ class RunEnvironment:
     runtime: str
     editable: tuple[str, ...]
     config: EvolveConfig
+    public_evaluation_mode: str
     run_dir: Path
     state: RunState
     commits: RunCommits

@@ -157,8 +157,9 @@ After this exploration-only path is stable, switch the YAML to the ordered
 research phases in `examples/experiment-research.yaml`. Do not enable every
 phase merely to test provider connectivity: strategy attribution and
 recombination add extra public and controller-only validation evaluations. A
-default-enabled integrity-review agent also assesses the initial solver and
-each candidate that survives public checks, with one retry on malformed or
+default-enabled integrity-review agent assesses each changed candidate that
+survives public checks. The unchanged initial solver is approved locally as the
+comparison baseline, with one retry on malformed or
 unavailable output by default. Its weight and enabled state are configurable.
 
 To launch this same flow from GitHub Actions, start from the
@@ -199,3 +200,10 @@ boundaries and should be used only for trusted package tests.
 - Modifying the package: [Contributing](../CONTRIBUTING.md)
 - Current isolation guarantees: [Security](security.md)
 - Provider/API compatibility and agent-mode checks: [Providers](providers.md)
+
+The worker image includes Poppler's `pdftoppm` for viewing PDF evidence as PNG.
+For an unsafe-local worker, install Poppler locally before using full-artifact
+feedback. No `render_pdf` harness extension is assumed.
+
+An alternative development setup is `uv sync --extra dev --frozen`, using the
+checked-in `uv.lock`; CI uses pip and the image-specific pinned dependencies.

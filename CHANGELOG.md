@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### Breaking changes from main
+
+- Replace `evaluation` with `execution`; move performance options to
+  `assessment.criteria.performance.options` and `integrity_review` to
+  `assessment.criteria.integrity.options`. Legacy `evolution.rounds` and backend
+  `local` are rejected; use `iterations` and `unsafe_local`.
+- Replace feedback modes `summary`/`agent` with `score_only`/`full_artifacts`.
+  The default remains score-only feedback.
+- Quick-start defaults now use 1 iteration, 1 island, population 2, no migration,
+  and `mutate -> smoke -> public_evaluate`. Tool defaults are minimal, with no
+  search or compilers. The default preset uses evaluation factor 20 (smoke 5),
+  one benchmark process and score-only output; previous default search budgets
+  were substantially larger.
+- Remove `integrity_review.strict`: exhausted reviewer retries reject that
+  candidate and exploration continues. This is not a fail-fast outage policy.
+  Integrity is a zero-weight validation constraint by default, including the
+  Python quick-start preset. Fully constructed criterion configs remain explicit.
+- Configured additional positive-weight criteria change selection scores; their
+  scales are not normalized. Warn disables constraint blocking, but missing
+  positive-weight evidence still prevents admission. Complexity defaults to warn.
+- Named competitors now honor bounds and constraints. Historical scores using
+  these competitors are not directly comparable; reference `initial` is unchanged.
+- An empty optional hidden split retains the validation score as the final score;
+  it does not make another benchmark call or count as hidden evidence.
+
+### Audit corrections
+
+- Validate execution/data settings even without performance, restore research
+  public-score tie breaking, report invalid direction artifacts, and keep optional
+  view failures from aborting runs. Display each review gate's matching decision.
+- Retain observed gateway usage after truncated streams or corrupt audit lines as
+  explicitly labelled lower bounds; unknown exact totals remain unavailable.
+- Bind formal public-artifact requirements from phase declarations, fix CI's
+  competitor import and execute optional wrappers in the evaluator image.
+
+
 - Align the integrity component's schema default with Python presets and validate
   worker pools before resolving reviewer defaults. Test preset schema round trips.
 - Keep feedback/index generation solely in worker projection and remove the

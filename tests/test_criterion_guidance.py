@@ -51,7 +51,7 @@ class CriterionGuidanceTests(unittest.TestCase):
                     if other != enabled:
                         self.assertNotIn(absent, prompt)
                 if enabled != "performance":
-                    self.assertNotIn("render_pdf", prompt)
+                    self.assertNotIn("pdftoppm", prompt)
                     self.assertNotIn("history plots", prompt)
 
     def test_performance_artifact_instructions_follow_available_public_feedback(self):
@@ -64,7 +64,7 @@ class CriterionGuidanceTests(unittest.TestCase):
                     )
                     artifacts = mode == "full_artifacts" and "evaluate" in tools
                     self.assertEqual("history plots" in prompt, artifacts)
-                    self.assertEqual("render_pdf" in prompt, artifacts)
+                    self.assertEqual("pdftoppm" in prompt, artifacts)
                     self.assertEqual("returned by the enabled public checks" in prompt, bool(tools))
         formal_only = AssessmentConfig(criteria=config.criteria, profiles={
             "public": {"performance": {"enabled": False}},
@@ -76,7 +76,7 @@ class CriterionGuidanceTests(unittest.TestCase):
         )
         self.assertIn("Performance:", prompt)
         self.assertNotIn("history plots", prompt)
-        self.assertNotIn("render_pdf", prompt)
+        self.assertNotIn("pdftoppm", prompt)
         self.assertNotIn("returned by the enabled public checks", prompt)
 
     def test_complexity_diagnostics_name_only_available_tools_and_profiles(self):

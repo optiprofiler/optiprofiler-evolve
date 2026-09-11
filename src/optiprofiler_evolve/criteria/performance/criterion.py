@@ -14,15 +14,18 @@ from optiprofiler_evolve.models import EvaluationResult
 
 _ARTIFACT_GUIDANCE = """
 - In agent-feedback experiments, inspect artifact_index.json and then open the useful
-  benchmark logs, profile plots, and per-problem history plots. Use `render_pdf` to convert
-  selected PDF pages to PNG, then open the PNG with the harness Read tool. At minimum, after
+  benchmark logs, profile plots, and per-problem history plots. Use the installed `pdftoppm` command
+  (for example, `pdftoppm -png -f 1 -singlefile input.pdf output`) to convert a PDF
+  page to PNG, then open the PNG with the harness image tool. At minimum, after
   a successful `evaluate`, inspect one aggregate profile and two representative per-problem
-  history plots before your final edit. Record in your final response which files you read
+  history plots before your final edit when those plots are available. If artifacts were
+  withheld or not generated, report that limitation instead. Record which files you read
   and what algorithmic decision each one informed. Opaque problem IDs are stable within the
   run, but their source-library names are intentionally unavailable."""
 
 
 class PerformanceCriterion(Criterion):
+    assessment_order = 100
     version = "performance/1"
     guidance_fields = ("fitness_source",)
 

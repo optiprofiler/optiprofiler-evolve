@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, BinaryIO, Mapping, Sequence
 
 from optiprofiler_evolve.config import SandboxConfig, WorkerConfig, WorkersConfig, plain_data
+from optiprofiler_evolve.files import read_json_object as _read_json_object
 from optiprofiler_evolve.solver import tree_hash
 
 _CHUNK_BYTES = 64 * 1024
@@ -790,13 +791,6 @@ def _file_evidence(path: Path) -> dict[str, object]:
             digest.update(chunk)
             size += len(chunk)
     return {"exists": True, "bytes": size, "sha256": digest.hexdigest()}
-
-
-def _read_json_object(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"Expected a JSON object in {path}")
-    return payload
 
 
 def _copy_private_file(source: Path, destination: Path) -> None:

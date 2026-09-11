@@ -77,7 +77,7 @@ class LiveViews:
                     self.run_dir,
                     final=include_report,
                 )
-            except (OSError, ValueError) as exc:
+            except Exception as exc:
                 logger.exception("View refresh failed")
                 self.emit(
                     "public_view_refresh_failed",
