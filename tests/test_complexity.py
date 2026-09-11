@@ -296,18 +296,24 @@ class ComplexityTests(unittest.TestCase):
                 "metrics": report.worker_dict(),
             }},
         })
-        for mode in ("score_only", "full_artifacts"):
-            destination = self.root / mode
-            project_feedback(
+        for mode, bad_receipt in (("score_only", False), ("full_artifacts", False),
+                                  ("full_artifacts", True)):
+            if bad_receipt:
+                (source / "eval_report.json").write_text("invalid receipt")
+            destination = self.root / f"{mode}-{bad_receipt}"
+            warning = project_feedback(
                 source,
                 destination,
                 result,
                 mode=mode,
             )
+            self.assertEqual(warning is not None, bad_receipt)
             payload = json.loads((destination / "complexity.json").read_text())
             self.assertNotIn("hotspots", payload["baseline"])
             self.assertNotIn("baseline_hash", payload)
-            self.assertIn("Simplify", (destination / "feedback.md").read_text())
+            feedback = (destination / "feedback.md").read_text()
+            self.assertIn("Simplify", feedback)
+            self.assertEqual(feedback.count("Relative complexity:"), 1)
 
     def test_unavailable_complexity_withholds_private_error(self):
         report = replace(self.checker().assess(self.candidate), candidate=None,

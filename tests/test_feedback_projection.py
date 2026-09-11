@@ -11,6 +11,22 @@ from optiprofiler_evolve.models import EvaluationResult
 
 
 class FeedbackProjectionTests(unittest.TestCase):
+    def test_private_assessment_is_rejected_before_writing_feedback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "private"
+            source.mkdir()
+            for profile in ("validation", "hidden"):
+                with self.subTest(profile=profile):
+                    destination = root / profile
+                    result = EvaluationResult(
+                        profile, 0.5, 0.5, 0.5, 1, source,
+                        assessment={"profile": profile, "results": {}},
+                    )
+                    with self.assertRaisesRegex(ValueError, "Controller-only assessment"):
+                        project_feedback(source, destination, result, mode="score_only")
+                    self.assertFalse(destination.exists())
+
     def test_failed_evaluation_without_benchmark_preserves_result(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

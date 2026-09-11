@@ -95,35 +95,6 @@ class ComplexityReport:
             "error": self.error,
         }
 
-    def feedback(self) -> str:
-        percent = self.summary()["complexity_percent"]
-        relative = f"{percent:g}%" if percent is not None else "unavailable"
-        lines = [
-            f"Relative complexity: {relative} / "
-            f"limit {100 * self.max_ratio:g}% — {self.mode}: {self.status}",
-        ]
-        if self.candidate is not None:
-            lines.extend(
-                [
-                    f"Branches: {self.candidate.decision_complexity} / "
-                    f"initial {self.baseline.decision_complexity} "
-                    f"(limit {self.max_ratio * self.baseline.decision_complexity:g})",
-                    f"Logical lines: {self.candidate.logical_lines} / "
-                    f"initial {self.baseline.logical_lines} "
-                    f"(limit {self.max_ratio * max(self.baseline.logical_lines, 1):g})",
-                ]
-            )
-            for item in self.candidate.hotspots:
-                lines.append(f"- {item['path']}:{item['line']} {item['name']}: CC {item['cc']}")
-        if self.error:
-            lines.append(self.error)
-        if self.status == "exceeded":
-            lines.append(
-                "Simplify duplicated logic and unnecessary special cases. "
-                "Do not remove documentation or compress formatting to reduce complexity."
-            )
-        return "\n".join(lines) + "\n"
-
 
 class ComplexityChecker:
     """Cache successful analyses; each instance owns one fixed baseline and policy."""

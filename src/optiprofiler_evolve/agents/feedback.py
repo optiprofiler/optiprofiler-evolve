@@ -10,7 +10,6 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.criteria.complexity.analyzer import ComplexityMetrics, ComplexityReport
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.observability.eval_reports import (
     EvalReportError,
@@ -75,7 +74,7 @@ def project_feedback(
         (destination / "assessment.json").write_text(json.dumps(public, indent=2) + "\n")
         metrics = result.assessment["results"].get("complexity", {}).get("metrics", {})
         if metrics:
-            complexity = _public_complexity_report(metrics)
+            complexity = _public_complexity(metrics)
     if complexity is not None:
         publish_complexity(destination, complexity)
     if mode == "score_only":
@@ -96,29 +95,60 @@ def project_feedback(
     _write_artifact_index(destination, copied)
 
 
-def _public_complexity_report(metrics: dict[str, Any]) -> ComplexityReport:
-    # Reconstruct only public counts and candidate locations; never forward backend errors or hashes.
+def _public_complexity(metrics: dict[str, Any]) -> dict[str, Any]:
+    # Only public counts and candidate locations; never forward backend errors or hashes.
     baseline = metrics["baseline"]
     candidate = metrics["candidate"]
-    return ComplexityReport(
-        tree_hash="", baseline_hash="",
-        baseline=ComplexityMetrics(baseline["decision_complexity"], baseline["logical_lines"]),
-        candidate=ComplexityMetrics(
-            candidate["decision_complexity"], candidate["logical_lines"],
-            tuple({key: item[key] for key in ("path", "name", "line", "cc")}
-                  for item in candidate["hotspots"]),
-        ) if candidate is not None else None,
-        mode=metrics["mode"], max_ratio=metrics["max_ratio"],
-    )
+    counts = ("decision_complexity", "logical_lines")
+    return {
+        **{key: metrics[key] for key in (
+            "mode", "status", "max_ratio", "branch_ratio", "size_ratio", "complexity_ratio",
+            "score", "complexity_percent", "blocked", "schema", "analyzer",
+        )},
+        "baseline": {key: baseline[key] for key in counts},
+        "candidate": {
+            **{key: candidate[key] for key in counts},
+            "hotspots": [{key: item[key] for key in ("path", "name", "line", "cc")}
+                         for item in candidate["hotspots"]],
+        } if candidate is not None else None,
+        "error": None,
+    }
 
 
-def publish_complexity(destination: Path, report: ComplexityReport) -> None:
-    destination.mkdir(parents=True, exist_ok=True)
+def publish_complexity(destination: Path, report: dict[str, Any]) -> None:
     (destination / "complexity.json").write_text(
-        json.dumps(report.worker_dict(), indent=2) + "\n", encoding="utf-8",
+        json.dumps(report, indent=2) + "\n", encoding="utf-8",
     )
     with (destination / "feedback.md").open("a", encoding="utf-8") as handle:
-        handle.write("\n" + report.feedback())
+        handle.write("\n" + _complexity_feedback(report))
+
+
+def _complexity_feedback(report: dict[str, Any]) -> str:
+    percent = report["complexity_percent"]
+    relative = f"{percent:g}%" if percent is not None else "unavailable"
+    limit = report["max_ratio"]
+    lines = [
+        f"Relative complexity: {relative} / "
+        f"limit {100 * limit:g}% — {report['mode']}: {report['status']}",
+    ]
+    baseline, candidate = report["baseline"], report["candidate"]
+    if candidate is not None:
+        lines.extend([
+            f"Branches: {candidate['decision_complexity']} / "
+            f"initial {baseline['decision_complexity']} "
+            f"(limit {limit * baseline['decision_complexity']:g})",
+            f"Logical lines: {candidate['logical_lines']} / "
+            f"initial {baseline['logical_lines']} "
+            f"(limit {limit * max(baseline['logical_lines'], 1):g})",
+        ])
+        for item in candidate["hotspots"]:
+            lines.append(f"- {item['path']}:{item['line']} {item['name']}: CC {item['cc']}")
+    if report["status"] == "exceeded":
+        lines.append(
+            "Simplify duplicated logic and unnecessary special cases. "
+            "Do not remove documentation or compress formatting to reduce complexity."
+        )
+    return "\n".join(lines) + "\n"
 
 
 def _copy_full_artifacts(source: Path, destination: Path) -> list[Path]:
