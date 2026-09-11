@@ -36,11 +36,9 @@ class PerformanceCriterion(Criterion):
             f"The configured fitness source is {source}; higher reported fitness is better. "
             "Keep comparisons within the same experiment and evaluation profile."
         )
-        if {"smoke", "public"}.intersection(request.profiles):
+        if request.evaluation_tools:
             text += " Use the performance scores returned by the enabled public checks."
-            # Baseline worker-task wording: it is included whenever public performance
-            # checks exist, and its own "In agent-feedback experiments" clause scopes it
-            # to runs that publish benchmark artifacts.
+        if "evaluate" in request.evaluation_tools and request.feedback_mode == "full_artifacts":
             text += _ARTIFACT_GUIDANCE
         return text
 

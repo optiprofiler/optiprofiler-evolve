@@ -26,9 +26,13 @@ validation rules, including weights and warn/enforce settings. Identical rules
 are grouped; different profile overrides remain explicit. Disabled standards
 and hidden-only settings do not contribute instructions. Performance plot
 instructions appear only when public performance and full artifact feedback
-are enabled.
+are enabled and this invocation can call `evaluate`. Tool instructions use the
+controller-bound invocation capabilities; roles without a broker still receive
+the scoring rules, but no instructions to call evaluation tools or inspect their
+artifacts. A zero call budget omits that tool from the guidance.
 
-The guidance request carries only profiles, weight, mode, feedback format and
+The guidance request carries only profiles, weight, mode, feedback format,
+available evaluation tool names and
 explicitly allowlisted option fields. `Criterion.guidance_fields` defaults to
 empty; built-ins expose only `fitness_source` or `max_ratio`, never reviewer
 configuration or benchmark input mappings. Custom criteria must implement the

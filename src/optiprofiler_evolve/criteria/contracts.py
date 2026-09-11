@@ -40,6 +40,7 @@ class GuidanceRequest:
     weight: float
     mode: Literal["warn", "enforce"]
     feedback_mode: str
+    evaluation_tools: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.profiles or any(p not in {"smoke", "public", "validation"} for p in self.profiles):

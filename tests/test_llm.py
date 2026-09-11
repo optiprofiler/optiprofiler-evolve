@@ -23,12 +23,15 @@ class LLMClientTests(unittest.TestCase):
         guidance = Mock(return_value="SYNTHETIC_CRITERION_GUIDANCE")
         client.generation_guidance = guidance
         job = SolverJob("explorer", "job", "Edit the solver.")
-        client.run(job)
+        started = Mock()
+        client.run(job, on_started=started)
         guidance.assert_called_once_with()
         self.assertEqual(job.prompt, "Edit the solver.")
         prompt = self.calls[0]["prompt"]
         self.assertEqual(prompt, f"{job.prompt}\n\n{guidance.return_value}")
         self.assertEqual(prompt.count(guidance.return_value), 1)
+        started.assert_called_once()
+        self.assertEqual(started.call_args.args[0].prompt, prompt)
         self.assertTrue(any(guidance.return_value in p.read_text() for p in
                             self.request.trace_dir.rglob("*.txt")))
 

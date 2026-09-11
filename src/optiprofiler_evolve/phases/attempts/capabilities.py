@@ -122,6 +122,10 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
                         "parent_tree_hash": self._parent.tree_hash,
                     },
                     cancellation_event=environment.cancellation_event,
+                    evaluation_tools=tuple(tool for tool, limit in (
+                        ("smoke_test", environment.config.execution.max_smoke_calls_per_worker),
+                        ("evaluate", environment.config.execution.max_public_calls_per_worker),
+                    ) if limit > 0),
                 )
             )
             outcome = client.run(
@@ -194,7 +198,9 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
         evaluated_hash = tree_hash(self._workspace)
         evaluation_mode = (
             "public" if mode == "public_score"
-            and self._environment.config.execution.feedback_mode == "full_artifacts" else mode
+            and self._environment.config.execution.feedback_mode == "full_artifacts"
+            and any(phase.name == "strategy_analysis"
+                    for phase in self._environment.config.workflow.phases) else mode
         )
         result = self._environment.state.assessor.evaluate(
             self._workspace,

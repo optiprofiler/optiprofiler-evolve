@@ -57,19 +57,39 @@ class CriterionGuidanceTests(unittest.TestCase):
     def test_performance_artifact_instructions_follow_available_public_feedback(self):
         config = AssessmentConfig(criteria={"performance": CriterionConfig()})
         for mode in ("score_only", "full_artifacts"):
-            with self.subTest(mode=mode):
-                prompt = build_generation_guidance(config, mode, self.criteria)
-                self.assertIn("history plots", prompt)
-                self.assertIn("render_pdf", prompt)
+            for tools in ((), ("smoke_test",), ("evaluate",), ("smoke_test", "evaluate")):
+                with self.subTest(mode=mode, tools=tools):
+                    prompt = build_generation_guidance(
+                        config, mode, self.criteria, evaluation_tools=tools,
+                    )
+                    artifacts = mode == "full_artifacts" and "evaluate" in tools
+                    self.assertEqual("history plots" in prompt, artifacts)
+                    self.assertEqual("render_pdf" in prompt, artifacts)
+                    self.assertEqual("returned by the enabled public checks" in prompt, bool(tools))
         formal_only = AssessmentConfig(criteria=config.criteria, profiles={
             "public": {"performance": {"enabled": False}},
             "smoke": {"performance": {"enabled": False}},
         })
-        prompt = build_generation_guidance(formal_only, "full_artifacts", self.criteria)
+        prompt = build_generation_guidance(
+            formal_only, "full_artifacts", self.criteria,
+            evaluation_tools=("smoke_test", "evaluate"),
+        )
         self.assertIn("Performance:", prompt)
         self.assertNotIn("history plots", prompt)
         self.assertNotIn("render_pdf", prompt)
         self.assertNotIn("returned by the enabled public checks", prompt)
+
+    def test_complexity_diagnostics_name_only_available_tools_and_profiles(self):
+        config = AssessmentConfig(criteria={"complexity": CriterionConfig()}, profiles={
+            "smoke": {"complexity": {"enabled": False}},
+        })
+        for tools in ((), ("smoke_test",), ("evaluate",), ("smoke_test", "evaluate")):
+            prompt = build_generation_guidance(
+                config, "score_only", self.criteria, evaluation_tools=tools,
+            )
+            self.assertIn("Complexity budget", prompt)
+            self.assertNotIn("smoke_test", prompt)
+            self.assertEqual("evaluate return diagnostics" in prompt, "evaluate" in tools)
 
     def test_profile_rules_are_distinct_but_identical_guidance_is_not_repeated(self):
         config = AssessmentConfig(criteria={"complexity": CriterionConfig(options={"max_ratio": 1.7})},
@@ -97,7 +117,7 @@ class CriterionGuidanceTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             request.options["public_rule"] = "changed"
         self.assertEqual({field.name for field in fields(request)},
-                         {"profiles", "options", "weight", "mode", "feedback_mode"})
+                         {"profiles", "options", "weight", "mode", "feedback_mode", "evaluation_tools"})
         for private in ("SECRET_CANARY", "PRIVATE_PROBLEM", "PRIVATE_RESULT", "HIDDEN_CANARY"):
             self.assertNotIn(private, prompt)
 

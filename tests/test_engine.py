@@ -124,6 +124,24 @@ def reviewer_config() -> dict:
 
 
 class EngineTests(unittest.TestCase):
+    def test_full_feedback_does_not_render_formal_candidate_plots_without_strategy_analysis(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "solver.py"
+            source.write_text("def solver(fun, x0):\n    return x0\n")
+            raw = minimal_config()
+            raw["execution"]["feedback_mode"] = "full_artifacts"
+            FakeEvaluator.calls = []
+            result = EvolutionRun(
+                initial=source, interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python", editable=("solver.py",), config=load_config(raw),
+                run_dir=root / "run", worker_adapter=RunnerAdapter(fake_agent_runner),
+                evaluator_factory=fake_evaluator_factory,
+            ).run()
+            self.assertEqual(result.public_score, 0.7)
+            self.assertEqual(FakeEvaluator.calls.count("public"), 1)  # Seed evidence.
+            self.assertEqual(FakeEvaluator.calls.count("public_score"), 2)
+
 
     def test_worker_explanation_is_saved_outside_candidate_and_promoted_for_champion(self) -> None:
         def explanatory_runner(**kwargs) -> WorkerOutcome:

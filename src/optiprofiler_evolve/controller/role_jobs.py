@@ -139,20 +139,22 @@ class RoleJobs:
             if "island" in scope and scope["island"] != linked_island:
                 raise ValueError("Agent job island conflicts with its trace link.")
             scope["island"] = linked_island
-        self.emit(
-            "role_agent_started",
-            "running",
-            scope=scope,
-            data={
-                "worker": f"{worker.harness}:{worker.model}",
-                "tools": {
-                    "network": tools.network,
-                    "web_search": tools.web_search,
-                    "shell": tools.shell,
+        def started(request: WorkerRequest) -> None:
+            self.emit(
+                "role_agent_started",
+                "running",
+                scope=scope,
+                data={
+                    "worker": f"{worker.harness}:{worker.model}",
+                    "tools": {
+                        "network": tools.network,
+                        "web_search": tools.web_search,
+                        "shell": tools.shell,
+                    },
+                    "prompt_hash": hashlib.sha256(request.prompt.encode()).hexdigest(),
                 },
-                "prompt_hash": hashlib.sha256(job.prompt.encode()).hexdigest(),
-            },
-        )
+            )
+
         try:
             client = self.llm_client(
                 WorkerRequest(
@@ -180,7 +182,7 @@ class RoleJobs:
                     cancellation_event=self.cancellation_event,
                 )
             )
-            result = client.run(job)
+            result = client.run(job, on_started=started)
             outcome = result.outcome
         except Exception as exc:
             transcript.parent.mkdir(parents=True, exist_ok=True)

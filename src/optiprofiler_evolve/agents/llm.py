@@ -41,8 +41,12 @@ class LLMClient:
         self.record_usage = record_usage
         self.generation_guidance = generation_guidance
 
-    def run(self, job: AgentJob) -> AgentJobResult:
+    def run(
+        self, job: AgentJob, *, on_started: Callable[[WorkerRequest], None] | None = None,
+    ) -> AgentJobResult:
         request = replace(self.request, prompt=job.render_prompt(self.generation_guidance))
+        if on_started is not None:
+            on_started(request)
         outcome = self._execute(request)
         outputs = {}
         for relative in job.expected_outputs:

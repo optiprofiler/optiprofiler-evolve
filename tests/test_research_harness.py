@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import shutil
 import tempfile
@@ -445,6 +446,13 @@ class ResearchHarnessTests(unittest.TestCase):
                 {"name": "strategy_transfer"} if item["name"] == "recombine" else item
                 for item in raw["workflow"]["phases"]
             ]
+            prompts = {}
+            scripted = FullResearchPathRunner()
+
+            def capture(**kwargs):
+                prompts[kwargs["workspace"].name] = kwargs["prompt"]
+                return scripted(**kwargs)
+
             engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
@@ -452,11 +460,17 @@ class ResearchHarnessTests(unittest.TestCase):
                 editable=("solver.py",),
                 config=load_config(raw),
                 run_dir=root / "run",
-                worker_adapter=RunnerAdapter(FullResearchPathRunner()),
+                worker_adapter=RunnerAdapter(capture),
                 evaluator_factory=research_evaluator_factory,
             )
 
             result = engine.run()
+            for line in (root / "run/events.jsonl").read_text().splitlines():
+                event = json.loads(line)
+                if event["kind"] == "role_agent_started":
+                    prompt = prompts[event["scope"]["job_id"]]
+                    self.assertEqual(event["data"]["prompt_hash"],
+                                     hashlib.sha256(prompt.encode()).hexdigest())
 
             transfer = json.loads(
                 (root / "run" / "research" / "strategy_transfer.json").read_text()
@@ -480,6 +494,9 @@ class ResearchHarnessTests(unittest.TestCase):
                 prompt_text = "\n".join(path.read_text() for path in trace.rglob("*.txt"))
                 self.assertIn("Performance:", prompt_text)
                 self.assertIn("Semantic integrity:", prompt_text)
+                self.assertNotIn("render_pdf", prompt_text)
+                self.assertNotIn("artifact_index.json", prompt_text)
+                self.assertNotIn("returned by the enabled public checks", prompt_text)
                 winner_solver = Path(item["winner_solver"])
                 self.assertTrue((winner_solver / "solver.py").is_file())
                 explanation = root / "run" / "explanations" / (

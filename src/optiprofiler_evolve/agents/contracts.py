@@ -27,6 +27,7 @@ class WorkerRequest:
     prompt: str
     transcript: Path
     trace_dir: Path
+    evaluation_tools: tuple[str, ...] = ()
     trace_context: Mapping[str, object] = field(default_factory=dict)
     cancellation_event: Event | None = None
 

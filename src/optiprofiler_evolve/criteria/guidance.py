@@ -9,6 +9,7 @@ from optiprofiler_evolve.criteria.contracts import Criterion, GuidanceRequest
 
 def build_generation_guidance(
     config: AssessmentConfig, feedback_mode: str, criteria: Mapping[str, type[Criterion]],
+    *, evaluation_tools: tuple[str, ...] = (),
 ) -> str:
     sections = []
     profiles = {name: config.resolve(name) for name in ("smoke", "public", "validation")}
@@ -32,6 +33,9 @@ def build_generation_guidance(
                 profiles=tuple(names),
                 options=spec.options,
                 weight=spec.weight, mode=spec.mode, feedback_mode=feedback_mode,
+                evaluation_tools=tuple(tool for tool, profile in
+                                       (("smoke_test", "smoke"), ("evaluate", "public"))
+                                       if tool in evaluation_tools and profile in names),
             )
             text = criterion.generation_guidance(request)
             sections.append(

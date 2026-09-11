@@ -90,7 +90,9 @@ The supported extension slots are `Phase`, `AttemptStep`,
   Pure evaluation phases do not invoke a model.
 - Solver proposal/edit tasks use `SolverJob`. The LLM entrypoint combines their
   task with criterion-owned generation guidance, using controller-bound public
-  rule fields only. Review jobs never inherit those instructions. Each
+  rule fields and the invocation's available evaluation tools only. Tool
+  instructions must match those capabilities and the feedback format.
+  Review jobs never inherit those instructions. Each
   `Criterion` owns both its assessment and its generation guidance; stages must
   not hard-code standard-specific instructions or append special-case notes.
 - Trusted phases receive one frozen `ControllerServices` value capped at five

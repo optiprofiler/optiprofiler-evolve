@@ -234,6 +234,7 @@ class EvolutionRun:
             generation_guidance=lambda: build_generation_guidance(
                 self.config.assessment, self.config.execution.feedback_mode,
                 self.criterion_factories,
+                evaluation_tools=request.evaluation_tools,
             ),
         )
 

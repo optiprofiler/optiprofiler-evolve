@@ -288,10 +288,14 @@ Seed, admitted candidate and research finalist records point to controller-built
 feedback bundles. Scout and analyst inputs consume these same projections as the
 worker broker; they never fall back to a private evaluation directory or an
 unmatched last broker call. Transfer jobs use `SolverJob` and receive the same
-criterion guidance as exploration jobs.
-With full-artifact feedback, the final public candidate evaluation retains
-configured benchmark artifacts, so the analyst receives evidence for the actual
-admitted tree without another benchmark call.
+criterion rules as exploration jobs, with tool instructions restricted to each
+invocation's controller-bound capabilities. The role-start event hashes the
+effective prompt after this guidance is appended, matching the adapter input.
+When strategy analysis and full-artifact feedback are configured, the final
+public candidate evaluation retains configured benchmark artifacts, so the
+analyst receives evidence for the actual admitted tree without another benchmark
+call. Other workflows keep score-only formal candidate evaluations; worker broker
+calls still honor the requested feedback format.
 Complexity analysis caches only source measurements. Each criterion invocation
 applies its profile policy once and persists `complexity/complexity.json` beside
 the assessment, so diagnostic and admission evidence describe the same rules.

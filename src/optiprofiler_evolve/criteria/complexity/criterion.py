@@ -94,12 +94,16 @@ class ComplexityCriterion(Criterion):
     @classmethod
     def generation_guidance(cls, request: GuidanceRequest) -> str:
         ratio = float(request.options.get("max_ratio", 1.2))
+        diagnostics = (
+            f"{'/'.join(request.evaluation_tools)} return diagnostics. "
+            if request.evaluation_tools else ""
+        )
         # Baseline worker-task wording. Absolute seed counts stay public-tool
         # evidence instead of a second analysis pass while building the prompt.
         return (
             f"Complexity budget ({request.mode}): branches and logical lines may each be at "
             f"most {ratio:g} times their initial values. All candidate Python files count. "
-            "smoke_test/evaluate return diagnostics. Simplify the algorithm rather than "
+            f"{diagnostics}Simplify the algorithm rather than "
             "compress formatting or remove documentation. In warn mode this is advice only, "
             "not grounds for semantic quarantine. In enforce mode an exceeded or unavailable "
             "analysis blocks evaluation and admission."
