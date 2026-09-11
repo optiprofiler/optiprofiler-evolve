@@ -55,9 +55,9 @@ class CandidateAssessor:
             if runtime != "python":
                 raise ValueError("Complexity assessment supports Python solvers only.")
             self.complexity = ComplexityChecker(
-                seed, next(config.complexity_config(profile)
+                seed, next(policy
                            for profile in ("public", "validation", "smoke", "hidden")
-                           if config.complexity_config(profile) is not None),
+                           if (policy := config.complexity_config(profile)) is not None),
                 config.sandbox, run_dir / "controller" / "complexity"
             )
 

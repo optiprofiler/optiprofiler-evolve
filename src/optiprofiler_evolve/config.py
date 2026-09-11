@@ -641,6 +641,8 @@ class AssessmentConfig:
             for name, override in overrides.items():
                 if name not in criteria:
                     raise ValueError(f"Assessment override references unknown criterion {name!r}.")
+                if "enabled" in override and not isinstance(override["enabled"], bool):
+                    raise ValueError("Criterion enabled must be boolean.")
                 unknown = set(override).difference({"enabled", "weight", "mode", "options"})
                 if unknown:
                     raise ValueError(f"Unknown criterion override fields: {sorted(unknown)!r}")
@@ -652,17 +654,26 @@ class AssessmentConfig:
         result = {}
         for name, spec in self.criteria.items():
             override = dict(self.profiles.get(profile, {}).get(name, {}))
-            enabled = override.pop("enabled", name != "integrity" or profile == "validation")
+            override.pop("enabled", None)
             options = {**spec.options, **override.pop("options", {})}
             result[name] = dataclasses.replace(
-                spec, enabled=spec.enabled and enabled, options=options, **override
+                spec, enabled=self.enabled(name, profile), options=options, **override
             )
         return freeze_value(result)
 
     def enabled(self, name: str, profile: str | None = None) -> bool:
+        if profile is not None and profile not in {"smoke", "public", "validation", "hidden"}:
+            raise ValueError(f"Unknown assessment profile: {profile!r}")
+        spec = self.criteria.get(name)
+        if spec is None or not spec.enabled:
+            return False
         profiles = (profile,) if profile else ("smoke", "public", "validation", "hidden")
-        return any(self.resolve(item).get(name, CriterionConfig(enabled=False)).enabled
-                   for item in profiles)
+        return any(
+            self.profiles.get(item, {}).get(name, {}).get(
+                "enabled", name != "integrity" or item == "validation",
+            )
+            for item in profiles
+        )
 
     def validate(self) -> None:
         formal = self.resolve("validation")
@@ -684,11 +695,12 @@ class EvolveConfig:
 
     def evaluation_config(self, profile: str = "validation") -> EvaluationConfig:
         spec = self.assessment.resolve(profile).get("performance", CriterionConfig(enabled=False))
-        raw = {**plain_data(self.execution), **spec.options}
-        forbidden = set(spec.options).intersection(plain_data(self.execution))
+        execution = plain_data(self.execution)
+        forbidden = set(spec.options).intersection(execution)
         if forbidden:
             raise ValueError(f"Performance options cannot override execution settings: {sorted(forbidden)}")
-        return _from_mapping(EvaluationConfig, raw, "assessment.criteria.performance.options")
+        return _from_mapping(EvaluationConfig, {**execution, **spec.options},
+                             "assessment.criteria.performance.options")
 
     def reviewer_config(self, profile: str = "validation") -> IntegrityReviewConfig:
         spec = self.assessment.resolve(profile).get("integrity", CriterionConfig(enabled=False))
@@ -723,14 +735,21 @@ class EvolveConfig:
     def validate(self) -> None:
         self.assessment.validate()
         self.workers.validate()
+        if self.assessment.enabled("performance"):
+            self.data.validate()
+        workers = list(self.workers.pool)
         references = set()
         for profile in ("smoke", "public", "validation", "hidden"):
             if self.assessment.enabled("performance", profile):
-                self.data.validate()
-                self.evaluation_config(profile).validate()
-                references.add(self.evaluation_config(profile).reference)
+                evaluation = self.evaluation_config(profile)
+                evaluation.validate()
+                references.add(evaluation.reference)
             if self.assessment.enabled("integrity", profile):
-                self.reviewer_config(profile).validate(self.workers)
+                review = self.reviewer_config(profile)
+                review.validate(self.workers)
+                reviewer = review.resolved_worker(self.workers)
+                if reviewer is not None:
+                    workers.append(reviewer)
             complexity = self.complexity_config(profile)
             if complexity is not None:
                 complexity.validate()
@@ -742,12 +761,6 @@ class EvolveConfig:
             raise ValueError("metric_pareto requires formal performance metric bundles.")
         self.sandbox.validate()
         self.workflow.validate()
-        workers = list(self.workers.pool)
-        for profile in ("smoke", "public", "validation", "hidden"):
-            if self.assessment.enabled("integrity", profile):
-                reviewer = self.reviewer_config(profile).resolved_worker(self.workers)
-                if reviewer is not None:
-                    workers.append(reviewer)
         gateway_workers = [worker for worker in workers if worker.provider_gateway is not None]
         if gateway_workers and self.workers.adapter != "cli":
             raise ValueError(

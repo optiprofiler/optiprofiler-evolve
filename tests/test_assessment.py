@@ -32,6 +32,30 @@ class ConstantCriterion(Criterion):
 
 
 class AssessmentTests(unittest.TestCase):
+    def test_enabled_queries_preserve_master_switch_and_profile_defaults(self):
+        config = AssessmentConfig(criteria={
+            "performance": CriterionConfig(),
+            "integrity": CriterionConfig(),
+            "complexity": CriterionConfig(enabled=False),
+        }, profiles={
+            "public": {"integrity": {"enabled": True}, "complexity": {"enabled": True}},
+            "validation": {"integrity": {"enabled": False}},
+        })
+        for profile, integrity in (("smoke", False), ("public", True),
+                                   ("validation", False), ("hidden", False)):
+            with self.subTest(profile=profile):
+                self.assertTrue(config.enabled("performance", profile))
+                self.assertEqual(config.enabled("integrity", profile), integrity)
+                self.assertFalse(config.enabled("complexity", profile))
+                self.assertFalse(config.enabled("absent", profile))
+        self.assertTrue(config.enabled("integrity"))
+        self.assertFalse(config.enabled("complexity"))
+        with self.assertRaisesRegex(ValueError, "Unknown assessment profile"):
+            config.enabled("absent", "typo")
+        for value in ("false", 0, None):
+            with self.subTest(enabled=value), self.assertRaisesRegex(ValueError, "boolean"):
+                AssessmentConfig(profiles={"public": {"performance": {"enabled": value}}})
+
     def test_source_mutation_is_rejected_even_for_zero_weight_advice(self):
         class MutatingCriterion(ConstantCriterion):
             def assess(self, request):
