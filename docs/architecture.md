@@ -214,6 +214,10 @@ Docker, LLM clients, brokers, analyzers, reviewers or HTML implementations.
 Criteria receive resolved guidance classes and reviewer factories instead of
 looking them up in controller registries. Application supplies component
 identities and prompt versions to provenance; observability only captures them.
+Enabled criterion factories are resolved once before startup and shared by
+assessment, generation guidance and provenance. The controller binds the assessor
+factory for Prepare; the phase supplies only its newly prepared seed, reference
+and data, without constructing controller implementations.
 See the [dependency rules](architecture-constitution.md#10-dependency-direction).
 
 `RunState` owns the run's registries and committed phase results. Core result

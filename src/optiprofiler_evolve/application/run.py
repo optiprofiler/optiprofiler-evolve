@@ -100,9 +100,10 @@ class EvolutionRun:
             champion=any(isinstance(phase, ValidatePhase) for phase in self.phases),
             hidden=any(isinstance(phase, HiddenPhase) for phase in self.phases),
         )
-        for name in config.assessment.criteria:
-            if config.assessment.enabled(name):
-                resolve("criterion", name)
+        self.criterion_factories = {
+            name: resolve("criterion", name)
+            for name in config.assessment.criteria if config.assessment.enabled(name)
+        }
         self.worker_adapter = (
             worker_adapter
             if worker_adapter is not None
@@ -146,6 +147,7 @@ class EvolutionRun:
             commits=self.commits,
             attempt_steps=self.attempt_steps,
             evaluator_factory=self.evaluator_factory,
+            criterion_factories=self.criterion_factories,
             emit=self._emit,
             scoped_emitter=self._scoped_emitter,
             validate_candidate=self._validate_candidate,
@@ -227,9 +229,7 @@ class EvolutionRun:
             record_usage=self._record_worker_usage,
             generation_guidance=lambda: build_generation_guidance(
                 self.config.assessment, self.config.execution.feedback_mode,
-                {name: resolve("criterion", name) for name in self.config.assessment.criteria
-                 if any(self.config.assessment.enabled(name, profile)
-                        for profile in ("smoke", "public", "validation"))},
+                self.criterion_factories,
             ),
         )
 
@@ -280,6 +280,7 @@ class EvolutionRun:
                         worker_adapter=self.worker_adapter,
                         worker_provenance=self.worker_adapter.provenance(provenance_workers),
                         evaluator_factory=self.evaluator_factory,
+                        criterion_factories=self.criterion_factories,
                         step_specs=self.step_specs,
                     ),
                     prompt_templates={

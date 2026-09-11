@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from optiprofiler_evolve.config import EvolveConfig
-from optiprofiler_evolve.controller.assessment import CandidateAssessor
 from optiprofiler_evolve.criteria.performance.contracts import Evaluator
 from optiprofiler_evolve.criteria.performance.references import materialize_reference
 from optiprofiler_evolve.data import DataPlan, resolve_data_plan, write_data_manifests
@@ -96,9 +95,8 @@ class PrepareContext(PhaseContext):
     runtime: str
     editable: tuple[str, ...]
     config: EvolveConfig
-    evaluator_factory: Callable[..., Evaluator]
+    create_assessor: Callable[..., Evaluator]
     validate_candidate: Callable[[Path], None]
-    review_candidate: Callable
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -169,11 +167,7 @@ class PreparePhase:
                 ),
             },
         )
-        evaluator = CandidateAssessor(
-            config=context.config, seed=seed_path, reference=reference, data=data,
-            runtime=context.runtime, interface=context.interface, run_dir=context.run_dir,
-            evaluator_factory=context.evaluator_factory, review=context.review_candidate,
-        )
+        evaluator = context.create_assessor(seed=seed_path, reference=reference, data=data)
         seed_public_mode = (
             "public" if context.config.execution.feedback_mode != "score_only" else "public_score"
         )

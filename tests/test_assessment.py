@@ -288,6 +288,10 @@ class AssessmentTests(unittest.TestCase):
                     run_dir=root / "run", worker_adapter=RunnerAdapter(fake_agent_runner),
                     evaluator_factory=backend,
                 )
+                if name == "constant_test":
+                    replacement = Mock(side_effect=AssertionError("run rebound its criterion"))
+                    register("criterion", name, replacement, replace=True)
+                    self.addCleanup(register, "criterion", name, ConstantCriterion, replace=True)
                 result = engine.run()
                 self.assertIsNotNone(result.assessment_score)
                 if name != "performance":
@@ -297,6 +301,7 @@ class AssessmentTests(unittest.TestCase):
                     self.assertIsNone(result.final_score)
                 if name == "constant_test":
                     self.assertEqual(result.assessment_score, 3)
+                    replacement.assert_not_called()
 
 
 if __name__ == "__main__":

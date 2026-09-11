@@ -16,6 +16,7 @@ def component_provenance(
     worker_adapter: object,
     worker_provenance: Mapping[str, object],
     evaluator_factory: object,
+    criterion_factories: Mapping[str, object],
     step_specs: Sequence[ComponentConfig],
 ) -> dict[str, Any]:
     # Config/hash preserve the declared experiment; components list constructed instances.
@@ -32,8 +33,8 @@ def component_provenance(
             "reviewer", (config.reviewer_config().component,)
         )[0] if config.assessment.enabled("integrity") else None,
         "criteria": [
-            {"name": name, **callable_identity(resolve("criterion", name))}
-            for name in config.assessment.criteria if config.assessment.enabled(name)
+            {"name": name, **callable_identity(factory)}
+            for name, factory in criterion_factories.items()
         ],
         "worker": {
             **callable_identity(worker_adapter),

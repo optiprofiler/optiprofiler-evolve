@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, fields
 from functools import partial
 
+from optiprofiler_evolve.controller.assessment import CandidateAssessor
 from optiprofiler_evolve.controller.runtime import RunEnvironment
 from optiprofiler_evolve.phases.contracts import PhaseContext
 from optiprofiler_evolve.phases.explore import ExploreContext, ExplorePhase
@@ -25,9 +26,15 @@ def prepare_context(bindings, base: PhaseContext) -> PhaseContext:
         runtime=environment.runtime,
         editable=environment.editable,
         config=environment.config,
-        evaluator_factory=environment.evaluator_factory,
+        create_assessor=partial(
+            CandidateAssessor,
+            config=environment.config, runtime=environment.runtime,
+            interface=environment.interface, run_dir=environment.run_dir,
+            evaluator_factory=environment.evaluator_factory,
+            criterion_factories=environment.criterion_factories,
+            review=bindings.review_candidate,
+        ),
         validate_candidate=environment.validate_candidate,
-        review_candidate=bindings.review_candidate,
     )
 
 

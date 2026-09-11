@@ -1,6 +1,6 @@
 """Controller-side inputs and execution ports, independent of the application."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
@@ -8,6 +8,7 @@ from threading import Event
 from optiprofiler_evolve.config import EvolveConfig
 from optiprofiler_evolve.controller.commits import RunCommits
 from optiprofiler_evolve.controller.state import RunState
+from optiprofiler_evolve.criteria.contracts import Criterion
 from optiprofiler_evolve.solver import InterfaceSpec
 
 
@@ -23,6 +24,7 @@ class RunEnvironment:
     commits: RunCommits
     attempt_steps: tuple
     evaluator_factory: Callable | None
+    criterion_factories: Mapping[str, type[Criterion]]
     emit: Callable
     scoped_emitter: Callable
     validate_candidate: Callable[[Path], None]

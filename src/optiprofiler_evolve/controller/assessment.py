@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING
 
 from optiprofiler_evolve.config import EvolveConfig, WorkerConfig
-from optiprofiler_evolve.controller.registry import resolve
 from optiprofiler_evolve.criteria.complexity.analyzer import ComplexityChecker
-from optiprofiler_evolve.criteria.contracts import AssessmentRequest
+from optiprofiler_evolve.criteria.contracts import AssessmentRequest, Criterion
 from optiprofiler_evolve.criteria.performance.contracts import Evaluator
 from optiprofiler_evolve.criteria.runner import AssessmentRunner
 from optiprofiler_evolve.data import DataPlan
@@ -33,6 +32,7 @@ class CandidateAssessor:
         self, *, config: EvolveConfig, seed: Path, reference: Path | None,
         data: DataPlan, runtime: str, interface: InterfaceSpec, run_dir: Path,
         evaluator_factory: Callable[..., Evaluator],
+        criterion_factories: Mapping[str, type[Criterion]],
         review: Callable[..., tuple[IntegrityReviewDecision, Path]],
     ) -> None:
         self.config = config
@@ -43,6 +43,7 @@ class CandidateAssessor:
         self.interface = interface
         self.run_dir = run_dir
         self.evaluator_factory = evaluator_factory
+        self.criterion_factories = dict(criterion_factories)
         self.review = review
         self._evaluators: dict[tuple[str, Path | None], Evaluator] = {}
         self._evaluator_lock = Lock()
@@ -93,23 +94,26 @@ class CandidateAssessor:
                 profile=profile,
             )
 
-        performance = (resolve("criterion", "performance")(benchmark)
-                       if self.config.assessment.enabled("performance", profile) else None)
-        factories = {
-            "complexity": lambda: resolve("criterion", "complexity")(
-                self.complexity, mode=specs["complexity"].mode,
-            ),
-            "integrity": lambda: resolve("criterion", "integrity")(review),
-            "performance": lambda: performance,
-        }
+        # Bind inexpensive/source constraints before benchmark execution.
         criteria = {}
-        for name in dict.fromkeys((*factories, *specs)):
-            if name in specs and specs[name].enabled:
-                criteria[name] = factories[name]() if name in factories else resolve("criterion", name)()
+        for name in dict.fromkeys(("complexity", "integrity", "performance", *specs)):
+            if name not in specs or not specs[name].enabled:
+                continue
+            factory = self.criterion_factories[name]
+            if name == "complexity":
+                criterion = factory(self.complexity, mode=specs[name].mode)
+            elif name == "integrity":
+                criterion = factory(review)
+            elif name == "performance":
+                criterion = factory(benchmark)
+            else:
+                criterion = factory()
+            criteria[name] = criterion
         report = AssessmentRunner(criteria).run(
             AssessmentRequest(candidate, tree_hash(candidate), profile, output_dir,
                               input_fingerprint=self.input_fingerprint), specs
         )
+        performance = criteria.get("performance")
         raw = performance.result if performance is not None else None
         if raw is None:
             raw = EvaluationResult(mode, None, None, None, 0, output_dir)
