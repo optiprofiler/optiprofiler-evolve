@@ -129,13 +129,14 @@ def _attempt_rows(run_dir: Path, *, terminal: bool = True, accepted: bool = True
             _ts(3, 2),
             "integrity_review_attempt_finished",
             "succeeded",
-            review_scope,
+            {**review_scope, "job_id": REVIEW_JOB},
             {
                 "review_attempt": 1,
                 "verdict": "approve",
                 "finding_count": 1,
                 "report": str(
-                    run_dir / "controller" / "integrity_reviews" / ATTEMPT / "attempt_01.json"
+                    run_dir / "controller" / "integrity_reviews" /
+                    f"{ATTEMPT}-validation-fingerprint" / "attempt_01.json"
                 ),
             },
         ),
@@ -144,7 +145,9 @@ def _attempt_rows(run_dir: Path, *, terminal: bool = True, accepted: bool = True
             "integrity_review_finished",
             "succeeded",
             review_scope,
-            {"gate": "approved" if accepted else "quarantined"},
+            {"gate": "approved" if accepted else "quarantined", "profile": "validation",
+             "report": str(run_dir / "controller/integrity_reviews" /
+                           f"{ATTEMPT}-validation-fingerprint" / "decision.json")},
         ),
     ]
     if terminal:
@@ -239,7 +242,7 @@ def _build_run_dir(root: Path, *, terminal: bool = True, accepted: bool = True) 
         "def solver(fun, x0):\n    return improved(x0)\n", encoding="utf-8"
     )
 
-    reviews = run_dir / "controller" / "integrity_reviews" / ATTEMPT
+    reviews = run_dir / "controller" / "integrity_reviews" / f"{ATTEMPT}-validation-fingerprint"
     reviews.mkdir(parents=True)
     decision = {
         "verdict": "approve",
@@ -1221,7 +1224,9 @@ class OwnerViewTests(unittest.TestCase):
             self.assertIn(ATTEMPT, attempt_entries)
             evidence = attempt_entries[ATTEMPT]["evidence"]
             self.assertIn("transcript", evidence)
-            self.assertIn("integrity_reviews", evidence)
+            self.assertIn("integrity_review_validation", evidence)
+            self.assertEqual(evidence["integrity_review_validation"]["path"],
+                             f"controller/integrity_reviews/{ATTEMPT}-validation-fingerprint")
             text = json.dumps(manifest)
             for item in re.findall(r'"path": "([^"]+)"', text):
                 self.assertFalse(Path(item).is_absolute(), item)

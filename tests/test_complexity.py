@@ -8,7 +8,7 @@ import threading
 import unittest
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,15 +20,15 @@ from optiprofiler_evolve.agents.broker import EvaluationBroker
 from optiprofiler_evolve.agents.contracts import AgentJob, WorkerOutcome
 from optiprofiler_evolve.agents.feedback import project_feedback
 from optiprofiler_evolve.application.run import EvolutionRun
-from optiprofiler_evolve.config import SandboxConfig, load_config
+from optiprofiler_evolve.config import ComplexityConfig, SandboxConfig, load_config
 from optiprofiler_evolve.controller.assessment import PublicAssessment
 from optiprofiler_evolve.controller.contracts import VariantRequest
 from optiprofiler_evolve.criteria.complexity.analyzer import (
     ComplexityChecker,
-    ComplexityConfig,
+    ComplexityMetrics,
     analyze_source,
 )
-from optiprofiler_evolve.criteria.complexity.criterion import ComplexityCriterion
+from optiprofiler_evolve.criteria.complexity.criterion import ComplexityCriterion, ComplexityReport
 from optiprofiler_evolve.criteria.contracts import AssessmentRequest
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.observability.events import EventWriter, rebuild_run_state
@@ -37,7 +37,7 @@ from optiprofiler_evolve.observability.trace_ledger import TraceLedger
 from optiprofiler_evolve.observability.views.public import render_public_report, render_status
 from optiprofiler_evolve.phases.attempts.contracts import StepResult
 from optiprofiler_evolve.phases.prepare import PreparePhase
-from optiprofiler_evolve.solver import InterfaceSpec
+from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
 
 SEED = "def solver(fun, x0):\n    return x0\n"
 LARGE = "def solver(fun, x0):\n    if len(x0):\n        x0 = x0.copy()\n    return x0\n"
@@ -54,8 +54,8 @@ class RecordingEvaluator:
 
 
 class ComplexityTests(unittest.TestCase):
-    def test_profile_policy_overrides_cached_analyzer_policy(self):
-        checker = self.checker("warn")
+    def test_each_profile_persists_its_own_policy_and_consistent_evidence(self):
+        checker = self.checker()
         criterion = ComplexityCriterion(checker, mode="enforce")
         result = criterion.assess(AssessmentRequest(
             self.candidate, "unused", "validation", self.root / "validation",
@@ -65,6 +65,15 @@ class ComplexityTests(unittest.TestCase):
         self.assertEqual(result.metrics["mode"], "enforce")
         self.assertEqual(result.metrics["max_ratio"], 1.1)
         self.assertTrue(result.metrics["blocked"])
+        public = ComplexityCriterion(checker, mode="warn").assess(AssessmentRequest(
+            self.candidate, tree_hash(self.candidate), "public", self.root / "public",
+            options={"max_ratio": 3.0},
+        ))
+        self.assertTrue(public.satisfied)
+        for profile, expected in (("public", public), ("validation", result)):
+            saved = json.loads((self.root / profile / expected.evidence[0]).read_text())
+            for key in ("mode", "max_ratio", "status", "blocked", "score"):
+                self.assertEqual(saved[key], expected.metrics[key])
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -79,10 +88,21 @@ class ComplexityTests(unittest.TestCase):
         (root / "solver.py").write_text(code)
         return root
 
-    def checker(self, mode="warn", ratio=1.2):
+    def checker(self):
         return ComplexityChecker(
-            self.seed, ComplexityConfig(mode, ratio), SandboxConfig(), self.root / "analysis"
+            self.seed, SandboxConfig(), self.root / "analysis"
         )
+
+    def report(self, checker, root, mode="warn", ratio=1.2):
+        output = self.root / "reports" / uuid.uuid4().hex
+        result = ComplexityCriterion(checker, mode=mode).assess(AssessmentRequest(
+            root, tree_hash(root), "public", output, options={"max_ratio": ratio},
+        ))
+        saved = json.loads((output / result.evidence[0]).read_text())
+        saved["baseline"] = ComplexityMetrics(**saved["baseline"])
+        if saved["candidate"] is not None:
+            saved["candidate"] = ComplexityMetrics(**saved["candidate"])
+        return ComplexityReport(**{f.name: saved[f.name] for f in fields(ComplexityReport)})
 
     def test_config_defaults_and_invalid_values(self):
         self.assertIsNone(load_config(minimal_config()).complexity_config())
@@ -136,22 +156,22 @@ class ComplexityTests(unittest.TestCase):
         )
 
     def test_boundaries_fixed_baseline_cache_and_source_invalidation(self):
-        checker = self.checker("enforce", 2)
-        self.assertEqual(checker.assess(self.seed).summary()["score"], 0.5)
-        self.assertEqual(checker.assess(self.seed).summary()["complexity_percent"], 100)
-        self.assertEqual(checker.assess(self.candidate).status, "within_limit")
+        checker = self.checker()
+        self.assertEqual(self.report(checker, self.seed).summary()["score"], 0.5)
+        self.assertEqual(self.report(checker, self.seed).summary()["complexity_percent"], 100)
+        self.assertEqual(self.report(checker, self.candidate, "enforce", 2).status, "within_limit")
         with patch.object(checker, "_analyze", wraps=checker._analyze) as analyzer:
-            checker.assess(self.candidate)
+            self.report(checker, self.candidate)
             analyzer.assert_not_called()
             (self.candidate / "solver.py").write_text(LARGE + "if True:\n    pass\n")
-            report = checker.assess(self.candidate)
+            report = self.report(checker, self.candidate, "enforce", 2)
             self.assertTrue(report.blocked)
             self.assertEqual(report.baseline_hash, checker.baseline_hash)
             self.assertEqual(analyzer.call_count, 1)
 
     def test_empty_size_baseline_has_finite_ratio(self):
         (self.seed / "solver.py").write_text("")
-        report = self.checker().assess(self.candidate)
+        report = self.report(self.checker(), self.candidate)
         self.assertTrue(math.isfinite(report.summary()["complexity_ratio"]))
 
     def test_analysis_of_distinct_candidates_runs_concurrently(self):
@@ -165,8 +185,8 @@ class ComplexityTests(unittest.TestCase):
 
         with patch.object(checker, "_analyze", side_effect=analyze):
             with ThreadPoolExecutor(max_workers=2) as pool:
-                reports = list(pool.map(checker.assess, (self.candidate, other)))
-        self.assertTrue(all(report.error is None for report in reports))
+                reports = list(pool.map(checker.measure, (self.candidate, other)))
+        self.assertEqual(reports, [analyze_source(self.candidate), analyze_source(other)])
 
     def test_concurrent_identical_sources_publish_a_valid_cached_report(self):
         checker = self.checker()
@@ -179,10 +199,10 @@ class ComplexityTests(unittest.TestCase):
 
         with patch.object(checker, "_analyze", side_effect=analyze):
             with ThreadPoolExecutor(max_workers=2) as pool:
-                reports = list(pool.map(checker.assess, (self.candidate, other)))
-        self.assertEqual(reports[0].as_dict(), reports[1].as_dict())
+                reports = list(pool.map(checker.measure, (self.candidate, other)))
+        self.assertEqual(reports[0], reports[1])
         with patch.object(checker, "_analyze") as analyzer:
-            self.assertEqual(checker.assess(other).as_dict(), reports[0].as_dict())
+            self.assertEqual(checker.measure(other), reports[0])
             analyzer.assert_not_called()
         for path in (self.root / "analysis").glob("*.json"):
             json.loads(path.read_text())
@@ -196,10 +216,10 @@ class ComplexityTests(unittest.TestCase):
             return metrics
 
         with patch.object(checker, "_analyze", side_effect=analyze):
-            self.assertEqual(checker.assess(self.candidate).status, "unavailable")
+            self.assertEqual(self.report(checker, self.candidate).status, "unavailable")
         (self.candidate / "solver.py").write_text(LARGE)
         with patch.object(checker, "_analyze", wraps=checker._analyze) as analyzer:
-            report = checker.assess(self.candidate)
+            report = self.report(checker, self.candidate)
             analyzer.assert_called_once()
         self.assertEqual(report.score, 1 / (1 + max(report.ratios)))
         self.assertEqual(report.summary()["complexity_percent"], 100 * max(report.ratios))
@@ -208,25 +228,25 @@ class ComplexityTests(unittest.TestCase):
         checker = self.checker()
         with patch.object(checker, "_analyze", side_effect=AttributeError("bug")):
             with self.assertRaisesRegex(AttributeError, "bug"):
-                checker.assess(self.candidate)
+                self.report(checker, self.candidate)
 
     def test_each_metric_can_independently_exceed_the_limit(self):
-        checker = self.checker("enforce")
+        checker = self.checker()
         (self.candidate / "solver.py").write_text(SEED + "extra = 1\n")
-        size = checker.assess(self.candidate)
+        size = self.report(checker, self.candidate, "enforce")
         self.assertEqual(size.ratios, (1, 1.5))
         self.assertTrue(size.blocked)
         (self.candidate / "solver.py").write_text(
             "def solver(fun, x0):\n    return x0 if x0 else None\n"
         )
-        branches = checker.assess(self.candidate)
+        branches = self.report(checker, self.candidate, "enforce")
         self.assertEqual(branches.ratios, (2, 1))
         self.assertTrue(branches.blocked)
 
     def test_invalid_source_has_no_numeric_score_and_baseline_failure_aborts(self):
         checker = self.checker()
         (self.candidate / "helper.py").write_text("def invalid(")
-        report = checker.assess(self.candidate)
+        report = self.report(checker, self.candidate)
         self.assertEqual(report.status, "unavailable")
         self.assertIsNone(report.summary()["score"])
         (self.seed / "solver.py").write_text("def invalid(")
@@ -234,7 +254,7 @@ class ComplexityTests(unittest.TestCase):
             self.checker()
 
     def test_unwired_complexity_event_never_enters_public_projection(self):
-        report = self.checker().assess(self.candidate)
+        report = self.report(self.checker(), self.candidate)
         private = self.root / "events.jsonl"
         writer = EventWriter(private)
         writer.emit(
@@ -266,9 +286,9 @@ class ComplexityTests(unittest.TestCase):
 
     def test_analysis_failures_and_timeouts_follow_mode(self):
         for mode in ("warn", "enforce"):
-            checker = self.checker(mode)
+            checker = self.checker()
             with patch.object(checker, "_analyze", side_effect=ValueError("unavailable")):
-                report = checker.assess(self.candidate)
+                report = self.report(checker, self.candidate, mode)
             self.assertEqual(report.status, "unavailable")
             self.assertEqual(report.blocked, mode == "enforce")
             self.assertIsNone(report.summary()["score"])
@@ -283,11 +303,11 @@ class ComplexityTests(unittest.TestCase):
         (self.candidate / "solver.py").write_text(
             f"open({str(marker)!r}, 'w').write('bad')\n" + LARGE
         )
-        self.checker().assess(self.candidate)
+        self.report(self.checker(), self.candidate)
         self.assertFalse(marker.exists())
 
     def test_all_feedback_modes_include_safe_complexity_details(self):
-        report = self.checker().assess(self.candidate)
+        report = self.report(self.checker(), self.candidate)
         source = self.root / "evidence"
         source.mkdir()
         result = EvaluationResult("public", 0.5, 0.5, 0.5, 1, source, assessment={
@@ -316,7 +336,7 @@ class ComplexityTests(unittest.TestCase):
             self.assertEqual(feedback.count("Relative complexity:"), 1)
 
     def test_unavailable_complexity_withholds_private_error(self):
-        report = replace(self.checker().assess(self.candidate), candidate=None,
+        report = replace(self.report(self.checker(), self.candidate), candidate=None,
                          error="private backend path and credentials")
         source = self.root / "evidence"
         source.mkdir()
@@ -338,14 +358,14 @@ class ComplexityTests(unittest.TestCase):
             engine._initialize_run_directory()
             engine.coordinator.run_phase(PreparePhase(), {})
             evaluator.calls.clear()
-            original_assess = engine.state.evaluator.complexity.assess
+            original_assess = engine.state.evaluator.complexity.measure
 
             def assess(snapshot):
                 report = original_assess(snapshot)
                 (self.candidate / "solver.py").write_text(SEED)
                 return report
 
-            engine.state.evaluator.complexity.assess = assess
+            engine.state.evaluator.complexity.measure = assess
 
             (self.candidate / "solver.py").write_text(LARGE)
             broker = EvaluationBroker(
@@ -467,10 +487,10 @@ class ComplexityTests(unittest.TestCase):
                 )
                 engine.coordinator.run_phase(PreparePhase(), {})
                 job = AgentJob(
-                    role="strategy-integrator", job_id="prompt-test", prompt="Integrate strategies."
+                    role="strategy-analyst", job_id="prompt-test", prompt="Analyze strategies."
                 )
                 engine.controller_services.run_trusted_agent(job)
-                self.assertEqual(job.prompt, "Integrate strategies.")
+                self.assertEqual(job.prompt, "Analyze strategies.")
                 self.assertEqual(len(prompts), 1)
                 # Research roles are not solver proposal/edit jobs, so the worker
                 # task card and the role prompt stay exactly as authored.

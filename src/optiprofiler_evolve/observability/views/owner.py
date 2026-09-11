@@ -29,6 +29,7 @@ from optiprofiler_evolve.observability.views._evidence import (
     read_json,
     resolve_recorded_path,
     resolve_role_output,
+    review_reports,
     safe_page_name,
     unified_diff,
     write_owner_manifest,
@@ -137,7 +138,7 @@ def render_owner_views(events_path: Path, run_dir: Path, *, final: bool = False)
         _render_owner_index(state, details, run_dir, now),
     )
     if final:
-        write_owner_manifest(state, run_dir)
+        write_owner_manifest(state, details, run_dir)
 
 
 def _collect_private_details(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -190,11 +191,14 @@ def _collect_private_details(events: list[dict[str, Any]]) -> dict[str, Any]:
                         "verdict": data.get("verdict"),
                         "finding_count": data.get("finding_count"),
                         "report": data.get("report"),
+                        "job_id": scope.get("job_id"),
                         "error": data.get("error"),
                     }
                 )
             elif kind == "integrity_review_finished":
                 record["gate"] = data.get("gate")
+                if data.get("report"):
+                    record.setdefault("review_reports", {})[data["profile"]] = data["report"]
         job_id = scope.get("job_id")
         if job_id is not None and kind in {"role_agent_started", "role_agent_finished"}:
             role = roles.setdefault(str(job_id), {})
@@ -1901,10 +1905,10 @@ def _attempt_review_section(
     private: Mapping[str, Any], run_dir: Path, page_dir: Path, attempt_id: str
 ) -> str:
     gate = private.get("gate") or "pending"
-    review_root = run_dir / "controller" / "integrity_reviews" / attempt_id
-    decision_path = review_root / "decision.json"
+    reports = review_reports(private, run_dir)
+    decision_path = reports.get("validation") or next(reversed(reports.values()), None)
     decision_html = '<p class="missing">Decision file unavailable.</p>'
-    if decision_path.is_file():
+    if decision_path is not None and decision_path.is_file():
         decision = read_json(decision_path)
         findings = _sequence(_mapping(decision).get("findings"))
         finding_items = []
@@ -1938,7 +1942,7 @@ def _attempt_review_section(
     for value in invocations:
         invocation = _mapping(value)
         number = invocation.get("review_attempt")
-        job_id = f"{attempt_id}-r{int(number):02d}" if isinstance(number, int) else None
+        job_id = invocation.get("job_id")
         job_link = (
             f'<a href="{_href("../roles", job_id)}"><code>{_h(job_id)}</code></a>'
             if job_id is not None

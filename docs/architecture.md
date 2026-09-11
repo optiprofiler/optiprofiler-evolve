@@ -289,6 +289,12 @@ feedback bundles. Scout and analyst inputs consume these same projections as the
 worker broker; they never fall back to a private evaluation directory or an
 unmatched last broker call. Transfer jobs use `SolverJob` and receive the same
 criterion guidance as exploration jobs.
+Complexity analysis caches only source measurements. Each criterion invocation
+applies its profile policy once and persists `complexity/complexity.json` beside
+the assessment, so diagnostic and admission evidence describe the same rules.
+Integrity completion events record profile-specific decision paths. Owner pages
+and evidence archives consume those paths, including fingerprinted review runs,
+rather than reconstructing directories from attempt IDs.
 
 ### EvalReport evidence
 

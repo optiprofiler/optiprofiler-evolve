@@ -24,8 +24,6 @@ def attempt_summary(attempt: Attempt, record: CandidateRecord) -> dict[str, obje
         "validation_score": record.validation_score,
         "assessment_score": record.assessment_score,
         "assessment": record.assessment,
-        "review_verdict": record.review_verdict,
-        "review_report": record.review_report,
         "valid": record.valid,
         "error": record.error,
         "changed_files": list(attempt.changed),

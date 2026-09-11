@@ -207,7 +207,18 @@ def resolve_role_output(workspace: Path, name: str) -> Path | None:
     return target
 
 
-def write_owner_manifest(state: Mapping[str, Any], run_dir: Path) -> None:
+def review_reports(private: Mapping[str, Any], run_dir: Path) -> dict[str, Path]:
+    """Resolve controller-recorded decisions without guessing the producer's layout."""
+    return {
+        profile: path
+        for profile, value in _mapping(private.get("review_reports")).items()
+        if (path := resolve_recorded_path(str(value), run_dir)) is not None
+    }
+
+
+def write_owner_manifest(
+    state: Mapping[str, Any], details: Mapping[str, Any], run_dir: Path,
+) -> None:
     """Write the derived evidence index. It never holds content or secrets."""
 
     attempts = []
@@ -222,12 +233,17 @@ def write_owner_manifest(state: Mapping[str, Any], run_dir: Path) -> None:
             ("traces", f"traces/{attempt_id}"),
             ("evaluations", f"controller/evaluations/{attempt_id}"),
             ("final_evaluation", f"controller/final_evaluations/{attempt_id}"),
-            ("integrity_reviews", f"controller/integrity_reviews/{attempt_id}"),
             ("broker", f"controller/brokers/{attempt_id}"),
         ):
             target = run_dir / relative
             if target.exists() and not target.is_symlink():
                 evidence[name] = {"path": relative, "bytes": tree_bytes(target)}
+        private = _mapping(_mapping(details.get("attempts")).get(attempt_id))
+        for profile, report in review_reports(private, run_dir).items():
+            evidence[f"integrity_review_{profile}"] = {
+                "path": report.parent.relative_to(run_dir).as_posix(),
+                "bytes": tree_bytes(report.parent),
+            }
         attempts.append({"attempt_id": attempt_id, "evidence": evidence})
     roles = []
     for value in _sequence(state.get("roles")):

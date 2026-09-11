@@ -100,7 +100,8 @@ class IntegrityReviewExecutor:
                 "integrity_review_finished",
                 "succeeded",
                 scope=review_scope,
-                data={"gate": "approved", "reason": "baseline"},
+                data={"gate": "approved", "reason": "baseline", "profile": profile,
+                      "report": str(normalized_root / "decision.json")},
             )
             return decision, normalized_root / "decision.json"
 
@@ -131,7 +132,7 @@ class IntegrityReviewExecutor:
         for review_attempt in range(1, config.retries + 2):
             scope = {
                 **review_scope,
-                "job_id": f"{candidate_id}-r{review_attempt:02d}",
+                "job_id": f"{cache_key}-r{review_attempt:02d}",
             }
             self.emit(
                 "integrity_review_attempt_started",
@@ -194,7 +195,8 @@ class IntegrityReviewExecutor:
                 "integrity_review_finished",
                 "succeeded",
                 scope=review_scope,
-                data={"gate": "approved" if decision.verdict == "approve" else "quarantined"},
+                data={"gate": "approved" if decision.verdict == "approve" else "quarantined",
+                      "profile": profile, "report": str(normalized_root / "decision.json")},
             )
             return decision, normalized_root / "decision.json"
 
@@ -207,6 +209,6 @@ class IntegrityReviewExecutor:
             "integrity_review_finished",
             "failed",
             scope=review_scope,
-            data={"gate": "unavailable"},
+            data={"gate": "unavailable", "profile": profile, "report": str(report)},
         )
         raise RuntimeError(message)

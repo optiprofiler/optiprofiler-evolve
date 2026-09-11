@@ -94,8 +94,8 @@ class ControllerBoundaryTests(unittest.TestCase):
         self.assertTrue((output / "public-002" / "result.json").is_file())
 
     def test_population_edits_are_atomic_and_reject_unapproved_records(self) -> None:
-        a = dataclasses.replace(candidate("a", 0.7, 0.7), review_verdict="approve")
-        b = dataclasses.replace(candidate("b", 0.8, 0.8), review_verdict="approve")
+        a = candidate("a", 0.7, 0.7)
+        b = candidate("b", 0.8, 0.8)
         bad = dataclasses.replace(candidate("bad", 0.9, 0.9), valid=False)
         unreviewed = dataclasses.replace(candidate("unreviewed", 0.9, 0.9), assessment_score=None)
         self.engine.state.candidates = {r.candidate_id: r for r in (a, b, bad, unreviewed)}

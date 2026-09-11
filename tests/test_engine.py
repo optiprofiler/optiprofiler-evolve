@@ -631,6 +631,13 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(json.loads((review_root / "outcome.json").read_text())["state"], "completed")
             decision = json.loads(next((result.run_dir / "controller" / "integrity_reviews").glob("it001-i00-a00-*/decision.json")).read_text())
             self.assertEqual(decision["verdict"], "approve")
+            attempt_page = (result.run_dir / "owner/attempts/it001-i00-a00.html").read_text()
+            self.assertNotIn("Decision file unavailable", attempt_page)
+            self.assertIn(f"{review_root.name}.html", attempt_page)
+            manifest = json.loads((result.run_dir / "owner/MANIFEST.json").read_text())
+            evidence = next(item["evidence"] for item in manifest["attempts"]
+                            if item["attempt_id"] == "it001-i00-a00")
+            self.assertIn("integrity_review_validation", evidence)
             public_events = (result.run_dir / "public_events.jsonl").read_text()
             self.assertIn('"gate": "approved"', public_events)
             self.assertNotIn("finding_count", public_events)
