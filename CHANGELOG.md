@@ -90,16 +90,16 @@
   returned solver tree, and apply one lockbox policy to planned core stages and
   committed results. Unused attempt steps remain unconstructed.
 
-- Restore the worker task card text to its pre-refactor wording: the parent
-  public fitness line, the "blind hyperparameter sweep" and benchmark-evidence
-  phrasing, the evaluation-tool descriptions, and the required work order match
-  the baseline prompt again (`solver-worker/5`). The benchmark-artifact reading
-  paragraph also returns verbatim, now owned by the public performance standard
-  and included whenever public performance checks exist, and the complexity
-  standard again states its warn/enforce consequences. Research roles
-  (direction-scout, strategy-analyst, strategy-integrator) are ordinary agent
-  jobs again, so their prompts stay exactly as authored instead of receiving the
-  worker-oriented criterion guidance.
+- Preserve the baseline parent-public-fitness wording, algorithmic improvement
+  instructions, and initial five work steps. The current task additionally
+  requires explanation JSON, whose summary can enter later worker memory; these
+  are behavior changes beyond complexity and EvalReport. Explorer and integrator
+  now share a complete explanation contract (`solver-worker/6`,
+  `strategy-transfer/2`), including explicit `file`/`lines` bindings and a 1 MiB
+  limit. Both are SolverJobs and receive criterion guidance. Scout, analyst, and
+  reviewer jobs retain their independent prompts. Performance guidance describes
+  `pdftoppm` and conditional inspection of available public artifacts; it is not
+  verbatim baseline text and does not grant an integrator evaluation tools.
 
 - The fixed seed now receives a controller-local baseline integrity approval
   (the seed equals its parent and has no mutation transcript), so prepare no

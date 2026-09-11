@@ -9,15 +9,46 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from test_config import minimal_config
+from test_prompt import _prompt_kwargs
 from worker_helpers import RunnerAdapter
 
 from optiprofiler_evolve.agents.contracts import AgentJob, SolverJob, WorkerOutcome, WorkerRequest
 from optiprofiler_evolve.agents.llm import LLMClient
 from optiprofiler_evolve.config import load_config
 from optiprofiler_evolve.observability.trace_ledger import TraceLedger
+from optiprofiler_evolve.phases.attempts.prompt import build_worker_prompt
+from optiprofiler_evolve.phases.strategy_transfer import _strategy_transfer_prompt
 
 
 class LLMClientTests(unittest.TestCase):
+    def test_both_solver_roles_receive_the_complete_explanation_contract(self):
+        tasks = {
+            'explorer': build_worker_prompt(**_prompt_kwargs()),
+            'strategy-integrator': _strategy_transfer_prompt(
+                island=0, base_candidate='seed', strategy_ids=['strategy'],
+                prompt_version='strategy-transfer/2',
+            ),
+        }
+        for role, prompt in tasks.items():
+            with self.subTest(role=role):
+                self.request = replace(self.request, trace_dir=self.root / role)
+                client = self.client(lambda kwargs: WorkerOutcome(0, kwargs['transcript']))
+                client.generation_guidance = Mock(return_value='CRITERION_GUIDANCE')
+                client.run(SolverJob(role, role, prompt))
+                delivered = self.calls[-1]['prompt']
+                self.assertEqual(delivered.count('CRITERION_GUIDANCE'), 1)
+                self.assertEqual(delivered.count('schema `solver_explanation/1`'), 1)
+                for field in ('summary', 'pseudocode', 'mechanisms', 'name', 'description',
+                              'code_bindings', 'file', 'lines', 'expected_strengths',
+                              'known_limitations', 'evidence_consulted'):
+                    self.assertIn(f'`{field}`', delivered)
+                self.assertIn('one-based `[start, end]`', delivered)
+                self.assertIn('1 MiB', delivered)
+                self.assertNotIn('contract from the normal worker task', delivered)
+                if role == 'strategy-integrator':
+                    self.assertIn('`candidate/.optiprofiler_evolve/solver_explanation.json`', delivered)
+                    self.assertIn('no\nevaluation broker', delivered)
+
     def test_solver_guidance_is_rendered_once_and_recorded_in_the_trace(self) -> None:
         client = self.client(lambda kwargs: WorkerOutcome(0, kwargs["transcript"]))
         guidance = Mock(return_value="SYNTHETIC_CRITERION_GUIDANCE")

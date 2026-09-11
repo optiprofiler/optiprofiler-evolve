@@ -390,7 +390,7 @@ directory is created:
 | `strategy_transfer` | `token_budget` | worker default | Advisory integrator token budget. |
 | `strategy_transfer` | `max_budget_usd` | worker default | Claude integrator cost cap. |
 | `strategy_transfer` | `tools` | network on, web off | Role-specific `ToolConfig` overrides. |
-| `strategy_transfer` | `prompt_version` | `strategy-transfer/1` | Recorded prompt contract. |
+| `strategy_transfer` | `prompt_version` | `strategy-transfer/2` | Recorded prompt contract. |
 | `challenger` | `reference` | `scipy_powell` | `initial` or any compatible registered competitor. This phase is post-selection only. |
 
 The older `recombine` phase remains available as an advanced compatibility

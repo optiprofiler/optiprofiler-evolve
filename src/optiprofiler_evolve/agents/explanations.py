@@ -22,6 +22,18 @@ WORKER_EXPLANATION = Path(".optiprofiler_evolve/solver_explanation.json")
 _MAX_EXPLANATION_BYTES = 1024 * 1024
 
 
+def explanation_instructions(solver_directory: str = ".") -> str:
+    """The complete explanation contract for each independent solver-edit job."""
+    output = PurePosixPath(solver_directory) / WORKER_EXPLANATION.as_posix()
+    return f"""Before finishing, write `{output}` using schema `solver_explanation/1`.
+   Include a concise `summary`; a `pseudocode` list; a `mechanisms` list whose entries
+   have `name`, `description`, and `code_bindings`; plus `expected_strengths`,
+   `known_limitations`, and `evidence_consulted` string lists. Each code binding has
+   `file` (relative to the solver directory) and `lines` (one-based `[start, end]`).
+   Describe the algorithm that actually remains in the files, not an intended or
+   discarded experiment. Keep the JSON file within 1 MiB."""
+
+
 def capture_solver_explanation(
     workspace: Path,
     destination: Path,

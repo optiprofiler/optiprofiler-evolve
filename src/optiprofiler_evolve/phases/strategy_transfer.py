@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from optiprofiler_evolve.agents.contracts import SolverJob
-from optiprofiler_evolve.agents.explanations import capture_solver_explanation
+from optiprofiler_evolve.agents.explanations import (
+    capture_solver_explanation,
+    explanation_instructions,
+)
 from optiprofiler_evolve.controller.contracts import VariantHandle, VariantRequest
 from optiprofiler_evolve.files import read_json_object, write_json
 from optiprofiler_evolve.phases._research import (
@@ -42,7 +45,7 @@ class StrategyTransferPhase:
         token_budget: int | None = None,
         max_budget_usd: float | None = None,
         tools: Mapping[str, object] | None = None,
-        prompt_version: str = "strategy-transfer/1",
+        prompt_version: str = "strategy-transfer/2",
     ) -> None:
         if max_strategies_per_island < 1 or attempts_per_island < 1:
             raise ValueError("strategy transfer limits must be positive")
@@ -318,9 +321,8 @@ Leave the complete edited solver in candidate/. Also write transfer_manifest.jso
 "applied_strategy_ids":["..."],"rejected_strategy_ids":["..."],
 "summary":"..."}}
 
-Finally write candidate/.optiprofiler_evolve/solver_explanation.json using the
-solver_explanation/1 contract from the normal worker task. It must explain the complete
-resulting algorithm, including which transferred mechanisms remain and their code lines.
+{explanation_instructions("candidate")}
+Explain which transferred mechanisms remain and their code lines.
 """
 
 
