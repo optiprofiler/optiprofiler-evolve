@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from optiprofiler_evolve.agents.feedback import publish_feedback
 from optiprofiler_evolve.controller.contracts import VariantHandle
 from optiprofiler_evolve.files import append_json as _append_json
 from optiprofiler_evolve.models import CandidateRecord
@@ -33,16 +34,18 @@ class FinalistRegistrar:
         if validation is None or not validation.success or validation.assessment_score is None:
             raise ValueError("A research finalist must pass controller validation first.")
         public = environment.state.variant_public.get(handle.variant_id)
-        public_score = (
-            public.score
-            if public is not None and public.success
-            else float(metadata.get("public_score", 0.0))
-        )
+        if public is None or not public.success:
+            raise ValueError("A research finalist must pass public assessment first.")
         existing = environment.state.candidates.get(handle.variant_id)
         if existing is not None:
             if existing.tree_hash != handle.tree_hash:
                 raise ValueError("Candidate id is already registered with another tree.")
             return existing.candidate_id
+        feedback = publish_feedback(
+            public, environment.run_dir / "controller" / "feedback" / handle.variant_id,
+            mode=environment.config.execution.feedback_mode,
+            emit=environment.scoped_emitter({"variant_id": handle.variant_id}),
+        )
         record = CandidateRecord(
             candidate_id=handle.variant_id,
             island=int(metadata.get("island", -2)),
@@ -51,7 +54,8 @@ class FinalistRegistrar:
             parent_id=str(metadata["parent_id"]) if metadata.get("parent_id") else None,
             path=handle.path,
             tree_hash=handle.tree_hash,
-            public_score=public_score,
+            public_score=public.score,
+            public_evidence=feedback.output_dir,
             validation_score=validation.score,
             selection_metrics=validation.metric_bundle,
             assessment_score=validation.assessment_score,

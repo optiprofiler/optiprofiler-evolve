@@ -213,6 +213,7 @@ class CandidateRecord:
     error: str | None = None
     assessment_score: float | None = None
     assessment: dict[str, Any] | None = None
+    public_evidence: Path | None = None
 
     @property
     def ranking_score(self) -> float:
@@ -227,6 +228,7 @@ class CandidateRecord:
     def as_dict(self) -> dict[str, Any]:
         value = dataclasses.asdict(self)
         value["path"] = str(self.path)
+        value["public_evidence"] = str(self.public_evidence) if self.public_evidence else None
         return value
 
 

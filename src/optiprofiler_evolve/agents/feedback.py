@@ -7,14 +7,17 @@ import json
 import mimetypes
 import shutil
 import stat
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from optiprofiler_evolve.files import write_json
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.observability.eval_reports import (
     EvalReportError,
     private_eval_report_paths,
 )
+from optiprofiler_evolve.observability.events import EventEmitter
 
 _FULL_ROOT_FILES = {
     "evaluator.log",
@@ -35,6 +38,23 @@ _FULL_ARTIFACT_SUFFIXES = {
     ".svg",
     ".txt",
 }
+
+
+def publish_feedback(
+    result: EvaluationResult, destination: Path, *, mode: str,
+    emit: EventEmitter | None = None,
+) -> EvaluationResult:
+    """Publish one public assessment through the same boundary for every agent role."""
+    worker_result = replace(
+        result, error="Evaluation failed; details retained by controller." if result.error else None,
+    )
+    warning = project_feedback(result.output_dir, destination, worker_result, mode=mode)
+    if warning is not None:
+        diagnostic = {"mode": result.mode, "error": warning}
+        write_json(result.output_dir / "feedback_warning.json", diagnostic)
+        if emit is not None:
+            emit("feedback_artifacts_withheld", "failed", diagnostic)
+    return replace(worker_result, output_dir=destination)
 
 
 def project_feedback(

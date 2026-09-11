@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from optiprofiler_evolve.controller.runtime import RunEnvironment
 
 from optiprofiler_evolve.agents.contracts import WorkerOutcome
+from optiprofiler_evolve.agents.feedback import publish_feedback
 from optiprofiler_evolve.agents.jobs import guidance_id as _guidance_id
 from optiprofiler_evolve.config import WorkerConfig
 from optiprofiler_evolve.models import Attempt, CandidateRecord, EvaluationResult
@@ -155,6 +156,11 @@ class AttemptRunner:
             )
             if not validation.success:
                 raise RuntimeError(validation.error or "controller validation evaluation failed")
+            feedback = publish_feedback(
+                public_result, self.environment.run_dir / "controller" / "feedback" / attempt_id,
+                mode=self.environment.config.execution.feedback_mode,
+                emit=self.environment.scoped_emitter(scope),
+            )
             snapshot = self.environment.run_dir / "candidates" / attempt_id
             copy_solver_tree(workspace, snapshot)
             record = CandidateRecord(
@@ -170,6 +176,7 @@ class AttemptRunner:
                 selection_metrics=validation.metric_bundle,
                 assessment_score=validation.assessment_score,
                 assessment=validation.assessment,
+                public_evidence=feedback.output_dir,
                 worker=f"{worker.harness}:{worker.model}",
                 guidance=_guidance_id(self.environment.state.direction_assignments.get(island)),
             )

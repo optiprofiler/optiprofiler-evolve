@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from optiprofiler_evolve.agents.feedback import publish_feedback
 from optiprofiler_evolve.config import EvolveConfig
 from optiprofiler_evolve.criteria.performance.contracts import Evaluator
 from optiprofiler_evolve.criteria.performance.references import materialize_reference
@@ -178,6 +179,10 @@ class PreparePhase:
         )
         if not seed_public.success:
             raise RuntimeError(f"Initial solver evaluation failed: {seed_public.error}")
+        feedback = publish_feedback(
+            seed_public, context.run_dir / "controller" / "feedback" / "seed",
+            mode=context.config.execution.feedback_mode, emit=context.emit,
+        )
         seed_validation = evaluator.evaluate(
             seed_path,
             "validation",
@@ -198,10 +203,11 @@ class PreparePhase:
             selection_metrics=seed_validation.metric_bundle,
             assessment_score=seed_validation.assessment_score,
             assessment=seed_validation.assessment,
+            public_evidence=feedback.output_dir,
         )
         prepared = PreparedArtifact(
             seed=seed_path,
-            seed_public_evidence=seed_public.output_dir,
+            seed_public_evidence=feedback.output_dir,
             solver_contract=solver_contract,
             islands=context.config.evolution.islands,
         )

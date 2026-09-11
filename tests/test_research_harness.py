@@ -336,6 +336,49 @@ def research_config() -> dict:
 
 
 class ResearchHarnessTests(unittest.TestCase):
+    def test_research_roles_receive_only_projected_evidence_without_broker_calls(self):
+        fixture = Path(__file__).parent / "fixtures" / "eval_report_v1"
+
+        class PrivateEvidenceEvaluator(ResearchEvaluator):
+            def evaluate(self, candidate, mode, output_dir):
+                result = super().evaluate(candidate, mode, output_dir)
+                benchmark = output_dir / "benchmark"
+                shutil.copytree(fixture, benchmark)
+                (output_dir / "private.json").write_text('{"secret": "PRIVATE_CANARY"}')
+                (benchmark / "plot.svg").write_text("<svg>public plot</svg>")
+                return result
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "solver.py"
+            source.write_text("def solver(fun, x0):\n    return x0\n")
+            raw = research_config()
+            raw["execution"]["feedback_mode"] = "full_artifacts"
+            seen = []
+            scripted = ScriptedResearchRunner()
+
+            def runner(**kwargs):
+                if any(role in kwargs["prompt"] for role in
+                       ("ROLE: direction-scout", "ROLE: strategy-analyst")):
+                    evidence = kwargs["workspace"] / "public_evidence"
+                    seen.append(evidence)
+                    self.assertTrue((evidence / "feedback.md").is_file())
+                    self.assertTrue((evidence / "artifact_index.json").is_file())
+                    self.assertTrue((evidence / "benchmark/plot.svg").is_file())
+                    self.assertFalse((evidence / "private.json").exists())
+                    self.assertFalse(list(evidence.rglob("eval_report*")))
+                return scripted(**kwargs)
+
+            engine = EvolutionRun(
+                initial=source, interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python", editable=("solver.py",), config=load_config(raw),
+                run_dir=root / "run", worker_adapter=RunnerAdapter(runner),
+                evaluator_factory=lambda **kwargs: PrivateEvidenceEvaluator(),
+            )
+            engine.run()
+            self.assertEqual(len(seen), 3)
+            self.assertTrue(list((root / "run/controller/evaluations").rglob("eval_report.json")))
+
     def test_strategy_analyst_keeps_model_transport_but_disables_web_search(self) -> None:
         phase = StrategyAnalysisPhase()
 
@@ -429,6 +472,13 @@ class ResearchHarnessTests(unittest.TestCase):
                     item["donor_strategy_ids"],
                 )
                 self.assertTrue(item["winner_candidate_id"].startswith("transfer-i"))
+                role_dir = root / "run/research/roles/strategy-integrator" / item["winner_candidate_id"]
+                # Inspect the actual unified-client prompt, not only the job's task template.
+                trace = root / "run/research/traces/strategy-integrator" / item["winner_candidate_id"]
+                self.assertTrue(role_dir.is_dir())
+                prompt_text = "\n".join(path.read_text() for path in trace.rglob("*.txt"))
+                self.assertIn("Performance:", prompt_text)
+                self.assertIn("Semantic integrity:", prompt_text)
                 winner_solver = Path(item["winner_solver"])
                 self.assertTrue((winner_solver / "solver.py").is_file())
                 explanation = root / "run" / "explanations" / (

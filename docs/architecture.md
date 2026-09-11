@@ -284,6 +284,11 @@ research directory, or a second event schema beside the existing ledger.
 Evaluators retain numerical results and sanitized benchmark files. Only the
 worker feedback projection writes `feedback.md` and `artifact_index.json`; the
 private evaluator output does not contain a duplicate presentation bundle.
+Seed, admitted candidate and research finalist records point to controller-built
+feedback bundles. Scout and analyst inputs consume these same projections as the
+worker broker; they never fall back to a private evaluation directory or an
+unmatched last broker call. Transfer jobs use `SolverJob` and receive the same
+criterion guidance as exploration jobs.
 
 ### EvalReport evidence
 

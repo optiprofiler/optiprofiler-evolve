@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.agents.contracts import AgentJob
+from optiprofiler_evolve.agents.contracts import SolverJob
 from optiprofiler_evolve.agents.explanations import capture_solver_explanation
 from optiprofiler_evolve.controller.contracts import VariantHandle, VariantRequest
 from optiprofiler_evolve.files import read_json_object, write_json
@@ -137,7 +137,7 @@ class StrategyTransferPhase:
                 }
                 try:
                     result = context.services.run_trusted_agent(
-                        AgentJob(
+                        SolverJob(
                             role="strategy-integrator",
                             job_id=variant_id,
                             prompt=_strategy_transfer_prompt(

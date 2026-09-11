@@ -99,7 +99,9 @@ class StrategyAnalysisPhase:
             island_dir.mkdir(parents=True, exist_ok=True)
             diff_path = island_dir / "source.diff"
             diff_path.write_text(source_diff(seed, finalist.path), encoding="utf-8")
-            evidence_dir = _public_evidence_dir(context.run_dir, finalist.candidate_id)
+            evidence_dir = finalist.public_evidence
+            if evidence_dir is None:
+                raise ValueError("Strategy analysis requires projected public candidate evidence.")
             evidence_index = EvidenceReader().build(
                 evidence_dir,
                 island_dir / "evidence_manifest.json",
@@ -473,16 +475,6 @@ def _candidate_path(run_dir: Path, candidate_id: str | None) -> Path | None:
         return None
     path = run_dir / "candidates" / candidate_id
     return path if path.is_dir() else None
-
-
-def _public_evidence_dir(run_dir: Path, candidate_id: str) -> Path:
-    broker_root = (
-        run_dir / "controller" / "brokers" / candidate_id / "artifacts" / "evaluations" / "public"
-    )
-    detailed = sorted(path for path in broker_root.glob("*") if path.is_dir())
-    if detailed:
-        return detailed[-1]
-    return run_dir / "controller" / "evaluations" / candidate_id / "public"
 
 
 def _write_island_direction(source: Path, island: int, destination_root: Path) -> Path | None:

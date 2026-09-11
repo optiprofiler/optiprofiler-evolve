@@ -15,9 +15,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.agents.feedback import project_feedback
+from optiprofiler_evolve.agents.feedback import publish_feedback
 from optiprofiler_evolve.criteria.performance.evaluator import Evaluator
-from optiprofiler_evolve.files import write_json
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.observability.events import EventEmitter
 from optiprofiler_evolve.solver import copy_solver_tree
@@ -233,20 +232,12 @@ class EvaluationBroker:
             result = self.evaluator.evaluate(candidate, mode, staging)
             private_output.parent.mkdir(parents=True, exist_ok=True)
             staging.replace(private_output)
-            worker_result = replace(
-                result, error="Evaluation failed; details retained by controller." if result.error else None,
-            )
-            warning = project_feedback(
-                private_output,
+            worker_result = publish_feedback(
+                replace(result, output_dir=private_output),
                 publication,
-                worker_result,
                 mode=self.feedback_mode,
+                emit=self.emit,
             )
-            if warning is not None:
-                diagnostic = {"mode": mode, "call": int(output.name), "error": warning}
-                write_json(private_output / "feedback_warning.json", diagnostic)
-                if self.emit is not None:
-                    self.emit("feedback_artifacts_withheld", "failed", diagnostic)
             output.parent.mkdir(parents=True, exist_ok=True)
             publication.replace(output)
             return replace(worker_result, output_dir=output)
