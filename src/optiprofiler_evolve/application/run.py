@@ -100,6 +100,9 @@ class EvolutionRun:
             champion=any(isinstance(phase, ValidatePhase) for phase in self.phases),
             hidden=any(isinstance(phase, HiddenPhase) for phase in self.phases),
         )
+        for name in config.assessment.criteria:
+            if config.assessment.enabled(name):
+                resolve("criterion", name)
         self.worker_adapter = (
             worker_adapter
             if worker_adapter is not None

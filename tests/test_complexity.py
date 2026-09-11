@@ -28,6 +28,8 @@ from optiprofiler_evolve.criteria.complexity.analyzer import (
     ComplexityConfig,
     analyze_source,
 )
+from optiprofiler_evolve.criteria.complexity.criterion import ComplexityCriterion
+from optiprofiler_evolve.criteria.contracts import AssessmentRequest
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.observability.events import EventWriter, rebuild_run_state
 from optiprofiler_evolve.observability.projections import project_public_events
@@ -52,6 +54,18 @@ class RecordingEvaluator:
 
 
 class ComplexityTests(unittest.TestCase):
+    def test_profile_policy_overrides_cached_analyzer_policy(self):
+        checker = self.checker("warn")
+        criterion = ComplexityCriterion(checker, mode="enforce")
+        result = criterion.assess(AssessmentRequest(
+            self.candidate, "unused", "validation", self.root / "validation",
+            options={"max_ratio": 1.1},
+        ))
+        self.assertFalse(result.satisfied)
+        self.assertEqual(result.metrics["mode"], "enforce")
+        self.assertEqual(result.metrics["max_ratio"], 1.1)
+        self.assertTrue(result.metrics["blocked"])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -276,7 +290,12 @@ class ComplexityTests(unittest.TestCase):
         report = self.checker().assess(self.candidate)
         source = self.root / "evidence"
         source.mkdir()
-        result = EvaluationResult("public", 0.5, 0.5, 0.5, 1, source)
+        result = EvaluationResult("public", 0.5, 0.5, 0.5, 1, source, assessment={
+            "profile": "public", "results": {"complexity": {
+                "status": "succeeded", "score": report.score, "satisfied": False,
+                "metrics": report.worker_dict(),
+            }},
+        })
         for mode in ("score_only", "full_artifacts"):
             destination = self.root / mode
             project_feedback(
@@ -284,12 +303,26 @@ class ComplexityTests(unittest.TestCase):
                 destination,
                 result,
                 mode=mode,
-                complexity=report,
             )
             payload = json.loads((destination / "complexity.json").read_text())
             self.assertNotIn("hotspots", payload["baseline"])
             self.assertNotIn("baseline_hash", payload)
             self.assertIn("Simplify", (destination / "feedback.md").read_text())
+
+    def test_unavailable_complexity_withholds_private_error(self):
+        report = replace(self.checker().assess(self.candidate), candidate=None,
+                         error="private backend path and credentials")
+        source = self.root / "evidence"
+        source.mkdir()
+        result = EvaluationResult("public", None, None, None, 0, source, success=False,
+                                  assessment={"profile": "public", "results": {"complexity": {
+                                      "status": "failed", "score": None, "satisfied": None,
+                                      "metrics": report.worker_dict(),
+                                  }}})
+        destination = self.root / "feedback"
+        project_feedback(source, destination, result, mode="score_only")
+        self.assertIn("unavailable", (destination / "feedback.md").read_text())
+        self.assertNotIn(report.error, (destination / "complexity.json").read_text())
 
     def test_broker_enforcement_quota_and_snapshot(self):
         for mode in ("warn", "enforce"):
@@ -329,6 +362,14 @@ class ComplexityTests(unittest.TestCase):
                 if call == 0:
                     self.assertEqual(payload["status"], 200)
                     self.assertFalse(payload["payload"]["assessment"]["results"]["complexity"]["satisfied"])
+                    details = json.loads(
+                        (broker.artifacts / "evaluations/public/001/complexity.json").read_text()
+                    )
+                    self.assertGreater(details["complexity_ratio"], 1.2)
+                    self.assertTrue(details["candidate"]["hotspots"])
+                    self.assertNotIn("baseline_hash", details)
+                    self.assertNotIn("hotspots", details["baseline"])
+                    self.assertIn("Logical lines", payload["payload"]["_feedback"])
                     if mode == "enforce":
                         self.assertIsNone(payload["payload"]["score"])
                 else:

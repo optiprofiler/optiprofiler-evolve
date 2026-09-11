@@ -96,7 +96,9 @@ class CandidateAssessor:
         performance = (resolve("criterion", "performance")(benchmark)
                        if self.config.assessment.enabled("performance", profile) else None)
         factories = {
-            "complexity": lambda: resolve("criterion", "complexity")(self.complexity),
+            "complexity": lambda: resolve("criterion", "complexity")(
+                self.complexity, mode=specs["complexity"].mode,
+            ),
             "integrity": lambda: resolve("criterion", "integrity")(review),
             "performance": lambda: performance,
         }

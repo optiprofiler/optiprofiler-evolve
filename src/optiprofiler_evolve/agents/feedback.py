@@ -10,7 +10,7 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.criteria.complexity.analyzer import ComplexityReport
+from optiprofiler_evolve.criteria.complexity.analyzer import ComplexityMetrics, ComplexityReport
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.observability.eval_reports import (
     EvalReportError,
@@ -44,12 +44,13 @@ def project_feedback(
     result: EvaluationResult,
     *,
     mode: str,
-    complexity: ComplexityReport | None = None,
 ) -> str | None:
     """Publish feedback; return a controller-private reason if artifacts were withheld."""
 
     if mode not in {"score_only", "full_artifacts"}:
         raise ValueError(f"Unknown feedback projection mode: {mode!r}")
+    if result.assessment is not None and result.assessment["profile"] not in {"smoke", "public"}:
+        raise ValueError("Controller-only assessment cannot enter worker feedback.")
     source = source.resolve()
     destination = destination.resolve()
     if not source.is_dir():
@@ -62,9 +63,8 @@ def project_feedback(
 
     _write_worker_result(destination / "result.json", result)
     _write_feedback(destination / "feedback.md", result, mode)
+    complexity = None
     if result.assessment is not None:
-        if result.assessment["profile"] not in {"smoke", "public"}:
-            raise ValueError("Controller-only assessment cannot enter worker feedback.")
         public = {
             "profile": result.assessment["profile"], "total": result.assessment_score,
             "results": {
@@ -73,6 +73,9 @@ def project_feedback(
             },
         }
         (destination / "assessment.json").write_text(json.dumps(public, indent=2) + "\n")
+        metrics = result.assessment["results"].get("complexity", {}).get("metrics", {})
+        if metrics:
+            complexity = _public_complexity_report(metrics)
     if complexity is not None:
         publish_complexity(destination, complexity)
     if mode == "score_only":
@@ -83,12 +86,30 @@ def project_feedback(
     except EvalReportError as exc:
         # The numerical result is independent of optional report evidence.
         _write_feedback(destination / "feedback.md", result, "score_only")
+        if complexity is not None:
+            publish_complexity(destination, complexity)
         with (destination / "feedback.md").open("a", encoding="utf-8") as handle:
             handle.write("\nAdditional artifacts were withheld; the evaluation result is unchanged.\n")
         return f"{type(exc).__name__}: {exc}"
     if complexity is not None:
         copied.append(destination / "complexity.json")
     _write_artifact_index(destination, copied)
+
+
+def _public_complexity_report(metrics: dict[str, Any]) -> ComplexityReport:
+    # Reconstruct only public counts and candidate locations; never forward backend errors or hashes.
+    baseline = metrics["baseline"]
+    candidate = metrics["candidate"]
+    return ComplexityReport(
+        tree_hash="", baseline_hash="",
+        baseline=ComplexityMetrics(baseline["decision_complexity"], baseline["logical_lines"]),
+        candidate=ComplexityMetrics(
+            candidate["decision_complexity"], candidate["logical_lines"],
+            tuple({key: item[key] for key in ("path", "name", "line", "cc")}
+                  for item in candidate["hotspots"]),
+        ) if candidate is not None else None,
+        mode=metrics["mode"], max_ratio=metrics["max_ratio"],
+    )
 
 
 def publish_complexity(destination: Path, report: ComplexityReport) -> None:

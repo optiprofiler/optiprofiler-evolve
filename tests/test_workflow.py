@@ -46,6 +46,18 @@ class ArtifactPhase:
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_unknown_enabled_criterion_fails_before_creating_run(self):
+        config = self.config.with_criterion("misspelled_criterion")
+        with self.assertRaisesRegex(KeyError, "Unknown criterion.*misspelled_criterion"):
+            self.make_run(config=config)
+        self.assertFalse((self.root / "run").exists())
+        self.evaluator.assert_not_called()
+        self.worker.assert_not_called()
+
+    def test_disabled_unknown_criterion_does_not_require_a_backend(self):
+        run = self.make_run((), config=self.config.with_criterion("unused", enabled=False))
+        self.assertIsNone(run.run().best_candidate_id)
+
     def test_core_names_do_not_grant_core_contexts(self):
         class OrdinaryPhase(ArtifactPhase):
             def run(inner, context):

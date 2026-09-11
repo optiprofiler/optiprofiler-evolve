@@ -11,6 +11,22 @@ from optiprofiler_evolve.models import EvaluationResult
 
 
 class FeedbackProjectionTests(unittest.TestCase):
+    def test_failed_evaluation_without_benchmark_preserves_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "private"
+            source.mkdir()
+            destination = root / "feedback"
+            result = EvaluationResult(
+                "public", None, None, None, 0, source, success=False, error="syntax error",
+            )
+            self.assertIsNone(project_feedback(source, destination, result, mode="full_artifacts"))
+            payload = json.loads((destination / "result.json").read_text())
+            self.assertFalse(payload["success"])
+            self.assertEqual(payload["error"], "syntax error")
+            self.assertEqual(json.loads((destination / "artifact_index.json").read_text()),
+                             {"artifacts": []})
+
     def test_root_receipt_can_withhold_a_companion_inside_benchmark(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

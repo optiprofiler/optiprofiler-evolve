@@ -29,14 +29,15 @@ class ComplexityCriterion(Criterion):
             "analysis blocks evaluation and admission."
         )
 
-    def __init__(self, checker: ComplexityChecker) -> None:
+    def __init__(self, checker: ComplexityChecker, *, mode: str) -> None:
         self.checker = checker
+        self.mode = mode
 
     def assess(self, request: AssessmentRequest) -> CriterionResult:
         report = replace(self.checker.assess(request.candidate),
-                         max_ratio=float(request.options.get("max_ratio", 1.2)))
+                         max_ratio=float(request.options.get("max_ratio", 1.2)), mode=self.mode)
         if report.ratios is None:
-            return CriterionResult("failed", error=report.error)
+            return CriterionResult("failed", metrics=report.worker_dict(), error=report.error)
         ratio = max(report.ratios)
         return CriterionResult(
             "succeeded", score=report.score, satisfied=ratio <= report.max_ratio,
