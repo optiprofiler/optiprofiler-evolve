@@ -541,7 +541,7 @@ def _load_python_solver(root: Path, interface: InterfaceSpec, label: str) -> tup
         for name in set(sys.modules).difference(before).union(created):
             loaded = sys.modules.get(name)
             file_name = getattr(loaded, "__file__", None)
-            if name in created or (file_name and _is_inside(Path(file_name), root)):
+            if name in created or (file_name and Path(file_name).resolve().is_relative_to(root.resolve())):
                 sys.modules.pop(name, None)
         raise
     finally:
@@ -549,7 +549,7 @@ def _load_python_solver(root: Path, interface: InterfaceSpec, label: str) -> tup
     for name in set(sys.modules).difference(before):
         loaded = sys.modules.get(name)
         file_name = getattr(loaded, "__file__", None)
-        if file_name and _is_inside(Path(file_name), root):
+        if file_name and Path(file_name).resolve().is_relative_to(root.resolve()):
             created.add(name)
     # Unqualified local imports would otherwise make the reference reuse the
     # candidate's module. Eager imports remain alive through solver globals;
@@ -561,14 +561,6 @@ def _load_python_solver(root: Path, interface: InterfaceSpec, label: str) -> tup
     if not callable(solver):
         raise TypeError(f"Interface {interface.function!r} is not callable.")
     return solver, created
-
-
-def _is_inside(path: Path, root: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-    except ValueError:
-        return False
-    return True
 
 
 def _write_feedback(result: EvaluationResult, output_dir: Path, feedback_mode: str) -> None:

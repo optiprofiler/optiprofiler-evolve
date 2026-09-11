@@ -13,8 +13,8 @@ from optiprofiler_evolve.files import read_json_object, write_json
 class EvidenceReader:
     """Create a small index over existing OptiProfiler benchmark outputs.
 
-    The reader prefers a future versioned ``agent_report.json`` but does not
-    invent benchmark statistics when only the current artifact bundle exists.
+    The legacy ``agent_report.json`` input is not the private EvalReport protocol.
+    Missing evidence is never replaced with invented benchmark statistics.
     """
 
     def build(self, source: Path, destination: Path) -> Path:

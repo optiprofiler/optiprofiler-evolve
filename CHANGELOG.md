@@ -6,7 +6,13 @@
   observability. Validate report/companion integrity, bounded file reads, references,
   history bins and numeric axes without changing fitness or enabling report production.
 - Exclude raw EvalReports and receipt-named companions from full worker feedback;
-  malformed receipts stop artifact copying. Raw reports remain controller-private.
+  unusable receipts withhold additional artifacts without losing completed scores
+  or spending another evaluation call. Diagnostics remain controller-private,
+  and broker errors no longer echo private exception paths to workers.
+- Separate EvalReport I/O boundaries from protocol validation, distinguish
+  unsupported versions, and centralize bundled schema digests. Receipt discovery
+  does not require full numerical validation. Accept retained-archive coverage
+  and declared axis subsets without imposing unsupported completeness rules.
 
 - Preserve successful unscored matrix cells and report their count separately.
   Bind core contexts by implementation type, reject duplicate artifact producers,

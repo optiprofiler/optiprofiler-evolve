@@ -9,6 +9,7 @@ import time
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import Mock
 
 from optiprofiler_evolve.agents.broker import EvaluationBroker
 from optiprofiler_evolve.models import EvaluationResult
@@ -41,6 +42,95 @@ class BlockingEvaluator:
 
 
 class BrokerTests(unittest.TestCase):
+    def test_bad_reports_keep_the_worker_score_and_charge_only_one_call(self):
+        for location, contents in (
+            ("", "broken report"),
+            ("benchmark", "broken report"),
+            ("benchmark", '{"schema":"optiprofiler.eval_report/2","plot_data":{"path":"secret.json"}}'),
+            ("benchmark", '{"schema":"optiprofiler.eval_report/1","plot_data":{"path":"../secret.json"}}'),
+        ):
+            with self.subTest(location=location, contents=contents), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                workspace = root / "workspace"
+                workspace.mkdir()
+                emit = Mock()
+
+                class ReportEvaluator(FakeEvaluator):
+                    calls = 0
+
+                    def evaluate(self, candidate, mode, output_dir):
+                        self.calls += 1
+                        result = super().evaluate(candidate, mode, output_dir)
+                        (output_dir / "benchmark").mkdir()
+                        (output_dir / location / "eval_report.json").write_text(contents)
+                        (output_dir / "benchmark/secret.json").write_text("PRIVATE_NUMBERS")
+                        return result
+
+                evaluator = ReportEvaluator()
+                with EvaluationBroker(
+                    workspace=workspace, control_dir=root / "controller", evaluator=evaluator,
+                    max_smoke_calls=1, max_public_calls=0, emit=emit,
+                ) as broker:
+                    tools = workspace / "tools"
+                    broker.install_tools(tools)
+                    connection = broker.start(docker=True)
+                    environment = {
+                        **os.environ,
+                        "OPTIPROFILER_EVOLVE_BROKER_DIR": str(connection.host_directory),
+                        "OPTIPROFILER_EVOLVE_BROKER_TOKEN": connection.token,
+                        "OPTIPROFILER_EVOLVE_WORKSPACE": str(workspace),
+                    }
+                    completed = subprocess.run(
+                        [str(tools / "smoke_test")], env=environment, capture_output=True,
+                        text=True, timeout=10,
+                    )
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    response = json.loads(completed.stdout)
+                    self.assertTrue(response["success"])
+                    self.assertEqual(response["score"], 0.6)
+                    self.assertNotIn(str(root), completed.stdout)
+                    self.assertNotIn("PRIVATE_NUMBERS", completed.stdout)
+                    self.assertEqual(broker.counts["smoke"], 1)
+                    self.assertEqual(evaluator.calls, 1)
+                    public = broker.artifacts / "evaluations/smoke/001"
+                    self.assertFalse((public / "benchmark").exists())
+                    self.assertNotIn(str(root), (public / "feedback.md").read_text())
+                    private = broker.control_dir / "private_evaluations/smoke/001"
+                    self.assertTrue((private / "benchmark/secret.json").exists())
+                    diagnostic = json.loads((private / "feedback_warning.json").read_text())
+                    emit.assert_called_once_with("feedback_artifacts_withheld", "failed", diagnostic)
+                    exhausted = subprocess.run(
+                        [str(tools / "smoke_test")], env=environment, capture_output=True,
+                        text=True, timeout=10,
+                    )
+                    self.assertNotEqual(exhausted.returncode, 0)
+                    self.assertEqual(evaluator.calls, 1)
+
+    def test_private_exception_text_is_never_in_worker_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            broker = EvaluationBroker(
+                workspace=workspace, control_dir=root / "controller", evaluator=FakeEvaluator(),
+                candidate_validator=Mock(side_effect=FileExistsError(f"PRIVATE_PATH {root}/secret")),
+                max_smoke_calls=1, max_public_calls=0,
+            )
+            with broker:
+                broker.start(docker=True)
+                request_id = uuid.uuid4().hex
+                request = broker.exchange / "requests" / f"{request_id}.json"
+                # Process synchronously to inspect both owner diagnostics and the actual response.
+                broker.stop()
+                request.write_text(json.dumps({"id": request_id, "token": broker.token, "mode": "smoke"}))
+                with self.assertLogs("optiprofiler_evolve.agents.broker", level="ERROR") as logs:
+                    broker._process(request)
+                response = json.loads((broker.exchange / "responses" / f"{request_id}.json").read_text())
+                self.assertEqual(response["status"], 500)
+                self.assertNotIn(str(root), json.dumps(response))
+                self.assertNotIn("PRIVATE_PATH", json.dumps(response))
+                self.assertIn("PRIVATE_PATH", "".join(logs.output))
+
     def test_private_evidence_is_projected_by_feedback_mode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

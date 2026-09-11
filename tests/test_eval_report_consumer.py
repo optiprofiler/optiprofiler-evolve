@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import os
 import shutil
@@ -16,11 +15,12 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator
 
 from optiprofiler_evolve.observability.eval_reports import (
-    CORE_SCHEMA_REVISION,
     EvalReportError,
+    UnsupportedEvalReport,
     load_eval_report,
     private_eval_report_paths,
 )
+from optiprofiler_evolve.observability.schemas import SCHEMA_DIGESTS
 
 FIXTURE = Path(__file__).parent / "fixtures" / "eval_report_v1"
 
@@ -50,21 +50,9 @@ def _refresh_companion_receipt(report_path: Path) -> None:
 
 class EvalReportConsumerTests(unittest.TestCase):
     def test_pinned_core_report_validates_and_supports_bounded_lookup(self) -> None:
-        self.assertEqual(
-            CORE_SCHEMA_REVISION,
-            "bf9d61c1482da6f0ad46fab660270cc8484d9f6f",
-        )
         schema_root = files("optiprofiler_evolve.observability.schemas")
-        self.assertEqual(
-            hashlib.sha256(
-                schema_root.joinpath("eval_report.schema.json").read_bytes()
-            ).hexdigest(),
-            "9b8f76fd9b2d3eff323304b758ff61c5c456d35b1d81fcf05d3ab9d64453a8a3",
-        )
-        self.assertEqual(
-            hashlib.sha256(schema_root.joinpath("plot_data.schema.json").read_bytes()).hexdigest(),
-            "76f83e1b7922a1479d8770888bd417c86fe5f837a450789891618960582d323c",
-        )
+        for name, digest in SCHEMA_DIGESTS.items():
+            self.assertEqual(hashlib.sha256(schema_root.joinpath(name).read_bytes()).hexdigest(), digest)
         with tempfile.TemporaryDirectory() as directory:
             bundle = load_eval_report(_copy_fixture(Path(directory)))
 
@@ -147,7 +135,7 @@ class EvalReportConsumerTests(unittest.TestCase):
             _write(report_path, report)
             bundle = load_eval_report(report_path)
 
-            self.assertTrue(bundle.numerical_success)
+            self.assertTrue(bundle.main["scores"])
             self.assertEqual(bundle.main["stages"]["rendering"]["status"], "failed")
             self.assertIsNotNone(bundle.main["scores"])
 
@@ -193,6 +181,44 @@ class EvalReportBoundaryTests(unittest.TestCase):
         self.companion["target_work"] = [work]
         return work
 
+    def test_unknown_versions_are_distinct_from_broken_reports(self):
+        self.main["schema"] = "optiprofiler.eval_report/2"
+        _write(self.path, self.main)
+        for read in (load_eval_report, private_eval_report_paths):
+            with self.assertRaises(UnsupportedEvalReport):
+                read(self.path)
+        self.main["schema"] = "optiprofiler.eval_report/1"
+        self.main["scores"] = "broken"
+        _write(self.path, self.main)
+        with self.assertRaises(EvalReportError) as failure:
+            load_eval_report(self.path)
+        self.assertNotIsInstance(failure.exception, UnsupportedEvalReport)
+        # Feedback only needs the valid receipt, not unrelated score metadata.
+        self.assertEqual(private_eval_report_paths(self.path), {self.path, self.companion_path})
+
+    def test_available_channel_needs_a_representation(self):
+        self.companion["histories"][0]["channels"]["objective"]["representation"] = None
+        self.assert_semantic_failure("representation")
+
+    def test_archive_does_not_apply_original_selection_arithmetic(self):
+        self.main["coverage"].update(scope="retained_archive", selected=0, original_selection_known=False)
+        self.save()
+        self.assertIsNotNone(load_eval_report(self.path).main["scores"])
+
+    def test_target_work_can_declare_a_subset_solver_axis(self):
+        work = self.add_target_work()
+        work["axis_values"]["solver"] = [2]
+        work["history"] = [[[2.0]]]
+        work["output"] = [[[2.0]]]
+        self.save()
+        self.assertEqual(load_eval_report(self.path).target_work("work-1"), work)
+
+    def test_display_series_need_not_cover_every_solver(self):
+        for plot in self.companion["plots"]:
+            plot["series"] = []
+        self.save()
+        self.assertEqual(load_eval_report(self.path).plot(self.companion["plots"][0]["id"])["series"], [])
+
     def test_main_and_companion_symlinks_are_rejected(self):
         alias = self.path.with_name("alias.json")
         alias.symlink_to(self.path.name)
@@ -215,7 +241,7 @@ class EvalReportBoundaryTests(unittest.TestCase):
     def test_authorized_parent_may_use_a_system_directory_alias(self):
         alias = self.root / "parent_alias"
         alias.symlink_to(self.path.parent, target_is_directory=True)
-        self.assertTrue(load_eval_report(alias / self.path.name).numerical_success)
+        self.assertTrue(load_eval_report(alias / self.path.name).main["scores"])
 
     def test_nonregular_main_is_rejected_without_opening(self):
         directory = self.root / "directory.json"
@@ -229,20 +255,10 @@ class EvalReportBoundaryTests(unittest.TestCase):
                 load_eval_report(fifo)
 
     def test_read_is_bounded_even_if_file_grows_after_fstat(self):
-        class GrowingFile(io.BytesIO):
-            def fileno(self):
-                return 99
-
-            def read(inner, count=-1):
-                self.assertEqual(count, 101)
-                return super().read(count)
-
-        with (
-            patch("optiprofiler_evolve.observability.eval_reports.os.open", return_value=99),
-            patch("optiprofiler_evolve.observability.eval_reports.os.fdopen", return_value=GrowingFile(b"x" * 200)),
-            patch("optiprofiler_evolve.observability.eval_reports.os.fstat", return_value=SimpleNamespace(
-                st_mode=self.path.stat().st_mode, st_size=0,
-            )),
+        # A real file exceeds the limit while fstat reports its earlier, smaller size.
+        with patch(
+            "optiprofiler_evolve.observability.eval_reports.os.fstat",
+            return_value=SimpleNamespace(st_mode=self.path.stat().st_mode, st_size=0),
         ):
             with self.assertRaisesRegex(EvalReportError, "size limit"):
                 load_eval_report(self.path, max_main_bytes=100)
@@ -253,7 +269,7 @@ class EvalReportBoundaryTests(unittest.TestCase):
         self.assertTrue(load_eval_report(
             self.path, max_main_bytes=self.path.stat().st_size,
             max_companion_bytes=self.companion_path.stat().st_size,
-        ).numerical_success)
+        ).main["scores"])
 
     def test_io_and_invalid_json_errors_are_report_errors(self):
         with patch.object(Path, "lstat", side_effect=PermissionError("denied")):
@@ -310,7 +326,7 @@ class EvalReportBoundaryTests(unittest.TestCase):
     def test_schema_integer_encoded_as_float_can_index_tolerance(self):
         self.add_target_work()["tolerance_index"] = 1.0
         self.save()
-        self.assertTrue(load_eval_report(self.path).numerical_success)
+        self.assertTrue(load_eval_report(self.path).main["scores"])
 
     def test_explicit_problem_axis_order_is_not_replaced_by_main_order(self):
         work = self.add_target_work()
@@ -359,7 +375,7 @@ class EvalReportBoundaryTests(unittest.TestCase):
         self.main["plot_data"]["plot_count"] += 2
         self.main["profiles"]["plot_refs"] = ["profile", "ratio"]
         self.save()
-        self.assertTrue(load_eval_report(self.path).numerical_success)
+        self.assertTrue(load_eval_report(self.path).main["scores"])
         # MATLAB retains bar identities; Python legitimately has no such mapping.
         ratio.pop("problem_mapping_reason")
         ratio["problem_mapping"] = "bar_sources"
@@ -368,7 +384,7 @@ class EvalReportBoundaryTests(unittest.TestCase):
             "solver2_failed": [False], "tie": [False],
         }
         self.save()
-        self.assertTrue(load_eval_report(self.path).numerical_success)
+        self.assertTrue(load_eval_report(self.path).main["scores"])
         ratio["bar_sources"]["problem_index"] = [2]
         self.assert_semantic_failure("unknown problem index")
 
@@ -412,7 +428,7 @@ class EvalReportBoundaryTests(unittest.TestCase):
             } for i in range(32)
         ])
         self.save()
-        self.assertTrue(load_eval_report(self.path).numerical_success)
+        self.assertTrue(load_eval_report(self.path).main["scores"])
         channel["bins"][0]["finite_min"]["evaluation_index"] = 10
         self.assert_semantic_failure("extremum index")
 
@@ -421,7 +437,7 @@ class EvalReportBoundaryTests(unittest.TestCase):
         for plot in self.companion["plots"]:
             plot["renderer_variants_ref"] = "history"
         self.save()
-        self.assertTrue(load_eval_report(self.path).numerical_success)
+        self.assertTrue(load_eval_report(self.path).main["scores"])
         self.companion["semantics"]["renderer_variants"] = {}
         self.assert_semantic_failure("renderer variant")
 

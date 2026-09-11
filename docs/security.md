@@ -42,6 +42,10 @@
   and raw pickle/HDF5 state are withheld and counted in
   `redaction_report.json`. The completed directory is then published
   atomically into the worker's read-only artifact mount.
+- Unusable EvalReport receipts withhold additional worker artifacts, not the
+  completed evaluation score. Broker error responses and evaluation error fields
+  use generic messages; exception details and feedback-withholding diagnostics
+  remain controller-private.
 - The append-only `events.jsonl` ledger is controller-private. Shareable status
   and report files are rebuilt from a centralized default-deny projection;
   unknown event kinds, fields, errors, paths, model identities, validation

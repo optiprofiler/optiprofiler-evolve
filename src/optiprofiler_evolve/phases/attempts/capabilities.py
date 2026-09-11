@@ -66,6 +66,9 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
             max_public_calls=environment.config.execution.max_public_calls_per_worker,
             candidate_validator=self._ensure_candidate_safe,
             feedback_mode=environment.config.execution.feedback_mode,
+            emit=lambda kind, status, data: environment.emit(
+                kind, status, scope=self._scope(), data=data,
+            ),
         )
         broker.install_tools(tools_dir)
         connection = broker.start(docker=environment.config.sandbox.backend == "docker")

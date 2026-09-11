@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -16,7 +17,9 @@ from typing import Any
 
 from optiprofiler_evolve.agents.feedback import project_feedback
 from optiprofiler_evolve.criteria.performance.evaluator import Evaluator
+from optiprofiler_evolve.files import write_json
 from optiprofiler_evolve.models import EvaluationResult
+from optiprofiler_evolve.observability.events import EventEmitter
 from optiprofiler_evolve.solver import copy_solver_tree
 
 _TOOL_CLIENT = """#!/usr/bin/env python3
@@ -80,6 +83,7 @@ class EvaluationBroker:
         max_public_calls: int,
         candidate_validator: Callable[[Path], None] | None = None,
         feedback_mode: str = "full_artifacts",
+        emit: EventEmitter | None = None,
     ) -> None:
         self.workspace = workspace.resolve()
         self.evaluator = evaluator
@@ -88,6 +92,7 @@ class EvaluationBroker:
         self.artifacts = self.control_dir / "artifacts"
         self.candidate_validator = candidate_validator
         self.feedback_mode = feedback_mode
+        self.emit = emit
         self.quotas = {"smoke": max_smoke_calls, "public": max_public_calls}
         self.counts = {"smoke": 0, "public": 0}
         self.token = secrets.token_urlsafe(32)
@@ -198,9 +203,10 @@ class EvaluationBroker:
                 }
             )
             self._respond(request_id, 200, payload)
-        except Exception as exc:
+        except Exception:
             request_id = request_path.stem
-            self._respond(request_id, 500, {"error": f"{type(exc).__name__}: {exc}"})
+            logging.getLogger(__name__).exception("Evaluation broker request %s failed", request_id)
+            self._respond(request_id, 500, {"error": "Evaluation request failed; details retained by controller."})
         finally:
             request_path.unlink(missing_ok=True)
 
@@ -227,16 +233,23 @@ class EvaluationBroker:
             result = self.evaluator.evaluate(candidate, mode, staging)
             private_output.parent.mkdir(parents=True, exist_ok=True)
             staging.replace(private_output)
-            project_feedback(
+            worker_result = replace(
+                result, error="Evaluation failed; details retained by controller." if result.error else None,
+            )
+            warning = project_feedback(
                 private_output,
                 publication,
-                result,
+                worker_result,
                 mode=self.feedback_mode,
             )
+            if warning is not None:
+                diagnostic = {"mode": mode, "call": int(output.name), "error": warning}
+                write_json(private_output / "feedback_warning.json", diagnostic)
+                if self.emit is not None:
+                    self.emit("feedback_artifacts_withheld", "failed", diagnostic)
             output.parent.mkdir(parents=True, exist_ok=True)
             publication.replace(output)
-            result = replace(result, output_dir=output)
-            return result
+            return replace(worker_result, output_dir=output)
         finally:
             if staging.exists():
                 shutil.rmtree(staging)

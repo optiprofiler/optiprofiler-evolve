@@ -280,16 +280,18 @@ copies pinned to Core revision `bf9d61c1482da6f0ad46fab660270cc8484d9f6f`,
 verified offline by digest. This does not certify that every supported installed
 OptiProfiler version produces that protocol. `jsonschema` is a runtime dependency.
 
-The reader checks file containment, non-symlink regular files, bounded reads,
-receipts, references and numeric shapes. Default limits are 16 MiB for the main
+The reader owns file containment, non-symlink regular files and bounded reads;
+`_eval_report_protocol.py` owns schema, receipt, reference and numeric-shape rules.
+Default limits are 16 MiB for the main
 report and 256 MiB for the companion. The caller authorizes the main report's
 parent; companion paths cannot escape it or traverse symlinks beneath it.
 The reader does not authorize other file paths mentioned in the report, nor act
 as an OS sandbox against concurrent mutation of controller-owned directories.
 
 `load_eval_report` returns an `EvalReportBundle` or raises `EvalReportError`.
-Queries by history, plot or target-work ID are linear-time lookups and return
-borrowed records that callers must not mutate. Numerical/scoring completion is
+Unrecognized versions raise its `UnsupportedEvalReport` subclass. Queries by
+history, plot or target-work ID return borrowed records that callers must not
+mutate; unknown IDs raise `KeyError`. Numerical/scoring completion is
 required; rendering failure alone does not erase valid numerical evidence.
 Validated evidence is not proof of convergence, comparability, reproducibility,
 or permission to publish.
@@ -299,10 +301,15 @@ This is reader support, not a new evaluation path: fitness still comes from
 consumes these reports, and `agent_report.json` is not treated as an alias.
 
 Before full worker artifact copying, feedback discovers standard-named
-`eval_report.json` files and reads only their main-report receipts to exclude
+`eval_report.json` files at the output root and beneath `benchmark/`, and checks
+only their version and companion receipt paths, not the full numerical report, to exclude
 both the main files and their contained companion paths, including custom
-companion names. Missing or malformed receipts abort artifact copying before
-any benchmark file is copied. Nonstandard main-report names are not discovered;
+companion names. Root receipts matter because their companions may reside in
+`benchmark/`. Missing, malformed or unsupported receipts withhold additional
+artifacts before any benchmark file is copied, but preserve the evaluation's
+score and success status. The controller retains `feedback_warning.json` and
+emits a private `feedback_artifacts_withheld` event; the worker sees only a generic
+notice. Nonstandard main-report names are not discovered;
 future producer integration must supply explicit report paths and a separately
 allowlisted public projection. Raw report files are never added to the public
 bundle allowlist.

@@ -8,10 +8,30 @@ from pathlib import Path
 
 from optiprofiler_evolve.agents.feedback import project_feedback
 from optiprofiler_evolve.models import EvaluationResult
-from optiprofiler_evolve.observability.eval_reports import EvalReportError
 
 
 class FeedbackProjectionTests(unittest.TestCase):
+    def test_root_receipt_can_withhold_a_companion_inside_benchmark(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "private"
+            benchmark = source / "benchmark"
+            benchmark.mkdir(parents=True)
+            (source / "eval_report.json").write_text(json.dumps({
+                "schema": "optiprofiler.eval_report/1",
+                "plot_data": {"path": "benchmark/secret.json"},
+            }))
+            (benchmark / "secret.json").write_text("PRIVATE_NUMBERS")
+            unrelated = source / "controller_only"
+            unrelated.mkdir()
+            (unrelated / "eval_report.json").write_text("broken and irrelevant")
+            destination = root / "feedback"
+            warning = project_feedback(
+                source, destination, EvaluationResult("public", 0.5, 0.5, 0.5, 1, source),
+                mode="full_artifacts",
+            )
+            self.assertIsNone(warning)
+            self.assertFalse((destination / "benchmark/secret.json").exists())
     def test_raw_reports_and_custom_named_companions_are_not_feedback(self):
         for companion_name in ("eval_report.plot_data.json", "numeric-private.log"):
             with self.subTest(companion=companion_name), tempfile.TemporaryDirectory() as directory:
@@ -38,7 +58,7 @@ class FeedbackProjectionTests(unittest.TestCase):
                 self.assertNotIn(companion_name, index)
                 self.assertNotIn("eval_report.json", index)
 
-    def test_bad_receipt_aborts_before_copying_any_benchmark_artifact(self):
+    def test_bad_receipt_withholds_artifacts_but_keeps_score(self):
         for bad in ("not json", '{"plot_data": null}'):
             with self.subTest(bad=bad), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -49,8 +69,10 @@ class FeedbackProjectionTests(unittest.TestCase):
                 (benchmark / "eval_report.json").write_text(bad)
                 destination = root / "feedback"
                 result = EvaluationResult("public", 0.5, 0.5, 0.5, 1, source)
-                with self.assertRaises(EvalReportError):
-                    project_feedback(source, destination, result, mode="full_artifacts")
+                warning = project_feedback(source, destination, result, mode="full_artifacts")
+                self.assertIsNotNone(warning)
+                self.assertEqual(json.loads((destination / "result.json").read_text())["score"], 0.5)
+                self.assertNotIn(str(source), (destination / "feedback.md").read_text())
                 self.assertFalse((destination / "benchmark").exists())
                 self.assertFalse((destination / "artifact_index.json").exists())
 
@@ -69,8 +91,8 @@ class FeedbackProjectionTests(unittest.TestCase):
                     main["plot_data"]["path"] = "../private.json"
                 main_path.write_text(json.dumps(main))
                 result = EvaluationResult("public", 0.5, 0.5, 0.5, 1, source)
-                with self.assertRaises(EvalReportError):
-                    project_feedback(source, root / "feedback", result, mode="full_artifacts")
+                warning = project_feedback(source, root / "feedback", result, mode="full_artifacts")
+                self.assertIsNotNone(warning)
                 self.assertFalse((root / "feedback" / "benchmark").exists())
 
     def test_feedback_modes_expose_distinct_evidence(self) -> None:

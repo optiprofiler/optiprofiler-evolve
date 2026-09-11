@@ -31,7 +31,7 @@ def _write_public_events(path: Path, rows: list[tuple[str, str, str, dict, dict]
 
 
 class PublicViewerTests(unittest.TestCase):
-    def test_raw_eval_reports_never_enter_public_bundle(self):
+    def test_existing_public_allowlist_also_excludes_raw_eval_reports(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "PUBLIC_REPORT.md").write_text("safe summary")
