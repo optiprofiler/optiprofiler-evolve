@@ -211,21 +211,23 @@ the execution path. Agents, criteria and observability implement the execution
 ports. Lower layers never import application; the coordinator does not import
 Docker, LLM clients, brokers, analyzers, reviewers or HTML implementations.
 
-`RunState` owns the run's registries, staged artifacts and selected results.
+`RunState` owns the run's registries and committed phase results. Core result
+constructors derive artifacts from their typed fields; state artifacts and
+champion/final accessors are read-only views of these results, not separate stores.
 `RunCommits` is the only production writer. Ordinary attempts and research
 finalists retain immutable candidate records and submit them through this same
 authority. Admission and research qualification remain distinct operations:
 their gates differ, so neither is forced through a fictitious linear status chain.
 
 Each phase sees only its `requires` artifacts and available `optional_requires`
-artifacts. Optional inputs do not impose ordering or require their producer to
-run; scout directions are an example. Context factories are registered mappings,
+artifacts. Optional producers may be absent, but configured producers must precede
+their consumers; scout directions are an example. Context factories are registered mappings,
 not action dispatchers. Failed/cancelled phase results are never committed;
 successful and skipped phases must publish exactly their declared outputs.
 
 The default five-phase order is unchanged, but configured workflows may contain
 any ordered list, including no phases. After constructing components, preflight
-checks unique resolved phase names and required inputs against preceding outputs.
+in `phases/contracts.py` checks unique resolved phase names and inputs against preceding outputs.
 Optional `validate_config(config)` hooks check phase-specific configuration using
 the constructed options. No directory or run infrastructure exists yet. The
 coordinator does not reorder phases or invent missing producers.
@@ -239,7 +241,8 @@ data-split handle. See [custom workflows](custom-workflows.md) for an example.
 
 One `RunState` persists throughout a run. Once validation fixes the champion,
 controller commit and service entries reject further admission, population edits,
-finalist registration and reselection. Hidden checks the fixed identity and tree
+finalist registration and reselection. Entry checks avoid expensive work; commit
+checks protect authoritative writes. Hidden checks the fixed champion's tree
 hash and consumes a single-use authorization before evaluation, even if it fails.
 Removing hidden is allowed unless a champion-returning run requires a lockbox.
 Post-selection public challenger comparisons remain evidence-only.
@@ -251,6 +254,10 @@ and formal assessment, but has no final score or finalists. Hidden's exported
 solver takes precedence when present. `artifacts` is a detached top-level
 read-only mapping, not a deep state snapshot; exceptions and cancellation are
 not converted into partial success.
+The final integrity check hashes the path actually returned, including the export
+after any optional post-selection phases. One lockbox policy checks planned core
+implementations at assembly and committed typed results at publication; ordinary
+artifact names cannot satisfy it.
 
 File formats and paths remain owned by their subsystems. This refactor does not
 add generic path dispatch, wrapper registries around dictionaries, another

@@ -755,14 +755,14 @@
       "properties": {
         "phases": {
           "type": "array",
-          "description": "Ordered phases, possibly empty. Required artifacts must be produced earlier; dependencies and phase configuration hooks are checked before run startup.",
+          "description": "Ordered phases, possibly empty. Required inputs and configured optional producers must precede consumers; dependencies and phase configuration hooks are checked before run startup.",
           "items": {
             "$ref": "#/$defs/ComponentConfig"
           }
         },
         "attempt_steps": {
           "type": "array",
-          "description": "Steps constructed for attempt-using phases. Attempt execution requires mutate and public_evaluate; other workflows may leave this empty.",
+          "description": "Steps constructed for ExplorePhase workflows, validated before startup to include mutate and public_evaluate. Without ExplorePhase, defaults or an empty list are both valid and names are not resolved.",
           "items": {
             "$ref": "#/$defs/ComponentConfig"
           }

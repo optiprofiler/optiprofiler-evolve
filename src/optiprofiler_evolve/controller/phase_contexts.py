@@ -75,15 +75,13 @@ def hidden_context(bindings, base: PhaseContext) -> PhaseContext:
     if (
         environment.state.champion is None
         or environment.state.evaluator is None
-        or environment.state.data is None
     ):
         raise RuntimeError("Hidden phase requires a validation-selected champion.")
     return HiddenContext(
         **common,
         champion=environment.state.champion,
         evaluator=environment.state.evaluator,
-        data=environment.state.data,
-        begin_holdout=environment.commits.begin_holdout,
+        begin_hidden=environment.commits.begin_hidden,
     )
 
 

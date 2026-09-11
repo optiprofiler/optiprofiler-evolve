@@ -5,12 +5,20 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from optiprofiler_evolve.config import EvolveConfig
 from optiprofiler_evolve.files import append_json as _append_json
 from optiprofiler_evolve.files import write_json as _write_json
 from optiprofiler_evolve.solver import tree_hash
 
 if TYPE_CHECKING:
     from optiprofiler_evolve.controller.runtime import RunEnvironment
+
+
+def require_lockbox(config: EvolveConfig, *, champion: bool, hidden: bool) -> None:
+    """Apply one policy to planned core stages and, later, committed typed results."""
+    if config.data.split.lockbox_required and champion:
+        if not hidden or not config.assessment.enabled("performance", "hidden"):
+            raise ValueError("A required lockbox needs hidden performance evaluation.")
 
 
 class ValidationSelector:

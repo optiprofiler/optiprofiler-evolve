@@ -14,13 +14,13 @@ from worker_helpers import RunnerAdapter
 from optiprofiler_evolve import evolve
 from optiprofiler_evolve.application.run import EvolutionRun
 from optiprofiler_evolve.config import ComponentConfig, load_config
-from optiprofiler_evolve.controller.coordinator import RunCoordinator
+from optiprofiler_evolve.controller.contracts import VariantRequest
 from optiprofiler_evolve.controller.registry import build
 from optiprofiler_evolve.errors import RunCancelled
 from optiprofiler_evolve.phases.attempts.contracts import PopulationEdit
-from optiprofiler_evolve.phases.contracts import PhaseResult
-from optiprofiler_evolve.phases.hidden import HiddenPhase
-from optiprofiler_evolve.phases.prepare import PreparedArtifact
+from optiprofiler_evolve.phases.contracts import PhaseResult, validate_workflow
+from optiprofiler_evolve.phases.hidden import HiddenPhase, HiddenResult
+from optiprofiler_evolve.phases.prepare import PreparedArtifact, PrepareResult
 from optiprofiler_evolve.phases.validate import ValidateResult
 from optiprofiler_evolve.solver import InterfaceSpec
 
@@ -89,7 +89,7 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(set(result.artifacts), set().union(*(p.provides for p in phases)))
                 with self.assertRaises(TypeError):
                     result.artifacts["extra"] = True
-                run.state.artifacts["later"] = True
+                run.commits.commit_phase_result(PhaseResult(artifacts={"later": True}))
                 self.assertNotIn("later", result.artifacts)
                 self.assertFalse((result.run_dir / "FINAL_REPORT.md").exists())
         self.assertEqual(dict(consumer.inputs), {"evidence": "evidence"})
@@ -142,14 +142,6 @@ class WorkflowTests(unittest.TestCase):
             run.run()
             with self.assertRaisesRegex(ValueError, "attempt_steps must include"):
                 self.make_run(("prepare", "explore"), config=config)
-
-    def test_attempt_entry_rejects_missing_steps_before_work(self):
-        run = self.make_run(())
-        with self.assertRaisesRegex(ValueError, "attempt_steps must include"):
-            run.attempt_runner.run(
-                iteration=1, island=0, attempt_index=0, parent=Mock(), worker=Mock(),
-            )
-        self.assertFalse(run.run_dir.exists())
 
     def test_prepared_seed_is_not_implicitly_returned_as_champion(self):
         result = self.make_run(("prepare",)).run()
@@ -225,19 +217,40 @@ class WorkflowTests(unittest.TestCase):
             self.make_run(config=disabled)
         run = self.make_run(config=config)
         run.run()
-        self.assertTrue(run.state.holdout_started)
+        self.assertTrue(run.state.hidden_started)
         self.assertEqual(FakeEvaluator.calls.count("hidden"), 1)
         fake_final = ArtifactPhase("fake_final", requires=("champion",), provides=("final",))
-        with self.assertRaisesRegex(RuntimeError, "required lockbox"):
+        with self.assertRaisesRegex(ValueError, "required lockbox"):
             self.make_run(
                 ("prepare", "explore", "validate", fake_final), config=config, name="fake-final",
             ).run()
+        self.assertFalse((self.root / "fake-final").exists())
 
     def test_research_requirements_are_owned_by_phase_hooks(self):
         config = self.config.with_criterion("performance", enabled=False)
         for name in ("strategy_analysis", "strategy_transfer", "recombine", "challenger"):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "public performance"):
                 build("phase", ComponentConfig(name)).validate_config(config)
+
+    def test_lockbox_uses_committed_core_results_not_custom_artifact_names(self):
+        class SelectCandidate(ArtifactPhase):
+            def run(self, context):
+                return ValidateResult(champion=(0, context.artifacts["populations"][0][0]))
+
+        raw = minimal_config()
+        raw["data"]["split"]["lockbox_required"] = True
+        config = load_config(raw)
+        names_only = ArtifactPhase("names_only", provides=("champion", "final"))
+        result = self.make_run((names_only,), config=config, name="names-only").run()
+        self.assertIsNone(result.best_candidate_id)
+        self.assertEqual(set(result.artifacts), {"champion", "final"})
+
+        selection = SelectCandidate("custom_selection", requires=("populations",), provides=("champion",))
+        run = self.make_run(("prepare", "explore", selection), config=config, name="custom-selection")
+        with self.assertRaisesRegex(ValueError, "required lockbox"):
+            run.run()
+        self.assertIsNotNone(run.state.champion)
+        self.assertNotIn("hidden", FakeEvaluator.calls)
 
     def test_failures_and_cancellation_are_not_converted_into_partial_success(self):
         for status, error in (("failed", RuntimeError), ("cancelled", RunCancelled)):
@@ -272,43 +285,144 @@ class WorkflowTests(unittest.TestCase):
                 action()
         self.assertIs(run.state.champion, champion)
 
-    def test_holdout_checks_champion_identity_and_hash_before_query(self):
-        run = self.make_run(("prepare", "explore", "validate"))
-        run.run()
-        island, champion = run.state.champion
-        forged = dataclasses.replace(champion, candidate_id="other")
-        with self.assertRaisesRegex(ValueError, "fixed champion"):
-            run.commits.begin_holdout((island, forged))
-        self.assertFalse(run.state.holdout_started)
-        (champion.path / "solver.py").write_text("changed", encoding="utf-8")
+    def test_hidden_checks_tree_changed_by_a_configured_intervening_phase(self):
+        class ChangeChampion(ArtifactPhase):
+            def run(self, context):
+                champion = context.artifacts["champion"][1]
+                (champion.path / "solver.py").write_text("changed", encoding="utf-8")
+                return PhaseResult()
+
+        change = ChangeChampion("change", requires=("champion",), provides=())
+        run = self.make_run(("prepare", "explore", "validate", change, "hidden"))
         with self.assertRaisesRegex(ValueError, "Champion changed"):
-            run.coordinator.run_phase(HiddenPhase(), {})
-        self.assertFalse(run.state.holdout_started)
+            run.run()
+        self.assertFalse(run.state.hidden_started)
         self.assertNotIn("hidden", FakeEvaluator.calls)
 
     def test_failed_holdout_consumes_single_query_and_publishes_nothing(self):
-        run = self.make_run(("prepare", "explore", "validate"))
-        run.run()
-        with patch.object(run.state.evaluator, "evaluate", side_effect=OSError("holdout failed")) as call:
-            with self.assertRaisesRegex(OSError, "holdout failed"):
-                run.coordinator.run_phase(HiddenPhase(), {})
+        class RetryHidden(HiddenPhase):
+            def run(self, context):
+                try:
+                    return super().run(context)
+                except RuntimeError:
+                    return super().run(context)
+
+        run = self.make_run(("prepare", "explore", "validate", RetryHidden()))
+        evaluate = FakeEvaluator.evaluate
+
+        def fail_hidden(evaluator, candidate, mode, output_dir):
+            if mode == "hidden":
+                evaluator.calls.append(mode)
+                raise OSError("hidden failed")
+            return evaluate(evaluator, candidate, mode, output_dir)
+
+        with patch.object(FakeEvaluator, "evaluate", fail_hidden):
             with self.assertRaisesRegex(RuntimeError, "already been started"):
-                run.coordinator.run_phase(HiddenPhase(), {})
-            call.assert_called_once()
-        self.assertTrue(run.state.holdout_started)
+                run.run()
+        self.assertEqual(FakeEvaluator.calls.count("hidden"), 1)
+        self.assertTrue(run.state.hidden_started)
         self.assertIsNone(run.state.final_result)
         self.assertNotIn("final", run.state.artifacts)
 
     def test_successful_holdout_cannot_be_repeated(self):
-        run = self.make_run(("prepare", "explore", "validate", "hidden"))
-        run.run()
+        class RepeatHidden(HiddenPhase):
+            def run(self, context):
+                super().run(context)
+                return super().run(context)
+
+        run = self.make_run(("prepare", "explore", "validate", RepeatHidden()))
         with self.assertRaisesRegex(RuntimeError, "already been started"):
-            run.coordinator.run_phase(HiddenPhase(), {})
+            run.run()
         self.assertEqual(FakeEvaluator.calls.count("hidden"), 1)
 
     def test_preflight_does_not_sort_or_invent_missing_producers(self):
         producer = ArtifactPhase("producer", provides=("evidence",))
         consumer = ArtifactPhase("consumer", requires=("evidence",))
         with self.assertRaisesRegex(ValueError, "missing artifacts.*evidence"):
-            RunCoordinator.preflight((consumer, producer), self.config)
-        RunCoordinator.preflight((producer, consumer), self.config)
+            validate_workflow((consumer, producer), self.config)
+        validate_workflow((producer, consumer), self.config)
+
+    def test_late_optional_producer_fails_before_directory_or_worker(self):
+        with self.assertRaisesRegex(ValueError, "directions.*producers must run before"):
+            self.make_run(("prepare", "explore", "direction_scout", "validate", "hidden", "report"))
+        self.assertFalse((self.root / "run").exists())
+        self.worker.assert_not_called()
+        self.evaluator.assert_not_called()
+
+    def test_optional_producer_absent_or_earlier_is_valid(self):
+        producer = ArtifactPhase("producer", provides=("absent",))
+        producer.optional_requires = frozenset()
+        consumer = ArtifactPhase("consumer")
+        validate_workflow((consumer,), self.config)
+        validate_workflow((producer, consumer), self.config)
+        with self.assertRaisesRegex(ValueError, "optional artifacts"):
+            validate_workflow((consumer, producer), self.config)
+
+    def test_core_results_derive_artifacts_and_state_has_no_duplicate_fields(self):
+        run = self.make_run(("prepare", "explore", "validate", "hidden"))
+        run.run()
+        fields = {item.name for item in dataclasses.fields(run.state)}
+        self.assertTrue(fields.isdisjoint({"champion", "final_result", "final_solver", "artifacts"}))
+        for result in run.state.phase_results:
+            if isinstance(result, PrepareResult):
+                self.assertIs(result.artifacts["prepared"], result.prepared)
+            elif isinstance(result, ValidateResult):
+                self.assertIs(result.artifacts["champion"], result.champion)
+                self.assertIs(run.state.champion, result.champion)
+            elif isinstance(result, HiddenResult):
+                self.assertIs(result.artifacts["final"], result.final_result)
+                self.assertIs(run.state.final_solver, result.final_solver)
+            else:
+                continue
+            with self.assertRaises((ValueError, TypeError)):
+                dataclasses.replace(result, artifacts={"forged": True})
+            with self.assertRaises(TypeError):
+                result.artifacts["forged"] = True
+        with self.assertRaises(AttributeError):
+            run.state.champion = None
+        with self.assertRaises(TypeError):
+            run.state.artifacts["champion"] = None
+
+    def test_configured_late_research_phase_cannot_select_or_materialize(self):
+        class LateResearch(ArtifactPhase):
+            def __init__(self, operation):
+                super().__init__("late_research", requires=("champion",), provides=())
+                self.operation = operation
+
+            def run(self, context):
+                champion = context.artifacts["champion"][1]
+                if self.operation == "select":
+                    context.services.select_by_validation((champion.candidate_id,), 1)
+                else:
+                    context.services.materialize_variant(VariantRequest("late", champion.path))
+                return PhaseResult()
+
+        for operation in ("select", "materialize"):
+            run = self.make_run(
+                ("prepare", "explore", "validate", LateResearch(operation)), name=operation,
+            )
+            with self.subTest(operation=operation), self.assertRaisesRegex(RuntimeError, "Champion is fixed"):
+                run.run()
+            self.assertFalse((run.run_dir / "research" / "variant_staging").exists())
+            self.assertEqual(run.state.validation_selection_count, 0)
+
+    def test_return_integrity_checks_export_not_its_old_candidate_copy(self):
+        class ChangeTree(ArtifactPhase):
+            def __init__(self, exported):
+                super().__init__("change_tree", requires=("champion", "final_solver"), provides=())
+                self.exported = exported
+
+            def run(self, context):
+                path = (context.artifacts["final_solver"] if self.exported
+                        else context.artifacts["champion"][1].path)
+                (path / "solver.py").write_text("changed", encoding="utf-8")
+                return PhaseResult()
+
+        original = self.make_run(
+            ("prepare", "explore", "validate", "hidden", ChangeTree(False)), name="old-copy",
+        ).run()
+        self.assertTrue(original.best_solver.is_dir())
+        with self.assertRaisesRegex(ValueError, "Returned solver changed"):
+            self.make_run(
+                ("prepare", "explore", "validate", "hidden", ChangeTree(True)), name="export",
+            ).run()

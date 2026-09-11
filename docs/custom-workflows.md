@@ -9,18 +9,26 @@ It returns `PhaseResult(artifacts=...)`. No inheritance or central context
 registration is required. Typed artifact dataclasses belong beside their owning
 phase; the built-in `prepared` output is a frozen `PreparedArtifact`.
 
-The coordinator constructs phases and validates their required inputs against
+Application constructs phases and `validate_workflow` checks their inputs against
 preceding outputs before creating the run directory. Duplicate resolved names
 and missing inputs fail immediately. An optional `validate_config(config)` hook
 checks phase-specific configuration, using options already applied by the
 constructor. `optional_requires` declares inputs that are passed only when
-available. Neither optional inputs nor preflight reorder the workflow.
+available. Their producer may be absent, but a configured producer must precede
+its consumer; placing direction scout after explore fails before any model call.
+Preflight never reorders the workflow. The optional extension adapters and their
+defaults are documented together in `phases/contracts.py`.
 
 Contexts expose only declared inputs, read-only options, an event emitter and
 the existing bounded controller services. Successful and skipped phases must
 return exactly their declared outputs. Failed or cancelled results never publish
 artifacts; exceptions propagate. A phase failure does not undo already completed
 file writes or earlier candidate commits, and checkpoints do not implement resume.
+Core result constructors accept typed fields only and derive their artifacts.
+`RunState` stores committed phase results; its artifacts and typed accessors are
+read-only views, not additional independently writable registries. `requires`
+also declares ordering prerequisites delivered through typed contexts (for
+example, hidden's prepared evaluator), not just dictionary values read by a phase.
 
 ## Two ordinary phases, no model calls
 
@@ -54,10 +62,11 @@ deep immutable snapshot, serialization format, or sanitized public export.
 Removing a producer requires removing or replacing its dependents. For example,
 report still requires hidden's `final` and `final_solver` outputs. To generate a
 pre-holdout summary, supply a separate phase with the appropriate inputs instead
-of fabricating final scores. Set `attempt_steps: []` when no phase runs attempts;
-the built-in explore phase declares `uses_attempts = True` and validates its
-mandatory mutate/public-evaluate steps. The attempt entry also enforces those
-steps if invoked through a controller extension.
+of fabricating final scores. Without an `ExplorePhase` (or subclass), attempt
+steps are not constructed; leaving defaults or setting `attempt_steps: []` are
+both valid. Unused step names are not resolved. Only `ExploreContext` grants
+attempt execution, so there is no general `uses_attempts` flag. Explore validates
+mandatory mutate/public-evaluate steps once during assembly, not on each attempt.
 
 ## Authority does not come from artifact names
 
@@ -68,8 +77,17 @@ phase. Owner plugins are trusted code, not an in-process security sandbox.
 
 After a champion is selected, controller entries reject new candidates,
 population edits, finalist registration and reselection. Hidden checks the fixed
-champion identity and source hash, then consumes its one query before execution;
+champion's source hash, then consumes its one query before execution;
 a failure cannot be retried. If `data.split.lockbox_required` is true, a run
 returning a champion must perform hidden performance evaluation. Independent
 post-selection public challenger comparisons may still produce evidence, but
 cannot affect selection. Validation and hidden data must never enter a worker.
+
+Lockbox policy is shared: assembly checks actual `ValidatePhase`/`HiddenPhase`
+implementations, and final publication checks their committed typed results.
+The latter covers trusted extensions that submit core results without being
+built-in phases; naming an ordinary artifact `final` grants no authority. Service
+entry guards avoid expensive work after selection closes; commit guards protect
+state writes, including proposals made without those service entrypoints.
+Publication hashes the exported solver when present, otherwise the selected
+candidate, because optional post-selection phases can still modify files.

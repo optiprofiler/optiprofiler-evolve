@@ -4,36 +4,15 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
-from optiprofiler_evolve.config import ComponentConfig, EvolveConfig
+from optiprofiler_evolve.config import ComponentConfig
 from optiprofiler_evolve.controller.commits import RunCommits
 from optiprofiler_evolve.controller.contracts import ControllerServices
 from optiprofiler_evolve.controller.state import RunState
 from optiprofiler_evolve.errors import RunCancelled
-from optiprofiler_evolve.phases.contracts import Phase, PhaseContext
+from optiprofiler_evolve.phases.contracts import Phase, PhaseContext, phase_optional_requires
 
 
 class RunCoordinator:
-    @staticmethod
-    def preflight(phases: tuple[Phase, ...], config: EvolveConfig) -> None:
-        names: set[str] = set()
-        available: set[str] = set()
-        for phase in phases:
-            if phase.name in names:
-                raise ValueError(f"Duplicate phase name {phase.name!r}.")
-            names.add(phase.name)
-            missing = phase.requires.difference(available)
-            if missing:
-                raise ValueError(
-                    f"Phase {phase.name!r} requires missing artifacts {sorted(missing)!r}."
-                )
-            validate = getattr(phase, "validate_config", None)
-            if validate is not None:
-                validate(config)
-            available.update(phase.provides)
-        if config.data.split.lockbox_required and "champion" in available:
-            if "final" not in available or not config.assessment.enabled("performance", "hidden"):
-                raise ValueError("A required lockbox needs hidden performance evaluation.")
-
     def __init__(
         self,
         *,
@@ -62,25 +41,22 @@ class RunCoordinator:
             self.run_phase(phase, spec.options)
 
     def run_phase(self, phase: Phase, options: Mapping[str, object]) -> Mapping[str, object]:
+        """Execute one stage of the prevalidated workflow and verify its outputs."""
         self.raise_if_cancelled()
-        missing = phase.requires.difference(self.state.artifacts)
-        if missing:
-            raise RuntimeError(
-                f"Phase {phase.name!r} requires missing artifacts {sorted(missing)!r}."
-            )
         scope = {"phase": phase.name}
         self.emit("phase_started", "running", scope=scope)
         self.refresh()
         try:
-            inputs = phase.requires.union(getattr(phase, "optional_requires", ()))
+            inputs = phase.requires.union(phase_optional_requires(phase))
+            artifacts = self.state.artifacts
             context = PhaseContext(
                 run_dir=self.run_dir,
                 options=MappingProxyType(dict(options)),
                 artifacts=MappingProxyType(
                     {
-                        key: self.state.artifacts[key]
+                        key: artifacts[key]
                         for key in inputs
-                        if key in self.state.artifacts
+                        if key in artifacts
                     }
                 ),
                 emit=lambda kind, status, data=None: self.emit(

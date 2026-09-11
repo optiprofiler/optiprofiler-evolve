@@ -17,7 +17,7 @@ class CoordinatorTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        self.state = RunState(artifacts={"input": "public", "private": "secret"})
+        self.state = RunState(phase_results=[PhaseResult(artifacts={"input": "public", "private": "secret"})])
         self.commits = RunCommits(self.state, Mock(), Path(directory.name), Mock(), Mock(), Mock())
         self.coordinator = RunCoordinator(
             state=self.state,
@@ -66,7 +66,7 @@ class CoordinatorTests(unittest.TestCase):
         )
         phase.optional_requires = frozenset({"directions"})
         self.coordinator.run_phase(phase, {})
-        self.state.artifacts["directions"] = "scout evidence"
+        self.commits.commit_phase_result(PhaseResult(artifacts={"directions": "scout evidence"}))
         self.coordinator.run_phase(phase, {})
         self.assertEqual(
             observed, [{"input": "public"}, {"input": "public", "directions": "scout evidence"}]

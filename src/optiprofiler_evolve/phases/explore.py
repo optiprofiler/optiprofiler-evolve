@@ -51,7 +51,6 @@ class ExplorePhase:
     requires = frozenset(["prepared"])
     optional_requires = frozenset({"directions"})
     provides = frozenset(["populations"])
-    uses_attempts = True
 
     def validate_config(self, config: EvolveConfig) -> None:
         validate_attempt_steps(item.name for item in config.workflow.attempt_steps)

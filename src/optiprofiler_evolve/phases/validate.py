@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 
 from optiprofiler_evolve.files import write_json as _write_json
 from optiprofiler_evolve.models import CandidateRecord
@@ -20,7 +20,12 @@ class ValidateContext(PhaseContext):
 
 @dataclass(frozen=True, kw_only=True)
 class ValidateResult(PhaseResult):
+    artifacts: Mapping[str, object] = field(init=False)
     champion: tuple[int, CandidateRecord]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "artifacts", {"champion": self.champion})
+        super().__post_init__()
 
 
 class ValidatePhase:
@@ -65,4 +70,4 @@ class ValidatePhase:
                 "finalists": [record.candidate_id for _, record in finalists],
             },
         )
-        return ValidateResult(artifacts={"champion": champion}, champion=champion)
+        return ValidateResult(champion=champion)

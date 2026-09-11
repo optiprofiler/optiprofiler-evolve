@@ -55,18 +55,16 @@ class RunCommits:
         if self.state.champion is not None:
             raise RuntimeError("Champion is fixed; candidate selection is closed.")
 
-    def begin_holdout(self, champion: tuple[int, CandidateRecord]) -> None:
-        if self.state.holdout_started:
+    def begin_hidden(self) -> None:
+        if self.state.hidden_started:
             raise RuntimeError("Hidden evaluation has already been started.")
         selected = self.state.champion
-        if selected is None or (
-            champion[0], champion[1].candidate_id, champion[1].tree_hash, champion[1].path
-        ) != (selected[0], selected[1].candidate_id, selected[1].tree_hash, selected[1].path):
+        if selected is None:
             raise ValueError("Hidden evaluation requires the fixed champion.")
         if tree_hash(selected[1].path) != selected[1].tree_hash:
             raise ValueError("Champion changed after formal assessment.")
-        # Consume before execution: a failed holdout must not permit another query.
-        self.state.holdout_started = True
+        # Consume before execution: a failed hidden evaluation must not permit another query.
+        self.state.hidden_started = True
 
     def set_directions(self, directions: Mapping[int, dict[str, object]]) -> None:
         self.require_open_selection()
@@ -77,9 +75,6 @@ class RunCommits:
             raise ValueError("Cannot commit a failed or cancelled phase result.")
         if isinstance(result, PrepareResult):
             self.require_open_selection()
-            self.state.data = result.data
-            self.state.reference = result.reference
-            self.state.evaluator = result.evaluator
             self.state.candidates[result.seed.candidate_id] = result.seed
             self.state.populations = [[result.seed] for _ in range(self.config.evolution.islands)]
             self.write_checkpoint(0)
@@ -89,19 +84,12 @@ class RunCommits:
             registered = self.state.candidates.get(champion.candidate_id)
             if registered is not champion or not champion.valid or champion.assessment_score is None:
                 raise ValueError("Champion must be an admitted, formally assessed candidate.")
-            if tree_hash(champion.path) != champion.tree_hash:
-                raise ValueError("Champion changed after formal assessment.")
-            self.state.champion = result.champion
         elif isinstance(result, HiddenResult):
-            if not self.state.holdout_started or self.state.champion is None:
-                raise RuntimeError("Hidden result requires an authorized holdout.")
+            if not self.state.hidden_started:
+                raise RuntimeError("Hidden result requires an authorized hidden evaluation.")
             if self.state.final_result is not None:
                 raise RuntimeError("Hidden result has already been committed.")
-            if result.final_result.candidate_id != self.state.champion[1].candidate_id:
-                raise ValueError("Hidden result does not belong to the fixed champion.")
-            self.state.final_result = result.final_result
-            self.state.final_solver = result.final_solver
-        self.state.artifacts.update(result.artifacts)
+        self.state.phase_results.append(result)
 
     def record_variant(self, handle: VariantHandle, base: Path) -> None:
         self.require_open_selection()

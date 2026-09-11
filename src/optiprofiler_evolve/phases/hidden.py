@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from optiprofiler_evolve.criteria.performance.contracts import Evaluator
-from optiprofiler_evolve.data import DataPlan
 from optiprofiler_evolve.models import CandidateRecord, FinalistResult
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 from optiprofiler_evolve.solver import copy_solver_tree
@@ -17,14 +16,20 @@ from optiprofiler_evolve.solver import copy_solver_tree
 class HiddenContext(PhaseContext):
     champion: tuple[int, CandidateRecord]
     evaluator: Evaluator
-    data: DataPlan
-    begin_holdout: Callable[[tuple[int, CandidateRecord]], None]
+    begin_hidden: Callable[[], None]
 
 
 @dataclass(frozen=True, kw_only=True)
 class HiddenResult(PhaseResult):
+    artifacts: Mapping[str, object] = field(init=False)
     final_result: FinalistResult
     final_solver: Path
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "artifacts", {
+            "final": self.final_result, "final_solver": self.final_solver,
+        })
+        super().__post_init__()
 
 
 class HiddenPhase:
@@ -36,16 +41,15 @@ class HiddenPhase:
 
     def run(self, context: HiddenContext) -> HiddenResult:
         island, champion = context.champion
-        context.begin_holdout(context.champion)
+        context.begin_hidden()
         final_result = _evaluate_hidden_champion(
-            context.run_dir, island, champion, context.evaluator, context.data
+            context.run_dir, island, champion, context.evaluator
         )
         if not final_result.success:
             raise RuntimeError(f"Controller-only hidden evaluation failed: {final_result.error}")
         final_solver = context.run_dir / "final_solver"
         copy_solver_tree(champion.path, final_solver)
         return HiddenResult(
-            artifacts={"final": final_result, "final_solver": final_solver},
             final_result=final_result, final_solver=final_solver,
             status="skipped" if final_result.assessment_status == "skipped" else "succeeded",
         )
@@ -56,7 +60,6 @@ def _evaluate_hidden_champion(
     island: int,
     record: CandidateRecord,
     evaluator: Evaluator,
-    data: DataPlan,
 ) -> FinalistResult:
     output_dir = run_dir / "controller" / "final_evaluations" / record.candidate_id
     result = evaluator.evaluate(record.path, "hidden", output_dir)

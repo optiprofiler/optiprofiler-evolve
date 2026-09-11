@@ -110,7 +110,6 @@ class WorkflowConfig:
     )
 
     def validate(self) -> None:
-        _validate_unique_components(self.phases, "workflow.phases")
         _validate_unique_components(self.attempt_steps, "workflow.attempt_steps")
         _validate_unique_components(self.after_iteration, "workflow.after_iteration")
 

@@ -32,7 +32,7 @@ from optiprofiler_evolve.controller.selection import (
     RetentionPolicy,
 )
 from optiprofiler_evolve.controller.state import RunState
-from optiprofiler_evolve.controller.validation import ValidationSelector
+from optiprofiler_evolve.controller.validation import ValidationSelector, require_lockbox
 from optiprofiler_evolve.controller.variants import VariantMaterializer
 from optiprofiler_evolve.criteria.guidance import build_generation_guidance
 from optiprofiler_evolve.criteria.integrity.execution import IntegrityReviewExecutor
@@ -53,7 +53,10 @@ from optiprofiler_evolve.phases.attempts.contracts import (
     AttemptStep,
 )
 from optiprofiler_evolve.phases.attempts.runner import AttemptRunner
-from optiprofiler_evolve.phases.contracts import Phase
+from optiprofiler_evolve.phases.contracts import Phase, validate_workflow
+from optiprofiler_evolve.phases.explore import ExplorePhase
+from optiprofiler_evolve.phases.hidden import HiddenPhase
+from optiprofiler_evolve.phases.validate import ValidatePhase
 from optiprofiler_evolve.solver import (
     InterfaceSpec,
     tree_hash,
@@ -88,7 +91,12 @@ class EvolutionRun:
         self.phases: tuple[Phase, ...] = tuple(
             build("phase", spec) for spec in config.workflow.phases
         )
-        RunCoordinator.preflight(self.phases, config)
+        validate_workflow(self.phases, config)
+        require_lockbox(
+            config,
+            champion=any(isinstance(phase, ValidatePhase) for phase in self.phases),
+            hidden=any(isinstance(phase, HiddenPhase) for phase in self.phases),
+        )
         self.worker_adapter = (
             worker_adapter
             if worker_adapter is not None
@@ -97,9 +105,13 @@ class EvolutionRun:
         self.evaluator_factory = evaluator_factory
         if self.evaluator_factory is None and config.assessment.enabled("performance"):
             self.evaluator_factory = resolve("evaluator", config.execution.adapter)
+        # Only ExploreContext grants attempt execution. Keep its specs for provenance.
+        self.step_specs = config.workflow.attempt_steps if any(
+            isinstance(phase, ExplorePhase) for phase in self.phases
+        ) else ()
         self.attempt_steps: tuple[AttemptStep, ...] = tuple(
-            build("step", spec) for spec in config.workflow.attempt_steps
-        ) if any(getattr(phase, "uses_attempts", False) for phase in self.phases) else ()
+            build("step", spec) for spec in self.step_specs
+        )
         self.after_iteration: tuple[AfterIterationPolicy, ...] = tuple(
             build("policy", spec) for spec in config.workflow.after_iteration
         )
@@ -179,14 +191,14 @@ class EvolutionRun:
     def _result(self) -> EvolveResult:
         champion = self.state.champion[1] if self.state.champion is not None else None
         final = self.state.final_result
-        if champion is not None:
-            if tree_hash(champion.path) != champion.tree_hash:
-                raise ValueError("Champion changed after formal assessment.")
-            if self.config.data.split.lockbox_required and final is None:
-                raise RuntimeError("A required lockbox must be evaluated before returning a champion.")
+        require_lockbox(self.config, champion=champion is not None, hidden=final is not None)
+        best_solver = (self.state.final_solver or champion.path) if champion else None
+        # Optional post-selection phases may touch files; verify the tree we actually return.
+        if best_solver is not None and tree_hash(best_solver) != champion.tree_hash:
+            raise ValueError("Returned solver changed after formal assessment.")
         return EvolveResult(
             run_dir=self.run_dir,
-            best_solver=(self.state.final_solver or champion.path) if champion else None,
+            best_solver=best_solver,
             best_candidate_id=champion.candidate_id if champion else None,
             public_score=champion.public_score if champion else None,
             validation_score=champion.validation_score if champion else None,
@@ -256,7 +268,7 @@ class EvolutionRun:
                     worker_adapter=self.worker_adapter,
                     worker_provenance=self.worker_adapter.provenance(provenance_workers),
                     evaluator_factory=self.evaluator_factory,
-                    attempt_steps=self.config.workflow.attempt_steps if self.attempt_steps else (),
+                    step_specs=self.step_specs,
                 )
                 self.trace_ledger = TraceLedger(
                     self.run_dir,

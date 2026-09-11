@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -22,13 +22,12 @@ from optiprofiler_evolve.solver import InterfaceSpec, copy_initial_source, tree_
 
 @dataclass(frozen=True)
 class PreparedArtifact:
+    """Public seed inputs consumed by research phases; no evaluator or private split."""
+
     seed: Path
     seed_public_evidence: Path
     solver_contract: Path
     islands: int
-    interface: str
-    runtime: str
-    editable: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -104,10 +103,16 @@ class PrepareContext(PhaseContext):
 
 @dataclass(frozen=True, kw_only=True)
 class PrepareResult(PhaseResult):
+    artifacts: Mapping[str, object] = field(init=False)
+    prepared: PreparedArtifact
     data: DataPlan
     reference: Path | None
     evaluator: Evaluator
     seed: CandidateRecord
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "artifacts", {"prepared": self.prepared})
+        super().__post_init__()
 
 
 class PreparePhase:
@@ -200,20 +205,15 @@ class PreparePhase:
             assessment_score=seed_validation.assessment_score,
             assessment=seed_validation.assessment,
         )
-        artifacts = {
-            "prepared": PreparedArtifact(
-                seed=seed_path,
-                seed_public_evidence=seed_public.output_dir,
-                solver_contract=solver_contract,
-                islands=context.config.evolution.islands,
-                interface=f"{context.interface.file}:{context.interface.function}",
-                runtime=context.runtime,
-                editable=tuple(context.editable),
-            )
-        }
+        prepared = PreparedArtifact(
+            seed=seed_path,
+            seed_public_evidence=seed_public.output_dir,
+            solver_contract=solver_contract,
+            islands=context.config.evolution.islands,
+        )
 
         return PrepareResult(
-            artifacts=artifacts,
+            prepared=prepared,
             data=data,
             reference=reference,
             evaluator=evaluator,

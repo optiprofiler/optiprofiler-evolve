@@ -314,9 +314,9 @@ the package.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `workflow.phases[].name` | registered name | `prepare`, `explore`, `validate`, `hidden`, `report` | Ordered run-level phases with declared inputs/outputs. The list may be empty; required inputs must be provided earlier. |
+| `workflow.phases[].name` | registered name | `prepare`, `explore`, `validate`, `hidden`, `report` | Ordered run-level phases with declared inputs/outputs. The list may be empty; required inputs and configured optional producers must precede consumers. |
 | `workflow.phases[].options` | mapping | `{}` | Constructor options for one phase. |
-| `workflow.attempt_steps[].name` | registered name | `mutate`, `smoke`, `public_evaluate` | Ordered candidate-attempt steps. `mutate` and `public_evaluate` are mandatory when attempts execute; unused steps are not constructed without an attempt phase. |
+| `workflow.attempt_steps[].name` | registered name | `mutate`, `smoke`, `public_evaluate` | Ordered candidate-attempt steps. Explore validates mandatory `mutate` and `public_evaluate` steps before startup. Without an ExplorePhase, names are not resolved and steps are not constructed; defaults or an empty list are both valid. |
 | `workflow.attempt_steps[].options` | mapping | `{}` | Constructor options for one attempt step. |
 | `workflow.after_iteration[].name` | registered name | none | Optional policies evaluated after the iteration barrier. They propose edits; only the engine applies them. |
 | `workflow.after_iteration[].options` | mapping | `{}` | Constructor options for one after-iteration policy. |

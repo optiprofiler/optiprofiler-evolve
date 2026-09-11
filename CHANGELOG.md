@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Workflows may omit core phases or be empty. Application now returns
+  `EvolveResult` independently of report, with nullable winner/score fields and
+  a read-only `artifacts` mapping; `without_phase` can remove core stages.
+- Reject configured optional-input producers placed after their consumers before
+  spending run budget. Absent optional producers remain valid. Phase assembly
+  validation and optional extension adapters now live in `phases/contracts.py`.
+- Core phase artifacts and run-state views derive from committed typed results,
+  eliminating separately writable copies of champion and final-result facts.
+  Remove redundant hidden identity and champion-hash checks, validate the actual
+  returned solver tree, and apply one lockbox policy to planned core stages and
+  committed results. Unused attempt steps remain unconstructed.
+
 - Restore the worker task card text to its pre-refactor wording: the parent
   public fitness line, the "blind hyperparameter sweep" and benchmark-evidence
   phrasing, the evaluation-tool descriptions, and the required work order match

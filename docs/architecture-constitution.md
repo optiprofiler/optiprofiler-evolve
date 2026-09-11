@@ -19,6 +19,7 @@ changed deliberately with matching tests.
   in supplied order, unique resolved names and optional phase configuration hooks
   before creating a run directory or infrastructure; it never sorts the list.
 - Available `optional_requires` inputs are passed without requiring a producer.
+  If a producer is configured, it must precede its optional consumer.
   Successful and skipped phases must return exactly their declared outputs.
 - The built-in `explore` phase owns the iteration/island/attempt barrier loop.
 - A candidate attempt is an ordered list of steps.
@@ -42,11 +43,15 @@ changed deliberately with matching tests.
   validation may rank and retain candidates; hidden evaluates one
   validation-selected champion once and never affects the evolution loop.
 - Champion selection closes admission, finalist registration and reselection.
-  The controller checks the fixed champion identity and source hash before
+  The controller checks the fixed champion's source hash before
   authorizing hidden, and consumes that authorization before evaluation. Failure
   cannot authorize a retry. A required lockbox needs hidden performance evaluation.
 - One `RunState` persists across phases; there are no per-phase state subclasses
   or full-system snapshots. `prepared` is a frozen phase-owned data artifact.
+  Core result artifacts derive from their typed fields. Run state retains these
+  committed results, with read-only artifact and champion/final views rather than
+  separately writable copies. Optional phase extensions and defaults are defined
+  together in `phases/contracts.py`; assembly validates their dependencies.
 - Application constructs `EvolveResult` after successful workflow completion.
   Without a champion, winner and score fields are `None`; without hidden, final
   fields are absent (`None`/empty tuple). Report only produces report evidence.
