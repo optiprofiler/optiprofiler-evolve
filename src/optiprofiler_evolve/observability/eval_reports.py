@@ -5,14 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
-import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 from typing import Any
 
+from optiprofiler_evolve.files import read_regular_bytes
 from optiprofiler_evolve.observability._eval_report_protocol import (
     EvalReportError,
     companion_receipt,
@@ -118,28 +117,12 @@ def _read_json_file(path: Path, limit: int, label: str) -> Mapping[str, Any]:
 
 
 def _read_regular_bytes(path: Path, limit: int, label: str) -> bytes:
-    if limit < 0:
-        raise EvalReportError(f"{label.capitalize()} size limit must be nonnegative.")
     try:
-        metadata = path.lstat()
-        if not stat.S_ISREG(metadata.st_mode):
-            raise EvalReportError(f"{label.capitalize()} must be a regular file (no symlinks or special files).")
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-        with os.fdopen(os.open(path, flags), "rb") as handle:
-            opened = os.fstat(handle.fileno())
-            if not stat.S_ISREG(opened.st_mode):
-                raise EvalReportError(f"{label.capitalize()} must be a regular file.")
-            if opened.st_size > limit:
-                raise EvalReportError(f"{label.capitalize()} exceeds the {limit}-byte size limit.")
-            # fstat alone cannot bound a file that grows while it is being read.
-            raw = handle.read(limit + 1)
+        return read_regular_bytes(path, limit)
     except FileNotFoundError as exc:
         raise EvalReportError(f"{label.capitalize()} is missing: {path}.") from exc
     except (OSError, ValueError) as exc:
         raise EvalReportError(f"Could not read {label} {path}: {exc}") from exc
-    if len(raw) > limit:
-        raise EvalReportError(f"{label.capitalize()} exceeds the {limit}-byte size limit.")
-    return raw
 
 
 def _decode_json(raw: bytes, path: Path, label: str) -> Mapping[str, Any]:

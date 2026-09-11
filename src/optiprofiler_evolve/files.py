@@ -4,8 +4,32 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+
+def read_regular_bytes(path: Path, max_bytes: int) -> bytes:
+    """Read a bounded regular file without following its final symlink.
+
+    Callers own the parent-directory boundary and any format-specific decoding.
+    """
+    if max_bytes < 0:
+        raise ValueError("File size limit must be nonnegative.")
+    if not stat.S_ISREG(path.lstat().st_mode):
+        raise ValueError("Expected a regular file, not a symlink or special file.")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    with os.fdopen(os.open(path, flags), "rb") as handle:
+        opened = os.fstat(handle.fileno())
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError("Opened file is not a regular file.")
+        if opened.st_size > max_bytes:
+            raise ValueError(f"File exceeds the {max_bytes}-byte size limit.")
+        raw = handle.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise ValueError(f"File exceeds the {max_bytes}-byte size limit.")
+    return raw
 
 
 def read_json_object(path: Path) -> dict[str, Any]:

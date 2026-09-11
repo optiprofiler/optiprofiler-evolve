@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import json
 import shutil
+import stat
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from optiprofiler_evolve.files import read_regular_bytes, write_json
+
 EXPLANATION_SCHEMA = "solver_explanation/1"
 WORKER_EXPLANATION = Path(".optiprofiler_evolve/solver_explanation.json")
+_MAX_EXPLANATION_BYTES = 1024 * 1024
 
 
 def capture_solver_explanation(
@@ -27,39 +31,34 @@ def capture_solver_explanation(
     """Capture one worker explanation and remove it from candidate source."""
 
     source = workspace / WORKER_EXPLANATION
+    metadata_root = source.parent
     try:
-        if not source.is_file():
-            payload: dict[str, Any] = {
-                "schema": EXPLANATION_SCHEMA,
-                "attempt_id": attempt_id,
-                "status": "missing",
-                "error": "Worker did not produce solver_explanation.json.",
+        metadata = metadata_root.lstat()
+    except FileNotFoundError:
+        metadata = None
+    if metadata is not None and not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError("Explanation directory must be a real directory, not a link.")
+    try:
+        encoded = read_regular_bytes(source, _MAX_EXPLANATION_BYTES)
+    except FileNotFoundError:
+        payload: dict[str, Any] = {
+            "schema": EXPLANATION_SCHEMA, "attempt_id": attempt_id,
+            "status": "missing", "error": "Worker did not produce solver_explanation.json.",
+        }
+    else:
+        try:
+            raw = json.loads(encoded.decode("utf-8"))
+            if not isinstance(raw, Mapping):
+                raise ValueError("explanation must be a JSON object")
+            payload = _normalize(raw, attempt_id=attempt_id, workspace=workspace)
+        except (OSError, TypeError, ValueError, RecursionError) as exc:
+            payload = {
+                "schema": EXPLANATION_SCHEMA, "attempt_id": attempt_id,
+                "status": "invalid", "error": f"{type(exc).__name__}: {exc}",
             }
-        else:
-            try:
-                raw = json.loads(source.read_text(encoding="utf-8"))
-                if not isinstance(raw, Mapping):
-                    raise ValueError("explanation must be a JSON object")
-                payload = _normalize(raw, attempt_id=attempt_id, workspace=workspace)
-            except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-                payload = {
-                    "schema": EXPLANATION_SCHEMA,
-                    "attempt_id": attempt_id,
-                    "status": "invalid",
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
-    finally:
-        metadata_root = workspace / WORKER_EXPLANATION.parts[0]
-        if metadata_root.exists():
-            shutil.rmtree(metadata_root)
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(destination)
+    write_json(destination, payload)
+    if metadata is not None:
+        shutil.rmtree(metadata_root)
     return destination
 
 

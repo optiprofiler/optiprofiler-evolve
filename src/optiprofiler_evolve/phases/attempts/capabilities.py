@@ -20,7 +20,12 @@ from optiprofiler_evolve.config import WorkerConfig
 from optiprofiler_evolve.models import CandidateRecord, EvaluationResult
 from optiprofiler_evolve.phases.attempts.contracts import AttemptCapabilities
 from optiprofiler_evolve.phases.attempts.prompt import build_worker_prompt
-from optiprofiler_evolve.solver import changed_files, tree_hash, validate_edit_scope
+from optiprofiler_evolve.solver import (
+    changed_files,
+    tree_hash,
+    validate_edit_scope,
+    validate_tree_safety,
+)
 
 
 class ControllerAttemptCapabilities(AttemptCapabilities):
@@ -140,6 +145,12 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
             outcome = WorkerOutcome(1, transcript)
         finally:
             broker.stop()
+        # Check raw worker output before reading or removing untrusted metadata.
+        validate_tree_safety(
+            self._workspace,
+            max_files=environment.config.sandbox.max_candidate_files,
+            max_bytes=environment.config.sandbox.max_candidate_bytes,
+        )
         explanation = capture_solver_explanation(
             self._workspace,
             environment.run_dir / "explanations" / f"{self._attempt_id}.json",

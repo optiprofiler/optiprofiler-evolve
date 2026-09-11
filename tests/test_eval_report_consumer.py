@@ -257,7 +257,7 @@ class EvalReportBoundaryTests(unittest.TestCase):
     def test_read_is_bounded_even_if_file_grows_after_fstat(self):
         # A real file exceeds the limit while fstat reports its earlier, smaller size.
         with patch(
-            "optiprofiler_evolve.observability.eval_reports.os.fstat",
+            "optiprofiler_evolve.files.os.fstat",
             return_value=SimpleNamespace(st_mode=self.path.stat().st_mode, st_size=0),
         ):
             with self.assertRaisesRegex(EvalReportError, "size limit"):

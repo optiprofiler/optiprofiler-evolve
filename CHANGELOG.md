@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Validate raw worker output before explanation capture. Reject linked, special,
+  or oversized explanation files before reading, and preserve unsafe output for
+  diagnostics. Explanation JSON is limited to 1 MiB; ordinary malformed metadata
+  remains non-blocking. EvalReport and explanation capture share bounded file I/O.
+
 ### Breaking changes from main
 
 - Replace `evaluation` with `execution`; move performance options to
