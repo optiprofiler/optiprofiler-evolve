@@ -7,12 +7,34 @@ from pathlib import Path
 
 from test_config import minimal_config
 
+from optiprofiler_evolve.application.experiments import run_matrix
 from optiprofiler_evolve.config import ComponentConfig, load_config
-from optiprofiler_evolve.controller.experiments import run_matrix
+from optiprofiler_evolve.errors import RunCancelled
 from optiprofiler_evolve.models import EvolveResult
 
 
 class ExperimentMatrixTests(unittest.TestCase):
+    def test_cancellation_stops_the_matrix_without_losing_completed_cells(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def run(**kwargs):
+                seed = kwargs["config"].evolution.random_seed
+                calls.append(seed)
+                if seed == 2:
+                    raise RunCancelled("cancelled")
+                return EvolveResult(kwargs["run_dir"], None, None, None, None, None, ())
+
+            with self.assertRaises(RunCancelled):
+                run_matrix(
+                    load_config(minimal_config()), {"oneshot": lambda config: config},
+                    seeds=(1, 2, 3), initial=root, run_root=root / "runs", run=run,
+                )
+            self.assertEqual(calls, [1, 2])
+            summary = json.loads((root / "runs" / "summary.json").read_text())
+            self.assertEqual([row["seed"] for row in summary["variants"]["oneshot"]["runs"]], [1])
+
     def test_successful_unscored_cells_are_persisted_and_excluded_from_mean(self):
         for scores in ((None, None), (None, 0.0, 2.0, None)):
             with self.subTest(scores=scores), tempfile.TemporaryDirectory() as directory:

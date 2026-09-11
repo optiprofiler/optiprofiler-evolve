@@ -1,20 +1,22 @@
 """Compose criterion-owned instructions without executing an assessment."""
 
+from collections.abc import Mapping
 from dataclasses import replace
 
 from optiprofiler_evolve.config import AssessmentConfig, CriterionConfig
-from optiprofiler_evolve.controller.registry import resolve
-from optiprofiler_evolve.criteria.contracts import GuidanceRequest
+from optiprofiler_evolve.criteria.contracts import Criterion, GuidanceRequest
 
 
-def build_generation_guidance(config: AssessmentConfig, feedback_mode: str) -> str:
+def build_generation_guidance(
+    config: AssessmentConfig, feedback_mode: str, criteria: Mapping[str, type[Criterion]],
+) -> str:
     sections = []
     profiles = {name: config.resolve(name) for name in ("smoke", "public", "validation")}
     for name in config.criteria:
         selected = [(profile, specs[name]) for profile, specs in profiles.items() if specs[name].enabled]
         if not selected:
             continue
-        criterion = resolve("criterion", name)
+        criterion = criteria[name]
         groups: list[tuple[CriterionConfig, list[str]]] = []
         for profile, spec in selected:
             spec = replace(spec, options={key: spec.options[key] for key in criterion.guidance_fields

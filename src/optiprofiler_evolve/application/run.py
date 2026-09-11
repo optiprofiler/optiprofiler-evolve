@@ -16,6 +16,7 @@ from typing import Any
 from optiprofiler_evolve.agents.contracts import WorkerAdapter, WorkerOutcome, WorkerRequest
 from optiprofiler_evolve.agents.docker_runtime import cleanup_managed_resources
 from optiprofiler_evolve.agents.llm import LLMClient
+from optiprofiler_evolve.application.provenance import component_provenance
 from optiprofiler_evolve.config import EvolveConfig, WorkerConfig
 from optiprofiler_evolve.controller.builtins import register_builtin_components
 from optiprofiler_evolve.controller.commits import RunCommits
@@ -36,6 +37,7 @@ from optiprofiler_evolve.controller.validation import ValidationSelector, requir
 from optiprofiler_evolve.controller.variants import VariantMaterializer
 from optiprofiler_evolve.criteria.guidance import build_generation_guidance
 from optiprofiler_evolve.criteria.integrity.execution import IntegrityReviewExecutor
+from optiprofiler_evolve.criteria.integrity.reviewer import REVIEW_PROMPT_VERSION
 from optiprofiler_evolve.criteria.performance.contracts import Evaluator
 from optiprofiler_evolve.errors import RunCancelled as _RunCancelled
 from optiprofiler_evolve.files import write_json as _write_json
@@ -52,6 +54,7 @@ from optiprofiler_evolve.phases.attempts.contracts import (
     AfterIterationPolicy,
     AttemptStep,
 )
+from optiprofiler_evolve.phases.attempts.prompt import WORKER_PROMPT_VERSION
 from optiprofiler_evolve.phases.attempts.runner import AttemptRunner
 from optiprofiler_evolve.phases.contracts import Phase, validate_workflow
 from optiprofiler_evolve.phases.explore import ExplorePhase
@@ -162,6 +165,7 @@ class EvolutionRun:
             editable=self.editable,
             workers=config.workers,
             reviewer_config=config.reviewer_config,
+            reviewer_factory=lambda spec: build("reviewer", spec),
             run_agent=self.controller_services.run_trusted_agent,
             emit=self._emit,
         )
@@ -219,7 +223,10 @@ class EvolutionRun:
             emit=self._emit,
             record_usage=self._record_worker_usage,
             generation_guidance=lambda: build_generation_guidance(
-                self.config.assessment, self.config.execution.feedback_mode
+                self.config.assessment, self.config.execution.feedback_mode,
+                {name: resolve("criterion", name) for name in self.config.assessment.criteria
+                 if any(self.config.assessment.enabled(name, profile)
+                        for profile in ("smoke", "public", "validation"))},
             ),
         )
 
@@ -265,10 +272,17 @@ class EvolutionRun:
                 provenance = build_run_provenance(
                     self.config,
                     run_id=self.run_id,
-                    worker_adapter=self.worker_adapter,
-                    worker_provenance=self.worker_adapter.provenance(provenance_workers),
-                    evaluator_factory=self.evaluator_factory,
-                    step_specs=self.step_specs,
+                    components=component_provenance(
+                        self.config,
+                        worker_adapter=self.worker_adapter,
+                        worker_provenance=self.worker_adapter.provenance(provenance_workers),
+                        evaluator_factory=self.evaluator_factory,
+                        step_specs=self.step_specs,
+                    ),
+                    prompt_templates={
+                        "solver_worker": WORKER_PROMPT_VERSION,
+                        "integrity_reviewer": REVIEW_PROMPT_VERSION,
+                    },
                 )
                 self.trace_ledger = TraceLedger(
                     self.run_dir,

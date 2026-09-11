@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from optiprofiler_evolve.config import EvolveConfig
+from optiprofiler_evolve.errors import RunCancelled
 from optiprofiler_evolve.models import EvolveResult
 
 ConfigVariant = Callable[[EvolveConfig], EvolveConfig]
@@ -25,7 +26,7 @@ def run_matrix(
     interface: str = "solver.py:solver",
     editable: Sequence[str] = (".",),
     run_root: str | Path,
-    run: RunFunction | None = None,
+    run: RunFunction,
 ) -> dict[str, Any]:
     """Run immutable config variants and record exact diffs from the base."""
 
@@ -36,10 +37,6 @@ def run_matrix(
             "A one-shot baseline is recommended for evolution ablations.",
             stacklevel=2,
         )
-    if run is None:
-        from optiprofiler_evolve.api import evolve
-
-        run = evolve
     root = Path(run_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     base_dict = base.resolved_dict()
@@ -83,6 +80,8 @@ def run_matrix(
                     config=configured,
                     run_dir=destination,
                 )
+            except RunCancelled:
+                raise
             except Exception as exc:
                 entry.update(
                     {

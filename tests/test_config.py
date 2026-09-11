@@ -32,6 +32,15 @@ def minimal_config() -> dict:
 
 class ConfigTests(unittest.TestCase):
 
+    def test_empty_pool_is_rejected_before_resolving_the_reviewer(self) -> None:
+        raw = minimal_config()
+        raw["workers"]["pool"] = []
+        raw["assessment"]["criteria"]["integrity"] = {
+            "options": {"allow_same_model": True},
+        }
+        with self.assertRaisesRegex(ValueError, "workers.pool must contain"):
+            load_config(raw)
+
     def test_removed_config_aliases_are_rejected(self) -> None:
         raw = minimal_config()
         raw["evolution"]["rounds"] = raw["evolution"].pop("iterations")

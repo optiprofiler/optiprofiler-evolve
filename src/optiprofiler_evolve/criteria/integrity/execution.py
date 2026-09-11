@@ -9,13 +9,14 @@ from collections.abc import Callable
 from pathlib import Path
 
 from optiprofiler_evolve.config import (
+    ComponentConfig,
     IntegrityReviewConfig,
     WorkerConfig,
     WorkersConfig,
     plain_data,
 )
-from optiprofiler_evolve.controller.registry import build
 from optiprofiler_evolve.criteria.integrity.reviewer import (
+    CandidateReviewer,
     IntegrityReviewDecision,
     IntegrityReviewRequest,
     write_private_review,
@@ -29,12 +30,14 @@ from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
 class IntegrityReviewExecutor:
     def __init__(self, *, run_dir: Path, interface: InterfaceSpec, editable: tuple[str, ...],
                  workers: WorkersConfig, reviewer_config: Callable[[str], IntegrityReviewConfig],
+                 reviewer_factory: Callable[[ComponentConfig], CandidateReviewer],
                  run_agent: Callable, emit: Callable) -> None:
         self.run_dir = run_dir
         self.interface = interface
         self.editable = editable
         self.workers = workers
         self.reviewer_config = reviewer_config
+        self.reviewer_factory = reviewer_factory
         self.run_agent = run_agent
         self.emit = emit
         self.cache: dict[str, IntegrityReviewDecision] = {}
@@ -121,7 +124,7 @@ class IntegrityReviewExecutor:
             transcript,
             secret_values=secret_values,
         )
-        reviewer = build("reviewer", config.component)
+        reviewer = self.reviewer_factory(config.component)
         reviewer_worker = config.resolved_worker(self.workers)
         failures: list[str] = []
         self.emit("integrity_review_started", "running", scope=review_scope)

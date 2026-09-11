@@ -5,7 +5,7 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from test_config import minimal_config
 from test_engine import fake_agent_runner, fake_evaluator_factory
@@ -67,7 +67,7 @@ class AssessmentTests(unittest.TestCase):
             executor = IntegrityReviewExecutor(
                 run_dir=root, interface=InterfaceSpec.parse("solver.py:solver"), editable=(".",),
                 workers=config.workers, reviewer_config=config.reviewer_config,
-                run_agent=Mock(), emit=Mock(),
+                run_agent=Mock(), emit=Mock(), reviewer_factory=Mock(return_value=reviewer),
             )
             def review():
                 with self.assertRaisesRegex(RuntimeError, "offline"):
@@ -75,14 +75,13 @@ class AssessmentTests(unittest.TestCase):
                                     changed=("solver.py",), mutation_transcript=None,
                                     mutation_worker=None)
 
-            with patch("optiprofiler_evolve.criteria.integrity.execution.build", return_value=reviewer):
-                review()
-                calls = reviewer.review.call_count
-                review()
-                self.assertEqual(reviewer.review.call_count, calls)
-                (candidate / "solver.py").write_text("candidate = False\n")
-                review()
-                self.assertEqual(reviewer.review.call_count, 2 * calls)
+            review()
+            calls = reviewer.review.call_count
+            review()
+            self.assertEqual(reviewer.review.call_count, calls)
+            (candidate / "solver.py").write_text("candidate = False\n")
+            review()
+            self.assertEqual(reviewer.review.call_count, 2 * calls)
 
     def test_baseline_review_is_a_local_approval_without_an_agent(self):
         config = load_config(minimal_config())
@@ -96,25 +95,23 @@ class AssessmentTests(unittest.TestCase):
             executor = IntegrityReviewExecutor(
                 run_dir=root, interface=InterfaceSpec.parse("solver.py:solver"), editable=(".",),
                 workers=config.workers, reviewer_config=config.reviewer_config,
-                run_agent=Mock(), emit=Mock(),
+                run_agent=Mock(), emit=Mock(), reviewer_factory=Mock(return_value=reviewer),
             )
-            with patch("optiprofiler_evolve.criteria.integrity.execution.build", return_value=reviewer):
-                decision, report = executor.review(
-                    candidate_id="seed", candidate=baseline, parent=baseline,
-                    changed=(), mutation_transcript=None, mutation_worker=None,
-                )
-                self.assertEqual(decision.verdict, "approve")
-                self.assertEqual(decision.reason, "baseline")
-                self.assertTrue(report.is_file())
-                self.assertEqual(
-                    json.loads(report.read_text())["reason"], "baseline",
-                )
-                # Repeat requests reuse the cached local decision, never the agent.
-                executor.review(
-                    candidate_id="seed", candidate=baseline, parent=baseline,
-                    changed=(), mutation_transcript=None, mutation_worker=None,
-                )
-                reviewer.review.assert_not_called()
+            decision, report = executor.review(
+                candidate_id="seed", candidate=baseline, parent=baseline,
+                changed=(), mutation_transcript=None, mutation_worker=None,
+            )
+            self.assertEqual(decision.verdict, "approve")
+            self.assertEqual(decision.reason, "baseline")
+            self.assertTrue(report.is_file())
+            self.assertEqual(json.loads(report.read_text())["reason"], "baseline")
+            # Repeat requests reuse the cached local decision, never the agent.
+            executor.review(
+                candidate_id="seed", candidate=baseline, parent=baseline,
+                changed=(), mutation_transcript=None, mutation_worker=None,
+            )
+            reviewer.review.assert_not_called()
+            executor.reviewer_factory.assert_not_called()
 
     def test_disabled_reviewer_does_not_require_unused_environment_variables(self):
         raw = minimal_config()

@@ -722,6 +722,7 @@ class EvolveConfig:
 
     def validate(self) -> None:
         self.assessment.validate()
+        self.workers.validate()
         references = set()
         for profile in ("smoke", "public", "validation", "hidden"):
             if self.assessment.enabled("performance", profile):
@@ -739,7 +740,6 @@ class EvolveConfig:
         if (self.evolution.retention.name == "metric_pareto"
                 and not self.assessment.enabled("performance", "validation")):
             raise ValueError("metric_pareto requires formal performance metric bundles.")
-        self.workers.validate()
         self.sandbox.validate()
         self.workflow.validate()
         workers = list(self.workers.pool)

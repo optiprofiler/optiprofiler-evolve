@@ -12,13 +12,22 @@ from unittest.mock import patch
 import jsonschema
 import yaml
 
-from optiprofiler_evolve.config import EvolveConfig, load_config
+from optiprofiler_evolve._presets import dfo_default
+from optiprofiler_evolve.config import EvolveConfig, load_config, plain_data
 from optiprofiler_evolve.solver import InterfaceSpec, validate_interface
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class DocumentationTests(unittest.TestCase):
+    def test_default_preset_round_trips_through_its_schema(self) -> None:
+        schema = json.loads((ROOT / "config.schema.json").read_text(encoding="utf-8"))
+        preset = dfo_default()
+        preset.validate()
+        raw = plain_data(preset)
+        jsonschema.Draft202012Validator(schema).validate(raw)
+        self.assertEqual(plain_data(load_config(raw)), raw)
+
     def test_schema_and_reference_cover_every_config_field(self) -> None:
         schema = json.loads((ROOT / "config.schema.json").read_text(encoding="utf-8"))
         expected = _dataclass_paths(EvolveConfig)

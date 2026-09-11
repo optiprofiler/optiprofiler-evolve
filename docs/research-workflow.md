@@ -67,7 +67,8 @@ The analyst can inspect existing profile and history plots through the public
 evidence index. Reliable automatic selection of the most discriminative
 problems still requires a dedicated public evidence projection. The private
 EvalReport reader now exists in observability, but is not wired into research
-agents; the older `agent_report.json` branch is not an alias for that protocol.
+agents. The evidence index consumes only the existing projected benchmark bundle,
+not a speculative `agent_report.json` format.
 Evolve does not infer problem-level effects from filenames or redefine Core's
 report schema. See [EvalReport evidence](architecture.md#evalreport-evidence).
 Each ablation entry keeps the base and removed-variant artifact directories, so

@@ -170,13 +170,14 @@ the optional `static_audit` evidence step is removed for an ablation.
 | `api.py` | The single public `evolve(...)` function |
 | `config.py`, `models.py`, `solver.py`, `data.py`, `files.py`, `errors.py` | Cross-subsystem configuration, domain values, solver/data boundaries and filesystem primitives |
 | `application/run.py` | Compose adapters and controller services; own run startup, traces and infrastructure cleanup |
+| `application/experiments.py`, `provenance.py` | Orchestrate experiment matrices with an injected run callable; resolve component identities for provenance |
 | `controller/coordinator.py`, `phase_contexts.py` | Ordered phase execution and registered, bounded context factories |
 | `controller/state.py`, `commits.py` | Explicit run state and the sole candidate/population/artifact commit operations |
 | `controller/runtime.py` | Frozen controller inputs and execution ports; no application dependency |
 | `phases/attempts/` | Private attempt execution, public-only capabilities, prompts, steps and iteration policy proposals |
 | `controller/variants.py`, `research_evaluation.py`, `validation.py`, `finalists.py`, `role_jobs.py` | Separate variant, evaluation, selection, registration and role capabilities |
 | `observability/live_views.py` | Live projection scheduling and rendering; no population authority |
-| `controller/registry.py`, `builtins.py`, `selection.py`, `experiments.py` | Explicit registration, archive selection and experiment matrices |
+| `controller/registry.py`, `builtins.py`, `selection.py` | Explicit registration and archive selection |
 | `phases/<name>.py` | One class per core or optional stage, including its specific inputs/results and local helpers |
 | `phases/contracts.py`, `_support.py`, `_research.py` | Stage contracts, shared phase helpers and research artifact formats |
 | `agents/` | Unified LLM invocation, CLI backend, isolation, provider transport, public tool broker and feedback |
@@ -210,6 +211,10 @@ is the baseline-relative percentage.
 the execution path. Agents, criteria and observability implement the execution
 ports. Lower layers never import application; the coordinator does not import
 Docker, LLM clients, brokers, analyzers, reviewers or HTML implementations.
+Criteria receive resolved guidance classes and reviewer factories instead of
+looking them up in controller registries. Application supplies component
+identities and prompt versions to provenance; observability only captures them.
+See the [dependency rules](architecture-constitution.md#10-dependency-direction).
 
 `RunState` owns the run's registries and committed phase results. Core result
 constructors derive artifacts from their typed fields; state artifacts and
@@ -271,6 +276,10 @@ add generic path dispatch, wrapper registries around dictionaries, another
 research directory, or a second event schema beside the existing ledger.
 
 ## Isolation
+
+Evaluators retain numerical results and sanitized benchmark files. Only the
+worker feedback projection writes `feedback.md` and `artifact_index.json`; the
+private evaluator output does not contain a duplicate presentation bundle.
 
 ### EvalReport evidence
 

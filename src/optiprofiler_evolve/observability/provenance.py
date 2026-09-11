@@ -8,16 +8,13 @@ import json
 import platform
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from functools import partial
 from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.config import ComponentConfig, EvolveConfig, plain_data
-from optiprofiler_evolve.controller.registry import resolve
-from optiprofiler_evolve.criteria.integrity.reviewer import REVIEW_PROMPT_VERSION
-from optiprofiler_evolve.phases.attempts.prompt import WORKER_PROMPT_VERSION
+from optiprofiler_evolve.config import EvolveConfig
 
 
 def coordinate_seed(base_seed: int, *coordinates: object) -> int:
@@ -31,48 +28,19 @@ def build_run_provenance(
     config: EvolveConfig,
     *,
     run_id: str,
-    worker_adapter: object,
-    worker_provenance: Mapping[str, object],
-    evaluator_factory: object,
-    step_specs: Sequence[ComponentConfig],
+    components: Mapping[str, object],
+    prompt_templates: Mapping[str, str],
 ) -> dict[str, Any]:
     """Build the redacted identity written into the first run event."""
 
     resolved = config.resolved_dict()
     encoded = json.dumps(resolved, sort_keys=True, separators=(",", ":"), default=str)
-    # Config/hash preserve the declared experiment; components list constructed instances.
-    # Unused attempt-step specs therefore remain in config, but not in this table.
-    components = {
-        "phases": _component_table("phase", config.workflow.phases),
-        "attempt_steps": _component_table("step", step_specs),
-        "after_iteration": _component_table("policy", config.workflow.after_iteration),
-        "retention": _component_table("retention", (config.evolution.retention,))[0],
-        "parent_sampler": _component_table(
-            "sampler", (config.evolution.parent_sampler,)
-        )[0],
-        "integrity_reviewer": _component_table(
-            "reviewer", (config.reviewer_config().component,)
-        )[0] if config.assessment.enabled("integrity") else None,
-        "criteria": [
-            {"name": name, **_callable_identity(resolve("criterion", name))}
-            for name in config.assessment.criteria if config.assessment.enabled(name)
-        ],
-        "worker": {
-            **_callable_identity(worker_adapter),
-            **dict(worker_provenance),
-        },
-        "evaluator": {
-            "name": config.execution.adapter,
-            "declared_deterministic": getattr(evaluator_factory, "deterministic", None),
-            **_callable_identity(evaluator_factory),
-        } if evaluator_factory is not None else None,
-    }
     return {
         "schema_version": "1",
         "run_id": run_id,
         "config": resolved,
         "config_hash": hashlib.sha256(encoded.encode()).hexdigest(),
-        "components": components,
+        "components": dict(components),
         "environment": {
             "package_version": _package_version(),
             "python": sys.version.split()[0],
@@ -87,26 +55,11 @@ def build_run_provenance(
             ),
         },
         "seed_coordinates": ["seed", "phase", "iteration", "island", "attempt", "component"],
-        "prompt_templates": {
-            "solver_worker": WORKER_PROMPT_VERSION,
-            "integrity_reviewer": REVIEW_PROMPT_VERSION,
-        },
+        "prompt_templates": dict(prompt_templates),
     }
 
 
-def _component_table(kind: str, specs: Sequence[ComponentConfig]) -> list[dict[str, Any]]:
-    return [
-        {
-            "position": index,
-            "name": spec.name,
-            "options": plain_data(spec.options),
-            **_callable_identity(spec._factory or resolve(kind, spec.name)),
-        }
-        for index, spec in enumerate(specs)
-    ]
-
-
-def _callable_identity(value: object) -> dict[str, Any]:
+def callable_identity(value: object) -> dict[str, Any]:
     bound: dict[str, object] | None = None
     if isinstance(value, partial):
         bound = {

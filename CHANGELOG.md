@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Align the integrity component's schema default with Python presets and validate
+  worker pools before resolving reviewer defaults. Test preset schema round trips.
+- Keep feedback/index generation solely in worker projection and remove the
+  unreachable legacy agent-report interpretation branch.
+- Inject criterion guidance classes and reviewer factories instead of resolving
+  controller registries inside criteria. Bind provenance identities and prompt
+  versions in application, and move matrix orchestration there with an explicit
+  run callable. Matrix cancellation now stops subsequent cells without losing
+  completed results. Guard the dependency directions in tests.
+
 - Merge the upstream EvalReport consumer and move it with its pinned schemas into
   observability. Validate report/companion integrity, bounded file reads, references,
   history bins and numeric axes without changing fitness or enabling report production.

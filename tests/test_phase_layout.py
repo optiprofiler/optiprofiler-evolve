@@ -22,6 +22,29 @@ from optiprofiler_evolve.solver import InterfaceSpec
 
 
 class PhaseLayoutTests(unittest.TestCase):
+    def test_lower_layers_do_not_resolve_or_import_the_composition_root(self) -> None:
+        package = Path(inspect.getfile(EvolutionRun)).parents[1]
+        forbidden = {
+            "criteria": ("controller", "application", "api", "phases"),
+            "observability": ("controller", "application", "api", "phases", "criteria"),
+            "controller": ("application", "api"),
+        }
+        violations = []
+        for layer, targets in forbidden.items():
+            for path in (package / layer).rglob("*.py"):
+                for node in ast.walk(ast.parse(path.read_text())):
+                    names = (
+                        [node.module or ""] if isinstance(node, ast.ImportFrom)
+                        else [alias.name for alias in node.names] if isinstance(node, ast.Import)
+                        else []
+                    )
+                    for name in names:
+                        if any(name == f"optiprofiler_evolve.{target}"
+                               or name.startswith(f"optiprofiler_evolve.{target}.")
+                               for target in targets):
+                            violations.append((path.relative_to(package).as_posix(), name))
+        self.assertEqual(violations, [])
+
     def test_every_stage_has_its_own_class_and_real_run_method(self) -> None:
         register_builtin_components()
         for name in (

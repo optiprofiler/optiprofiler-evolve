@@ -105,7 +105,8 @@ class OptiProfilerEvaluationTests(unittest.TestCase):
             self.assertTrue(breakdown["normalized_profile_advantage"])
             serialized = (root / "output" / "result.json").read_text(encoding="utf-8")
             self.assertNotIn("ROSENBR", serialized)
-            self.assertTrue((root / "output" / "artifact_index.json").is_file())
+            self.assertFalse((root / "output" / "artifact_index.json").exists())
+            self.assertFalse((root / "output" / "feedback.md").exists())
             for path in (root / "output").rglob("*"):
                 self.assertNotIn("ROSENBR", path.name)
                 if path.suffix in {".json", ".log", ".md", ".txt"}:

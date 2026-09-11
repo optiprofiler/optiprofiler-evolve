@@ -673,10 +673,7 @@
           "exclusiveMinimum": 0,
           "default": null
         }
-      },
-      "required": [
-        "component"
-      ]
+      }
     },
     "ToolConfig": {
       "type": "object",

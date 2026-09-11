@@ -7,39 +7,25 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.files import read_json_object, write_json
+from optiprofiler_evolve.files import write_json
 
 
 class EvidenceReader:
-    """Create a small index over existing OptiProfiler benchmark outputs.
-
-    The legacy ``agent_report.json`` input is not the private EvalReport protocol.
-    Missing evidence is never replaced with invented benchmark statistics.
-    """
+    """Index already-projected benchmark files without inferring missing statistics."""
 
     def build(self, source: Path, destination: Path) -> Path:
         source = source.resolve()
-        report = source / "agent_report.json"
-        if report.is_file():
-            payload = {
-                "schema": EVIDENCE_SCHEMA,
-                "source": "agent_report",
-                "agent_report": read_json_object(report),
-                "artifacts": self._index(source),
-            }
-        else:
-            payload = {
-                "schema": EVIDENCE_SCHEMA,
-                "source": "legacy_bundle",
-                "result": _optional_json(source / "result.json"),
-                "profile_scores": _optional_json(source / "profile_scores.json"),
-                "artifact_index": _optional_json(source / "artifact_index.json"),
-                "artifacts": self._index(source),
-                "limitations": [
-                    "No versioned OptiProfiler agent_report.json was available.",
-                    "This index does not infer problem-level causes from filenames or plots.",
-                ],
-            }
+        payload = {
+            "schema": EVIDENCE_SCHEMA,
+            "source": "legacy_bundle",
+            "result": _optional_json(source / "result.json"),
+            "profile_scores": _optional_json(source / "profile_scores.json"),
+            "artifact_index": _optional_json(source / "artifact_index.json"),
+            "artifacts": self._index(source),
+            "limitations": [
+                "This index does not infer problem-level causes from filenames or plots.",
+            ],
+        }
         return write_json(destination, payload)
 
     @staticmethod

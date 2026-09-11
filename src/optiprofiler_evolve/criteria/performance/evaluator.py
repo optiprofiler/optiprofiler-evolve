@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
-import mimetypes
 import os
 import stat
 import subprocess
@@ -90,9 +89,7 @@ class PythonOptiProfilerEvaluator:
             json.dumps(_json_safe(result.as_dict()), indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        _write_feedback(result, output_dir, self.config.feedback_mode)
         _sanitize_worker_artifacts(output_dir, self.data)
-        _write_artifact_index(output_dir)
         return result
 
     def _benchmark(
@@ -287,9 +284,7 @@ class DockerOptiProfilerEvaluator:
                 error=error,
             )
             result_path.write_text(json.dumps(result.as_dict(), indent=2) + "\n", encoding="utf-8")
-            _write_feedback(result, output_dir, self.config.feedback_mode)
             _sanitize_worker_artifacts(output_dir, self.data)
-            _write_artifact_index(output_dir)
             return result
         result = _read_result(result_path)
         result = replace(
@@ -302,7 +297,6 @@ class DockerOptiProfilerEvaluator:
             encoding="utf-8",
         )
         _sanitize_worker_artifacts(output_dir, self.data)
-        _write_artifact_index(output_dir)
         return result
 
     def command(
@@ -561,48 +555,6 @@ def _load_python_solver(root: Path, interface: InterfaceSpec, label: str) -> tup
     if not callable(solver):
         raise TypeError(f"Interface {interface.function!r} is not callable.")
     return solver, created
-
-
-def _write_feedback(result: EvaluationResult, output_dir: Path, feedback_mode: str) -> None:
-    if result.success:
-        text = (
-            f"# Evaluation: {result.mode}\n\n"
-            f"- fitness: `{result.score:.6f}`\n"
-            "- direction: `maximize`\n"
-            f"- problems: `{result.problem_count}`\n\n"
-            "Use this fitness only to compare candidates produced within this run.\n"
-        )
-        if feedback_mode == "full_artifacts":
-            text += (
-                "\n## Benchmark artifacts\n\n"
-                "Read `artifact_index.json` to discover the complete benchmark bundle. "
-                "Problem identifiers in every worker-visible file are opaque and stable "
-                "within this run. `profile_scores.json` contains the structured "
-                "profile-level output when available.\n"
-            )
-    else:
-        text = f"# Evaluation failed\n\n`{result.error}`\n"
-    (output_dir / "feedback.md").write_text(text, encoding="utf-8")
-
-
-def _write_artifact_index(output_dir: Path) -> None:
-    entries = []
-    excluded = {"artifact_index.json", "feedback.md", "result.json"}
-    for path in sorted(output_dir.rglob("*")):
-        if not path.is_file() or path.name in excluded:
-            continue
-        media_type, _encoding = mimetypes.guess_type(path.name)
-        entries.append(
-            {
-                "path": path.relative_to(output_dir).as_posix(),
-                "bytes": path.stat().st_size,
-                "media_type": media_type or "application/octet-stream",
-            }
-        )
-    (output_dir / "artifact_index.json").write_text(
-        json.dumps({"artifacts": entries}, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
 
 
 def _read_result(path: Path) -> EvaluationResult:

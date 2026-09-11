@@ -211,3 +211,22 @@ Do not introduce a god context, nested override mini-language, auto-discovery
 framework, public executor hierarchy, or second authoritative database. A new
 abstraction must remove demonstrated duplication or enable a concrete ablation
 that the current five extension contracts cannot express.
+
+## 10. Dependency direction
+
+Execution flow is not a strict package import hierarchy. The permitted
+collaborations are explicit; none grants a second state-writing authority.
+
+| Owner | Allowed dependency and boundary |
+|---|---|
+| Application | Resolve components through controller registries; inject criteria, reviewer factories and provenance identities. Matrix orchestration receives its run callable explicitly. |
+| Controller | Bind phase contexts and execution services; consume criterion and observability contracts. Never import application or the public API. |
+| Phases | Use phase contracts and bounded controller capabilities, never application or worker execution backends. |
+| Criteria | Use injected backends and reviewer factories; never import controller registries, phases or application. |
+| Observability | Consume supplied identities, events, snapshots and artifact files; never import controller, phases, criteria or application. Agent trace contracts are permitted. |
+
+Owner views may read documented controller artifact paths without importing
+controller implementations. Controller commits may write observability attempt
+records; those records are evidence, not a second candidate registry. Public
+disclosure stays default-deny and independent of private event reconstruction.
+Dependency tests guard these import boundaries.

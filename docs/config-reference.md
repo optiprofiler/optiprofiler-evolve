@@ -5,6 +5,9 @@ invalid combinations fail before workers start. The checked-in
 [JSON Schema](../config.schema.json) provides editor completion and structural
 validation; Python validation in `config.py` remains authoritative for
 cross-field rules.
+Tests validate serialized Python presets against this schema as well as YAML
+examples. Reviewer component defaults may be omitted; an empty worker pool is
+rejected before reviewer resolution.
 
 Defaults shown below are package defaults. Calling `evolve(..., config=None)`
 uses the same bounded quick-start values: one iteration, one island, one

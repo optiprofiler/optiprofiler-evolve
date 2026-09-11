@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import fields
-from unittest.mock import patch
 
 from optiprofiler_evolve.config import AssessmentConfig, CriterionConfig
-from optiprofiler_evolve.controller.builtins import register_builtin_components
-from optiprofiler_evolve.controller.registry import register
+from optiprofiler_evolve.criteria.complexity.criterion import ComplexityCriterion
 from optiprofiler_evolve.criteria.contracts import Criterion, GuidanceRequest
 from optiprofiler_evolve.criteria.guidance import build_generation_guidance
+from optiprofiler_evolve.criteria.integrity.criterion import IntegrityCriterion
+from optiprofiler_evolve.criteria.performance.criterion import PerformanceCriterion
 
 
 class GuidanceOnlyCriterion(Criterion):
@@ -29,8 +29,12 @@ class GuidanceOnlyCriterion(Criterion):
 
 class CriterionGuidanceTests(unittest.TestCase):
     def setUp(self):
-        register_builtin_components()
-        register("criterion", "guidance_test", GuidanceOnlyCriterion, replace=True)
+        self.criteria = {
+            "performance": PerformanceCriterion,
+            "complexity": ComplexityCriterion,
+            "integrity": IntegrityCriterion,
+            "guidance_test": GuidanceOnlyCriterion,
+        }
         GuidanceOnlyCriterion.requests = []
 
     def test_each_standard_owns_its_instruction_and_can_be_disabled(self):
@@ -41,7 +45,7 @@ class CriterionGuidanceTests(unittest.TestCase):
                 config = AssessmentConfig(criteria={
                     name: CriterionConfig(enabled=name == enabled) for name in markers
                 })
-                prompt = build_generation_guidance(config, "full_artifacts")
+                prompt = build_generation_guidance(config, "full_artifacts", self.criteria)
                 self.assertIn(marker, prompt)
                 for other, absent in markers.items():
                     if other != enabled:
@@ -54,14 +58,14 @@ class CriterionGuidanceTests(unittest.TestCase):
         config = AssessmentConfig(criteria={"performance": CriterionConfig()})
         for mode in ("score_only", "full_artifacts"):
             with self.subTest(mode=mode):
-                prompt = build_generation_guidance(config, mode)
+                prompt = build_generation_guidance(config, mode, self.criteria)
                 self.assertIn("history plots", prompt)
                 self.assertIn("render_pdf", prompt)
         formal_only = AssessmentConfig(criteria=config.criteria, profiles={
             "public": {"performance": {"enabled": False}},
             "smoke": {"performance": {"enabled": False}},
         })
-        prompt = build_generation_guidance(formal_only, "full_artifacts")
+        prompt = build_generation_guidance(formal_only, "full_artifacts", self.criteria)
         self.assertIn("Performance:", prompt)
         self.assertNotIn("history plots", prompt)
         self.assertNotIn("render_pdf", prompt)
@@ -72,7 +76,7 @@ class CriterionGuidanceTests(unittest.TestCase):
                                   profiles={"validation": {"complexity": {
                                       "weight": 3, "mode": "warn", "options": {"max_ratio": 1.1},
                                   }}, "hidden": {"complexity": {"options": {"max_ratio": 987654}}}})
-        prompt = build_generation_guidance(config, "score_only")
+        prompt = build_generation_guidance(config, "score_only", self.criteria)
         self.assertEqual(prompt.count("Complexity budget"), 2)
         self.assertIn("smoke, public; weight=1; enforce", prompt)
         self.assertIn("validation; weight=3; warn", prompt)
@@ -85,7 +89,7 @@ class CriterionGuidanceTests(unittest.TestCase):
             "public_rule": "prefer fewer operations", "api_key": "SECRET_CANARY",
             "problem_names": ["PRIVATE_PROBLEM"], "validation_result": "PRIVATE_RESULT",
         })}, profiles={"hidden": {"guidance_test": {"options": {"public_rule": "HIDDEN_CANARY"}}}})
-        prompt = build_generation_guidance(config, "score_only")
+        prompt = build_generation_guidance(config, "score_only", self.criteria)
         self.assertIn("prefer fewer operations", prompt)
         self.assertEqual(len(GuidanceOnlyCriterion.requests), 1)
         request = GuidanceOnlyCriterion.requests[0]
@@ -103,9 +107,7 @@ class CriterionGuidanceTests(unittest.TestCase):
             "hidden_only_unregistered": CriterionConfig(),
         }, profiles={p: {"hidden_only_unregistered": {"enabled": False}}
                      for p in ("smoke", "public", "validation")})
-        with patch("optiprofiler_evolve.criteria.guidance.resolve") as resolve:
-            build_generation_guidance(config, "score_only")
-        resolve.assert_not_called()
+        build_generation_guidance(config, "score_only", {})
         self.assertFalse(GuidanceOnlyCriterion.requests)
 
     def test_reviewer_settings_are_not_generation_inputs(self):
@@ -113,7 +115,7 @@ class CriterionGuidanceTests(unittest.TestCase):
             "worker": {"model": "PRIVATE_MODEL", "env": {"API_KEY": "SECRET_CANARY"}},
             "component": {"name": "PRIVATE_COMPONENT"},
         })})
-        prompt = build_generation_guidance(config, "score_only")
+        prompt = build_generation_guidance(config, "score_only", self.criteria)
         self.assertIn("Semantic integrity:", prompt)
         for private in ("PRIVATE_MODEL", "SECRET_CANARY", "PRIVATE_COMPONENT"):
             self.assertNotIn(private, prompt)
