@@ -69,7 +69,7 @@ class PhaseLayoutTests(unittest.TestCase):
                 emit=lambda *args: None,
                 services=engine.controller_services,
             )
-            context = engine.coordinator.contexts["prepare"](base)
+            context = engine.coordinator.contexts[PreparePhase](base)
             self.assertFalse(hasattr(context, "engine"))
             result = PreparePhase().run(context)
             self.assertIsNone(engine.state.data)

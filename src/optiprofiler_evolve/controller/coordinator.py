@@ -21,7 +21,7 @@ class RunCoordinator:
         run_dir: Path,
         services: ControllerServices,
         commits: RunCommits,
-        contexts: Mapping[str, Callable[[PhaseContext], PhaseContext]],
+        contexts: Mapping[type, Callable[[PhaseContext], PhaseContext]],
         emit: Callable,
         refresh: Callable,
         raise_if_cancelled: Callable,
@@ -64,12 +64,16 @@ class RunCoordinator:
                 ),
                 services=self.services,
             )
-            factory = self.contexts.get(phase.name)
+            # Capabilities follow registered implementations, never owner-selected names.
+            factory = next(
+                (self.contexts[cls] for cls in type(phase).__mro__ if cls in self.contexts),
+                None,
+            )
             result = phase.run(factory(context) if factory is not None else context)
             if result.status == "cancelled":
                 raise RunCancelled(f"Phase {phase.name!r} was cancelled.")
             if result.status == "failed":
-                raise RuntimeError(f"Phase {phase.name!r} failed.")
+                raise RuntimeError(f"Phase {phase.name!r} failed: {result.error or 'no reason supplied'}")
             undeclared = set(result.artifacts).difference(phase.provides)
             if undeclared:
                 raise RuntimeError(

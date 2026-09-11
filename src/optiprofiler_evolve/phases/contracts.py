@@ -30,6 +30,7 @@ class PhaseResult:
 
     status: str = "succeeded"
     artifacts: Mapping[str, object] = field(default_factory=dict)
+    error: str | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {"succeeded", "failed", "skipped", "cancelled"}:
@@ -72,6 +73,11 @@ def validate_workflow(phases: tuple[Phase, ...], config: EvolveConfig) -> None:
         if phase.name in names:
             raise ValueError(f"Duplicate phase name {phase.name!r}.")
         names.add(phase.name)
+        duplicates = phase.provides.intersection(available)
+        if duplicates:
+            raise ValueError(
+                f"Phase {phase.name!r} provides duplicate artifacts {sorted(duplicates)!r}."
+            )
         missing = phase.requires.difference(available)
         if missing:
             raise ValueError(f"Phase {phase.name!r} requires missing artifacts {sorted(missing)!r}.")

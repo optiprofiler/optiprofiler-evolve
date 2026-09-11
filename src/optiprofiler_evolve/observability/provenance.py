@@ -40,6 +40,8 @@ def build_run_provenance(
 
     resolved = config.resolved_dict()
     encoded = json.dumps(resolved, sort_keys=True, separators=(",", ":"), default=str)
+    # Config/hash preserve the declared experiment; components list constructed instances.
+    # Unused attempt-step specs therefore remain in config, but not in this table.
     components = {
         "phases": _component_table("phase", config.workflow.phases),
         "attempt_steps": _component_table("step", step_specs),

@@ -59,6 +59,7 @@ def run_matrix(
             "runs": runs,
             "n_ok": 0,
             "n_failed": 0,
+            "n_unscored": 0,
             "mean_final_score": None,
         }
         summary["variants"][name] = variant_summary
@@ -104,9 +105,11 @@ def run_matrix(
             successful = [item for item in runs if item["status"] == "succeeded"]
             variant_summary["n_ok"] = len(successful)
             variant_summary["n_failed"] = len(runs) - len(successful)
+            scores = [item["final_score"] for item in successful if item["final_score"] is not None]
+            variant_summary["n_unscored"] = len(successful) - len(scores)
             variant_summary["mean_final_score"] = (
-                sum(float(item["final_score"]) for item in successful) / len(successful)
-                if successful
+                sum(scores) / len(scores)
+                if scores
                 else None
             )
             _write_summary(summary_path, summary)

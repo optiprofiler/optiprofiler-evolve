@@ -8,11 +8,11 @@ from functools import partial
 
 from optiprofiler_evolve.controller.runtime import RunEnvironment
 from optiprofiler_evolve.phases.contracts import PhaseContext
-from optiprofiler_evolve.phases.explore import ExploreContext
-from optiprofiler_evolve.phases.hidden import HiddenContext
-from optiprofiler_evolve.phases.prepare import PrepareContext
-from optiprofiler_evolve.phases.report import ReportContext
-from optiprofiler_evolve.phases.validate import ValidateContext
+from optiprofiler_evolve.phases.explore import ExploreContext, ExplorePhase
+from optiprofiler_evolve.phases.hidden import HiddenContext, HiddenPhase
+from optiprofiler_evolve.phases.prepare import PrepareContext, PreparePhase
+from optiprofiler_evolve.phases.report import ReportContext, ReportPhase
+from optiprofiler_evolve.phases.validate import ValidateContext, ValidatePhase
 
 
 def prepare_context(bindings, base: PhaseContext) -> PhaseContext:
@@ -98,11 +98,11 @@ def report_context(bindings, base: PhaseContext) -> PhaseContext:
 
 
 CONTEXT_FACTORIES = {
-    "prepare": prepare_context,
-    "explore": explore_context,
-    "validate": validate_context,
-    "hidden": hidden_context,
-    "report": report_context,
+    PreparePhase: prepare_context,
+    ExplorePhase: explore_context,
+    ValidatePhase: validate_context,
+    HiddenPhase: hidden_context,
+    ReportPhase: report_context,
 }
 
 

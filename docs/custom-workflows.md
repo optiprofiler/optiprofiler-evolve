@@ -11,7 +11,8 @@ phase; the built-in `prepared` output is a frozen `PreparedArtifact`.
 
 Application constructs phases and `validate_workflow` checks their inputs against
 preceding outputs before creating the run directory. Duplicate resolved names
-and missing inputs fail immediately. An optional `validate_config(config)` hook
+and duplicate artifact producers or missing inputs fail immediately.
+An optional `validate_config(config)` hook
 checks phase-specific configuration, using options already applied by the
 constructor. `optional_requires` declares inputs that are passed only when
 available. Their producer may be absent, but a configured producer must precede
@@ -22,7 +23,9 @@ defaults are documented together in `phases/contracts.py`.
 Contexts expose only declared inputs, read-only options, an event emitter and
 the existing bounded controller services. Successful and skipped phases must
 return exactly their declared outputs. Failed or cancelled results never publish
-artifacts; exceptions propagate. A phase failure does not undo already completed
+artifacts; exceptions propagate. `PhaseResult(status="failed", error="reason")`
+preserves the reason in the raised exception and failure event.
+A phase failure does not undo already completed
 file writes or earlier candidate commits, and checkpoints do not implement resume.
 Core result constructors accept typed fields only and derive their artifacts.
 `RunState` stores committed phase results; its artifacts and typed accessors are
@@ -74,6 +77,9 @@ Ordinary artifacts do not grant candidate-admission or holdout authority. Core
 contexts and typed controller commit branches remain explicit; changing that
 authority requires matching controller changes and tests, not just adding a
 phase. Owner plugins are trusted code, not an in-process security sandbox.
+Core contexts follow registered implementation classes and their subclasses,
+not names. An unrelated custom phase named `prepare` receives `PhaseContext`.
+Prepared island metadata must match the configured population count at commit.
 
 After a champion is selected, controller entries reject new candidates,
 population edits, finalist registration and reselection. Hidden checks the fixed
@@ -82,6 +88,10 @@ a failure cannot be retried. If `data.split.lockbox_required` is true, a run
 returning a champion must perform hidden performance evaluation. Independent
 post-selection public challenger comparisons may still produce evidence, but
 cannot affect selection. Validation and hidden data must never enter a worker.
+
+Experiment matrix summaries average only successful cells with a final score.
+Successful cells without one still count toward `n_ok` and are additionally
+counted in `n_unscored`; an entirely unscored variant has `mean_final_score: null`.
 
 Lockbox policy is shared: assembly checks actual `ValidatePhase`/`HiddenPhase`
 implementations, and final publication checks their committed typed results.

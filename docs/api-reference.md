@@ -78,3 +78,9 @@ Only `evolve` and `__version__` are exported from the top-level package. Interna
 dataclasses and modules may change during the alpha. Experiment reproducibility
 should rely on the resolved config, frozen data manifest, solver contract, and
 run artifacts rather than importing controller internals.
+
+Results support `dataclasses.asdict` and `copy.deepcopy` when their artifact values
+support copying. The artifact mapping stays read-only; `asdict` preserves this
+mapping type. Hashing excludes artifacts, while equality includes them. For JSON,
+convert mappings with `dict(...)` and encode paths or custom records explicitly;
+arbitrary phase outputs are not guaranteed to be JSON serializable.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import random
 from collections.abc import Callable, Mapping
 from dataclasses import replace
@@ -64,6 +66,19 @@ class RunCommits:
         if tree_hash(selected[1].path) != selected[1].tree_hash:
             raise ValueError("Champion changed after formal assessment.")
         # Consume before execution: a failed hidden evaluation must not permit another query.
+        marker = self.run_dir / "controller" / "hidden_started.json"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            handle = marker.open("x", encoding="utf-8")
+        except FileExistsError as exc:
+            raise RuntimeError("Hidden evaluation has already been started.") from exc
+        with handle:
+            json.dump({
+                "candidate_id": selected[1].candidate_id,
+                "tree_hash": selected[1].tree_hash,
+            }, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
         self.state.hidden_started = True
 
     def set_directions(self, directions: Mapping[int, dict[str, object]]) -> None:
@@ -75,6 +90,8 @@ class RunCommits:
             raise ValueError("Cannot commit a failed or cancelled phase result.")
         if isinstance(result, PrepareResult):
             self.require_open_selection()
+            if result.prepared.islands != self.config.evolution.islands:
+                raise ValueError("Prepared island count must match evolution.islands.")
             self.state.candidates[result.seed.candidate_id] = result.seed
             self.state.populations = [[result.seed] for _ in range(self.config.evolution.islands)]
             self.write_checkpoint(0)
@@ -217,6 +234,7 @@ class RunCommits:
     def write_checkpoint(self, iteration: int) -> None:
         payload = {
             "iteration": iteration,
+            "hidden_started": self.state.hidden_started,
             "populations": [
                 [record.candidate_id for record in population]
                 for population in self.state.populations

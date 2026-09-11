@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve successful unscored matrix cells and report their count separately.
+  Bind core contexts by implementation type, reject duplicate artifact producers,
+  and retain phase-supplied failure reasons in exceptions and events.
+- Restore result copying and hashing with read-only artifacts. Persist hidden-query
+  consumption before execution and reject inconsistent prepared island counts.
+
 - Workflows may omit core phases or be empty. Application now returns
   `EvolveResult` independently of report, with nullable winner/score fields and
   a read-only `artifacts` mapping; `without_phase` can remove core stages.

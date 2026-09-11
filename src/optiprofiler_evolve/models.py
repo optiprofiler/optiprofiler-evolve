@@ -8,8 +8,9 @@ import json
 import math
 from collections.abc import Mapping
 from pathlib import Path
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
+
+from optiprofiler_evolve.config import FrozenDict
 
 if TYPE_CHECKING:
     from optiprofiler_evolve.agents.contracts import WorkerOutcome
@@ -265,10 +266,10 @@ class EvolveResult:
     assessment_score: float | None = None
     final_assessment_score: float | None = None
 
-    artifacts: Mapping[str, object] = dataclasses.field(default_factory=dict)
+    artifacts: Mapping[str, object] = dataclasses.field(default_factory=dict, hash=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "artifacts", MappingProxyType(dict(self.artifacts)))
+        object.__setattr__(self, "artifacts", FrozenDict(self.artifacts))
 
 
 @dataclasses.dataclass(frozen=True)

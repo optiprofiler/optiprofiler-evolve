@@ -4,6 +4,7 @@ import dataclasses
 import json
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -18,9 +19,14 @@ from optiprofiler_evolve.controller.contracts import VariantRequest
 from optiprofiler_evolve.controller.registry import build
 from optiprofiler_evolve.errors import RunCancelled
 from optiprofiler_evolve.phases.attempts.contracts import PopulationEdit
-from optiprofiler_evolve.phases.contracts import PhaseResult, validate_workflow
+from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult, validate_workflow
 from optiprofiler_evolve.phases.hidden import HiddenPhase, HiddenResult
-from optiprofiler_evolve.phases.prepare import PreparedArtifact, PrepareResult
+from optiprofiler_evolve.phases.prepare import (
+    PrepareContext,
+    PreparedArtifact,
+    PreparePhase,
+    PrepareResult,
+)
 from optiprofiler_evolve.phases.validate import ValidateResult
 from optiprofiler_evolve.solver import InterfaceSpec
 
@@ -40,6 +46,66 @@ class ArtifactPhase:
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_core_names_do_not_grant_core_contexts(self):
+        class OrdinaryPhase(ArtifactPhase):
+            def run(inner, context):
+                self.assertIs(type(context), PhaseContext)
+                return super().run(context)
+
+        for name in ("prepare", "explore", "validate", "hidden", "report"):
+            with self.subTest(name=name):
+                result = self.make_run((OrdinaryPhase(name),), name=name).run()
+                self.assertEqual(dict(result.artifacts), {"custom": "custom"})
+        self.evaluator.assert_not_called()
+        self.worker.assert_not_called()
+
+    def test_renamed_core_subclass_retains_its_context(self):
+        class RenamedPrepare(PreparePhase):
+            name = "renamed_prepare"
+
+            def run(inner, context):
+                self.assertIsInstance(context, PrepareContext)
+                return super().run(context)
+
+        result = self.make_run((RenamedPrepare(),)).run()
+        self.assertIn("prepared", result.artifacts)
+
+    def test_duplicate_outputs_fail_before_creating_run(self):
+        with self.assertRaisesRegex(ValueError, "duplicate artifacts.*shared"):
+            self.make_run((
+                ArtifactPhase("first", provides=("shared",)),
+                ArtifactPhase("second", requires=("shared",), provides=("shared",)),
+            ))
+        self.assertFalse((self.root / "run").exists())
+        self.evaluator.assert_not_called()
+
+    def test_result_supports_copy_asdict_and_hash_with_mutable_artifacts(self):
+        result = self.make_run(()).run()
+        result = dataclasses.replace(result, artifacts={"nested": {"values": [1]}})
+        copied = deepcopy(result)
+        converted = dataclasses.asdict(result)
+        self.assertEqual(copied, result)
+        self.assertEqual(hash(copied), hash(result))
+        copied.artifacts["nested"]["values"].append(2)
+        converted["artifacts"]["nested"]["values"].append(3)
+        self.assertEqual(result.artifacts["nested"]["values"], [1])
+        with self.assertRaises(TypeError):
+            copied.artifacts["extra"] = True
+
+    def test_prepared_island_count_must_match_before_population_commit(self):
+        class InconsistentPrepare(PreparePhase):
+            def run(inner, context):
+                result = super().run(context)
+                return dataclasses.replace(
+                    result, prepared=dataclasses.replace(result.prepared, islands=999),
+                )
+
+        run = self.make_run((InconsistentPrepare(),))
+        with self.assertRaisesRegex(ValueError, "island count"):
+            run.run()
+        self.assertEqual(run.state.candidates, {})
+        self.assertEqual(run.state.populations, [])
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -323,6 +389,17 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(run.state.hidden_started)
         self.assertIsNone(run.state.final_result)
         self.assertNotIn("final", run.state.artifacts)
+        marker = run.run_dir / "controller" / "hidden_started.json"
+        self.assertEqual(json.loads(marker.read_text())["candidate_id"], run.state.champion[1].candidate_id)
+        # Losing the in-memory flag must not authorize a second query in the same directory.
+        fresh_state = dataclasses.replace(run.state, hidden_started=False)
+        commits = type(run.commits)(
+            fresh_state, run.config, run.run_dir, Mock(), Mock(), Mock(),
+        )
+        with self.assertRaisesRegex(RuntimeError, "already been started"):
+            commits.begin_hidden()
+        run.commits.write_checkpoint(1)
+        self.assertTrue(json.loads((run.run_dir / "state.json").read_text())["hidden_started"])
 
     def test_successful_holdout_cannot_be_repeated(self):
         class RepeatHidden(HiddenPhase):
@@ -334,6 +411,16 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "already been started"):
             run.run()
         self.assertEqual(FakeEvaluator.calls.count("hidden"), 1)
+
+    def test_hidden_does_not_execute_if_consumption_cannot_be_persisted(self):
+        run = self.make_run(("prepare", "explore", "validate", "hidden"))
+        with patch("optiprofiler_evolve.controller.commits.os.fsync", side_effect=OSError("disk failed")):
+            with self.assertRaisesRegex(OSError, "disk failed"):
+                run.run()
+        self.assertNotIn("hidden", FakeEvaluator.calls)
+        self.assertFalse(run.state.hidden_started)
+        with self.assertRaisesRegex(RuntimeError, "already been started"):
+            run.commits.begin_hidden()
 
     def test_preflight_does_not_sort_or_invent_missing_producers(self):
         producer = ArtifactPhase("producer", provides=("evidence",))

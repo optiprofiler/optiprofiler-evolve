@@ -53,10 +53,18 @@ class CoordinatorTests(unittest.TestCase):
     def test_custom_context_factory_needs_no_central_dispatch_change(self):
         seen = Mock(return_value=PhaseResult(artifacts={"output": "done"}))
         factory = Mock(side_effect=lambda base: ("custom context", base))
-        self.coordinator.contexts["custom"] = factory
+        self.coordinator.contexts[SimpleNamespace] = factory
         self.coordinator.run_phase(self.phase(seen), {})
         self.assertEqual(seen.call_args.args[0][0], "custom context")
         factory.assert_called_once()
+
+    def test_failed_result_preserves_reason_in_exception_and_event(self):
+        phase = self.phase(lambda _: PhaseResult(status="failed", error="missing research evidence"))
+        with self.assertRaisesRegex(RuntimeError, "missing research evidence"):
+            self.coordinator.run_phase(phase, {})
+        event = self.coordinator.emit.call_args
+        self.assertEqual(event.args, ("phase_finished", "failed"))
+        self.assertIn("missing research evidence", event.kwargs["data"]["error"])
 
     def test_optional_inputs_are_explicit_and_need_not_exist(self):
         observed = []

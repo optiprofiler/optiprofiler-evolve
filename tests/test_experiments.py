@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,28 @@ from optiprofiler_evolve.models import EvolveResult
 
 
 class ExperimentMatrixTests(unittest.TestCase):
+    def test_successful_unscored_cells_are_persisted_and_excluded_from_mean(self):
+        for scores in ((None, None), (None, 0.0, 2.0, None)):
+            with self.subTest(scores=scores), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+
+                def fake_run(**kwargs):
+                    score = scores[kwargs["config"].evolution.random_seed]
+                    return EvolveResult(Path(kwargs["run_dir"]), None, None, None, None, score, ())
+
+                summary = run_matrix(
+                    load_config(minimal_config()), {"partial": lambda config: config},
+                    seeds=tuple(range(len(scores))), initial=root,
+                    run_root=root / "runs", run=fake_run,
+                )
+                variant = summary["variants"]["partial"]
+                self.assertEqual(variant["n_ok"], len(scores))
+                self.assertEqual(variant["n_failed"], 0)
+                self.assertEqual(variant["n_unscored"], 2)
+                self.assertEqual(variant["mean_final_score"], None if len(scores) == 2 else 1.0)
+                persisted = json.loads((root / "runs" / "summary.json").read_text())
+                self.assertEqual(persisted["variants"]["partial"], variant)
+
     def test_variants_record_only_their_diff_from_base(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

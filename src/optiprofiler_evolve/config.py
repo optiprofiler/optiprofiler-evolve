@@ -8,6 +8,7 @@ import os
 import re
 import types
 from collections.abc import Iterator, Mapping, Sequence
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Generic, TypeVar, Union, get_args, get_origin, get_type_hints
 from urllib.parse import unquote, urlsplit
@@ -23,7 +24,7 @@ _V = TypeVar("_V")
 
 
 class FrozenDict(Mapping[_K, _V], Generic[_K, _V]):
-    """A small immutable mapping used inside frozen experiment configs."""
+    """A shallow read-only mapping for configuration and public results."""
 
     def __init__(self, value: Mapping[_K, _V] | None = None) -> None:
         self._data = dict(value or {})
@@ -37,8 +38,11 @@ class FrozenDict(Mapping[_K, _V], Generic[_K, _V]):
     def __len__(self) -> int:
         return len(self._data)
 
-    def __deepcopy__(self, _memo: dict[int, object]) -> FrozenDict[_K, _V]:
-        return self
+    def __deepcopy__(self, memo: dict[int, object]) -> FrozenDict[_K, _V]:
+        copied = type(self)()
+        memo[id(self)] = copied
+        copied._data = deepcopy(self._data, memo)
+        return copied
 
     def __repr__(self) -> str:
         return f"FrozenDict({self._data!r})"

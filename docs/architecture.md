@@ -227,7 +227,8 @@ successful and skipped phases must publish exactly their declared outputs.
 
 The default five-phase order is unchanged, but configured workflows may contain
 any ordered list, including no phases. After constructing components, preflight
-in `phases/contracts.py` checks unique resolved phase names and inputs against preceding outputs.
+in `phases/contracts.py` checks unique resolved phase names, unique artifact producers,
+and inputs against preceding outputs.
 Optional `validate_config(config)` hooks check phase-specific configuration using
 the constructed options. No directory or run infrastructure exists yet. The
 coordinator does not reorder phases or invent missing producers.
@@ -235,7 +236,9 @@ coordinator does not reorder phases or invent missing producers.
 Ordinary custom phases need only the `Phase` protocol and `PhaseResult`; they do
 not need controller registration or new state classes. Core context factories
 and typed commit branches remain explicit because they grant authority that an
-artifact alone cannot grant. The shared `prepared` artifact is a frozen
+artifact alone cannot grant. Factories bind to implementation types (including
+subclasses), not stage names; an unrelated custom `report` gets the ordinary
+context. The shared `prepared` artifact is a frozen
 `PreparedArtifact` with typed paths and solver metadata, not an evaluator or
 data-split handle. See [custom workflows](custom-workflows.md) for an example.
 
@@ -244,6 +247,10 @@ controller commit and service entries reject further admission, population edits
 finalist registration and reselection. Entry checks avoid expensive work; commit
 checks protect authoritative writes. Hidden checks the fixed champion's tree
 hash and consumes a single-use authorization before evaluation, even if it fails.
+An exclusively created `controller/hidden_started.json` records the champion ID
+and tree hash before execution; an existing marker forbids another query, even
+if the in-memory flag was lost. Later checkpoints also include `hidden_started`.
+This is durable consumption evidence, not support for resuming interrupted runs.
 Removing hidden is allowed unless a champion-returning run requires a lockbox.
 Post-selection public challenger comparisons remain evidence-only.
 
