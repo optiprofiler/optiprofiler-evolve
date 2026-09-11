@@ -182,7 +182,7 @@ the optional `static_audit` evidence step is removed for an ablation.
 | `agents/` | Unified LLM invocation, CLI backend, isolation, provider transport, public tool broker and feedback |
 | `criteria/` | Criterion contracts, runner, aggregator, and performance/complexity/integrity implementations |
 | `criteria/performance/` | Performance criterion, canonical evaluator, subprocess entrypoint, references and benchmark evidence |
-| `observability/` | Events, provenance, private traces, usage and report generation |
+| `observability/` | Events, provenance, private traces, usage, report evidence validation and report generation |
 | `observability/views/` | Public/private derived views and their evidence readers, refreshed throughout a run |
 
 The former `quality` package is named `criteria`. The mixed `evaluation` package
@@ -271,6 +271,43 @@ add generic path dispatch, wrapper registries around dictionaries, another
 research directory, or a second event schema beside the existing ledger.
 
 ## Isolation
+
+### EvalReport evidence
+
+`observability/eval_reports.py` reads the private `optiprofiler.eval_report/1`
+and `optiprofiler.plot_data/1` pair. Its sibling `schemas/` resources are exact
+copies pinned to Core revision `bf9d61c1482da6f0ad46fab660270cc8484d9f6f`,
+verified offline by digest. This does not certify that every supported installed
+OptiProfiler version produces that protocol. `jsonschema` is a runtime dependency.
+
+The reader checks file containment, non-symlink regular files, bounded reads,
+receipts, references and numeric shapes. Default limits are 16 MiB for the main
+report and 256 MiB for the companion. The caller authorizes the main report's
+parent; companion paths cannot escape it or traverse symlinks beneath it.
+The reader does not authorize other file paths mentioned in the report, nor act
+as an OS sandbox against concurrent mutation of controller-owned directories.
+
+`load_eval_report` returns an `EvalReportBundle` or raises `EvalReportError`.
+Queries by history, plot or target-work ID are linear-time lookups and return
+borrowed records that callers must not mutate. Numerical/scoring completion is
+required; rendering failure alone does not erase valid numerical evidence.
+Validated evidence is not proof of convergence, comparability, reproducibility,
+or permission to publish.
+
+This is reader support, not a new evaluation path: fitness still comes from
+`benchmark()` return values. No phase, scorer or research agent automatically
+consumes these reports, and `agent_report.json` is not treated as an alias.
+
+Before full worker artifact copying, feedback discovers standard-named
+`eval_report.json` files and reads only their main-report receipts to exclude
+both the main files and their contained companion paths, including custom
+companion names. Missing or malformed receipts abort artifact copying before
+any benchmark file is copied. Nonstandard main-report names are not discovered;
+future producer integration must supply explicit report paths and a separately
+allowlisted public projection. Raw report files are never added to the public
+bundle allowlist.
+
+### Worker boundaries
 
 Workers receive a private copy of one candidate, an anonymous public manifest,
 and brokered `smoke_test`/`evaluate` commands. They do not receive validation or

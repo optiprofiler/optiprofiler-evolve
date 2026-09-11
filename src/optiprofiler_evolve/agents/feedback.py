@@ -12,6 +12,7 @@ from typing import Any
 
 from optiprofiler_evolve.criteria.complexity.analyzer import ComplexityReport
 from optiprofiler_evolve.models import EvaluationResult
+from optiprofiler_evolve.observability.eval_reports import private_eval_report_paths
 
 _FULL_ROOT_FILES = {
     "evaluator.log",
@@ -90,10 +91,16 @@ def publish_complexity(destination: Path, report: ComplexityReport) -> None:
 
 
 def _copy_full_artifacts(source: Path, destination: Path) -> list[Path]:
+    private: set[Path] = set()
+    # Discover every receipt before copying: malformed reports must fail closed.
+    for report in source.rglob("eval_report.json"):
+        private.update(private_eval_report_paths(report))
     copied: list[Path] = []
     for path in sorted(source.rglob("*")):
         metadata = path.lstat()
         if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+            continue
+        if path.resolve() in private:
             continue
         relative = path.relative_to(source)
         if not _is_allowed_full_artifact(relative):

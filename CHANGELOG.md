@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Merge the upstream EvalReport consumer and move it with its pinned schemas into
+  observability. Validate report/companion integrity, bounded file reads, references,
+  history bins and numeric axes without changing fitness or enabling report production.
+- Exclude raw EvalReports and receipt-named companions from full worker feedback;
+  malformed receipts stop artifact copying. Raw reports remain controller-private.
+
 - Preserve successful unscored matrix cells and report their count separately.
   Bind core contexts by implementation type, reject duplicate artifact producers,
   and retain phase-supplied failure reasons in exceptions and events.

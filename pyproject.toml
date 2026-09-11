@@ -49,7 +49,7 @@ include = ["optiprofiler_evolve*"]
 exclude = ["optiprofiler_evolve.tests*"]
 
 [tool.setuptools.package-data]
-optiprofiler_evolve = ["py.typed", "schemas/*.json"]
+optiprofiler_evolve = ["py.typed", "observability/schemas/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

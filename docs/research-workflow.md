@@ -65,8 +65,11 @@ states that this is a single measurement, not statistical certainty.
 
 The analyst can inspect existing profile and history plots through the public
 evidence index. Reliable automatic selection of the most discriminative
-problems awaits OptiProfiler's versioned `agent_report/1`; Evolve does not infer
-problem-level effects from filenames or duplicate Core's report schema.
+problems still requires a dedicated public evidence projection. The private
+EvalReport reader now exists in observability, but is not wired into research
+agents; the older `agent_report.json` branch is not an alias for that protocol.
+Evolve does not infer problem-level effects from filenames or redefine Core's
+report schema. See [EvalReport evidence](architecture.md#evalreport-evidence).
 Each ablation entry keeps the base and removed-variant artifact directories, so
 the owner can compare their profile and history plots instead of relying only
 on the scalar effect.
