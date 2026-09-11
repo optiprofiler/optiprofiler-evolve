@@ -26,6 +26,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
 dependencies = [
+    "jsonschema>=4.23",
     "optiprofiler>=1.3.0",
     "PyYAML>=6.0",
     "radon==6.0.1",
@@ -34,7 +35,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "build>=1.2",
-    "jsonschema>=4.23",
     "pytest>=8",
     "ruff==0.15.22",
 ]
@@ -49,7 +49,7 @@ include = ["optiprofiler_evolve*"]
 exclude = ["optiprofiler_evolve.tests*"]
 
 [tool.setuptools.package-data]
-optiprofiler_evolve = ["py.typed"]
+optiprofiler_evolve = ["py.typed", "schemas/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
