@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Resolve assessment profiles once per immutable configuration and reuse their
+  settings for execution, guidance, and provenance. Record each enabled review
+  profile and collect all reviewer worker versions instead of assuming validation.
+- Fix shared competitor construction to use the base performance benchmark budget
+  (500 when omitted), independent of profile overrides. Record the actual reference
+  name, budget, and source identity in `controller/reference_manifest.json`.
+
 - Validate raw worker output before explanation capture. Reject linked, special,
   or oversized explanation files before reading, and preserve unsafe output for
   diagnostics. Explanation JSON is limited to 1 MiB; ordinary malformed metadata

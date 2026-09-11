@@ -65,7 +65,8 @@ class CandidateAssessor:
         reference: Path | None = None,
     ) -> EvaluationResult:
         profile = "public" if mode in {"public", "public_score"} else mode
-        specs = self.config.assessment.resolve(profile)
+        resolved = self.config.resolved_profiles[profile]
+        specs = resolved.criteria
         if profile == "hidden" and not self.data.hidden and "performance" in specs:
             if self.data.lockbox_required and specs["performance"].enabled:
                 raise ValueError("required lockbox has no hidden problems")
@@ -80,7 +81,7 @@ class CandidateAssessor:
                 if key not in self._evaluators:
                     self._evaluators[key] = self.evaluator_factory(
                         runtime=self.runtime, reference=key[1], interface=self.interface,
-                        data=self.data, config=self.config.evaluation_config(profile),
+                        data=self.data, config=resolved.performance,
                     )
                 evaluator = self._evaluators[key]
             performance_result = evaluator.evaluate(request.candidate, mode, request.output_dir.parent)

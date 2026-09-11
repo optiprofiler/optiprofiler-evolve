@@ -115,6 +115,13 @@ Evaluation quotas are local to one worker job and each invocation consumes one
 slot, including a failed execution. An exhausted quota is non-retryable;
 waiting does not restore it.
 
+The shared built-in reference solver's budget comes from the base
+`assessment.criteria.performance.options.benchmark.max_eval_factor` (500 when
+omitted). Profile benchmark overrides and `smoke_overrides` affect their own
+evaluations, never the shared reference source. Enabled performance profiles
+must agree on the reference name. The private `controller/reference_manifest.json`
+records its name, construction budget, and tree hash.
+
 `profile_scores_mean` writes `fitness_breakdown.json` beside each execution.
 The file records the normalized tensor, its axis meanings, and the exact mean
 used for retention. It changes only the controller-owned fitness reduction;

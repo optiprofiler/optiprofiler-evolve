@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import numpy as np
 
-from optiprofiler_evolve.config import EvaluationConfig
 from optiprofiler_evolve.criteria.performance.references import materialize_reference
 from optiprofiler_evolve.solver import InterfaceSpec, validate_interface
 
@@ -28,11 +27,7 @@ class ReferenceTests(unittest.TestCase):
                 initial=initial,
                 destination=root / "reference",
                 interface=InterfaceSpec.parse("solver.py:solver"),
-                config=EvaluationConfig(
-                    backend="unsafe_local",
-                    reference="scipy_powell",
-                    benchmark={"max_eval_factor": 20},
-                ),
+                reference="scipy_powell", max_eval_factor=20,
             )
             validate_interface(reference, InterfaceSpec.parse("solver.py:solver"), "python")
             self.assertNotEqual(
@@ -66,11 +61,7 @@ class ReferenceTests(unittest.TestCase):
                 initial=initial,
                 destination=root / "reference",
                 interface=InterfaceSpec.parse("solver.py:solver"),
-                config=EvaluationConfig(
-                    backend="unsafe_local",
-                    reference="prima_newuoa",
-                    benchmark={"max_eval_factor": 20},
-                ),
+                reference="prima_newuoa", max_eval_factor=20,
             )
             spec = importlib.util.spec_from_file_location(
                 "trusted_prima_reference", reference / "solver.py"

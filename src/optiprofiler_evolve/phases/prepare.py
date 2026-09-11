@@ -133,12 +133,16 @@ class PreparePhase:
             initial=context.initial,
             destination=context.run_dir / "controller" / "reference",
             interface=context.interface,
-            config=context.config.evaluation_config(next(
-                profile for profile in ("smoke", "public", "validation", "hidden")
-                if context.config.assessment.enabled("performance", profile)
-            )),
+            reference=context.config.reference_name,
+            max_eval_factor=context.config.reference_max_eval_factor,
             ptype=ptype,
         ) if enabled else None
+        if reference is not None:
+            _write_json(context.run_dir / "controller" / "reference_manifest.json", {
+                "schema": "reference_manifest/1", "name": context.config.reference_name,
+                "max_eval_factor": context.config.reference_max_eval_factor,
+                "tree_hash": tree_hash(reference),
+            })
         seed_path = context.run_dir / "candidates" / "seed"
         copy_initial_source(context.initial, seed_path)
         context.validate_candidate(seed_path)

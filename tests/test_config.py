@@ -55,7 +55,7 @@ class ConfigTests(unittest.TestCase):
         for mode in ("score_only", "full_artifacts"):
             raw = minimal_config()
             raw["execution"]["feedback_mode"] = mode
-            self.assertEqual(load_config(raw).evaluation_config().feedback_mode, mode)
+            self.assertEqual(load_config(raw).resolved_profiles["validation"].performance.feedback_mode, mode)
 
         for mode in ("summary", "agent", "everything", "structured_numeric"):
             raw = minimal_config()
@@ -104,7 +104,7 @@ class ConfigTests(unittest.TestCase):
             "top_biased_validation_weighted",
         )
         self.assertEqual(config.evolution.parent_sampler.options["greedy_ratio"], 0.7)
-        self.assertEqual(config.reviewer_config().component.name, "unsafe_approve")
+        self.assertEqual(config.resolved_profiles["validation"].integrity.component.name, "unsafe_approve")
 
     def test_agent_reviewer_requires_a_distinct_model_or_explicit_override(self) -> None:
         raw = minimal_config()
@@ -115,7 +115,7 @@ class ConfigTests(unittest.TestCase):
         raw["assessment"]["criteria"]["integrity"]["options"]["allow_same_model"] = True
         config = load_config(raw)
         self.assertEqual(
-            config.reviewer_config().resolved_worker(config.workers).model,
+            config.resolved_profiles["validation"].integrity.resolved_worker(config.workers).model,
             "test-model",
         )
 
@@ -136,7 +136,7 @@ class ConfigTests(unittest.TestCase):
             },
         }
         config = load_config(raw)
-        self.assertEqual(config.reviewer_config().worker.model, "review-model")
+        self.assertEqual(config.resolved_profiles["validation"].integrity.worker.model, "review-model")
         self.assertEqual(
             config.redacted_dict()["assessment"]["criteria"]["integrity"]["options"]["worker"]["env"][
                 "ANTHROPIC_API_KEY"
@@ -164,7 +164,7 @@ class ConfigTests(unittest.TestCase):
         raw = minimal_config()
         raw["assessment"]["criteria"]["performance"]["options"]["fitness_source"] = "profile_scores_mean"
         config = load_config(raw)
-        self.assertEqual(config.evaluation_config().fitness_source, "profile_scores_mean")
+        self.assertEqual(config.resolved_profiles["validation"].performance.fitness_source, "profile_scores_mean")
 
         raw["assessment"]["criteria"]["performance"]["options"]["fitness_source"] = "unknown"
         with self.assertRaisesRegex(ValueError, "fitness_source"):
@@ -175,7 +175,7 @@ class ConfigTests(unittest.TestCase):
         raw["execution"]["forbidden_candidate_imports"] = ["scipy.optimize", "pdfo"]
         config = load_config(raw)
         self.assertEqual(
-            config.evaluation_config().forbidden_candidate_imports,
+            config.resolved_profiles["validation"].performance.forbidden_candidate_imports,
             ("scipy.optimize", "pdfo"),
         )
         raw["execution"]["forbidden_candidate_imports"] = ["not valid"]

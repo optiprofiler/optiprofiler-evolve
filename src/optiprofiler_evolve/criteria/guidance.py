@@ -12,7 +12,7 @@ def build_generation_guidance(
     *, evaluation_tools: tuple[str, ...] = (),
 ) -> str:
     sections = []
-    profiles = {name: config.resolve(name) for name in ("smoke", "public", "validation")}
+    profiles = {name: config.resolved_profiles[name] for name in ("smoke", "public", "validation")}
     for name in config.criteria:
         selected = [(profile, specs[name]) for profile, specs in profiles.items() if specs[name].enabled]
         if not selected:

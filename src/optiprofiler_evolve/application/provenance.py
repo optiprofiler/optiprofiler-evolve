@@ -29,9 +29,20 @@ def component_provenance(
         "parent_sampler": _component_table(
             "sampler", (config.evolution.parent_sampler,)
         )[0],
-        "integrity_reviewer": _component_table(
-            "reviewer", (config.reviewer_config().component,)
-        )[0] if config.assessment.enabled("integrity") else None,
+        "integrity_reviewers": {
+            name: {
+                **_component_table("reviewer", (profile.integrity.component,))[0],
+                "worker": ({"harness": worker.harness, "model": worker.model}
+                           if (worker := profile.integrity.resolved_worker(config.workers)) is not None
+                           else None),
+            }
+            for name, profile in config.resolved_profiles.items() if profile.integrity is not None
+        },
+        "reference": {
+            "name": config.reference_name,
+            "max_eval_factor": config.reference_max_eval_factor,
+            "manifest": "controller/reference_manifest.json",
+        } if config.reference_name is not None else None,
         "criteria": [
             {"name": name, **callable_identity(factory)}
             for name, factory in criterion_factories.items()

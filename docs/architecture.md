@@ -220,6 +220,15 @@ factory for Prepare; the phase supplies only its newly prepared seed, reference
 and data, without constructing controller implementations.
 See the [dependency rules](architecture-constitution.md#10-dependency-direction).
 
+Configuration resolves profile overrides once into an immutable derived table.
+Execution and criterion guidance reuse the same criterion settings; enabled
+performance and integrity backends receive their typed settings from that table.
+It is not a second declared configuration and is excluded from config serialization
+and hashes. Derived experiment configs construct their own tables. Provenance
+records `components.integrity_reviewers` by enabled profile and captures versions
+for all corresponding workers. `components.reference` points to the private
+reference manifest containing the actual source identity and construction budget.
+
 `RunState` owns the run's registries and committed phase results. Core result
 constructors derive artifacts from their typed fields; state artifacts and
 champion/final accessors are read-only views of these results, not separate stores.

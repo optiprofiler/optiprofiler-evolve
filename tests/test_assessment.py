@@ -119,7 +119,7 @@ class AssessmentTests(unittest.TestCase):
             (candidate / "solver.py").write_text("candidate = True\n")
             executor = IntegrityReviewExecutor(
                 run_dir=root, interface=InterfaceSpec.parse("solver.py:solver"), editable=(".",),
-                workers=config.workers, reviewer_config=config.reviewer_config,
+                workers=config.workers, reviewer_configs={"validation": config.resolved_profiles["validation"].integrity},
                 run_agent=Mock(), emit=Mock(), reviewer_factory=Mock(return_value=reviewer),
             )
             def review():
@@ -147,7 +147,7 @@ class AssessmentTests(unittest.TestCase):
             (baseline / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
             executor = IntegrityReviewExecutor(
                 run_dir=root, interface=InterfaceSpec.parse("solver.py:solver"), editable=(".",),
-                workers=config.workers, reviewer_config=config.reviewer_config,
+                workers=config.workers, reviewer_configs={"validation": config.resolved_profiles["validation"].integrity},
                 run_agent=Mock(), emit=Mock(), reviewer_factory=Mock(return_value=reviewer),
             )
             decision, report = executor.review(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from optiprofiler_evolve.config import (
@@ -29,14 +29,14 @@ from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
 
 class IntegrityReviewExecutor:
     def __init__(self, *, run_dir: Path, interface: InterfaceSpec, editable: tuple[str, ...],
-                 workers: WorkersConfig, reviewer_config: Callable[[str], IntegrityReviewConfig],
+                 workers: WorkersConfig, reviewer_configs: Mapping[str, IntegrityReviewConfig],
                  reviewer_factory: Callable[[ComponentConfig], CandidateReviewer],
                  run_agent: Callable, emit: Callable) -> None:
         self.run_dir = run_dir
         self.interface = interface
         self.editable = editable
         self.workers = workers
-        self.reviewer_config = reviewer_config
+        self.reviewer_configs = reviewer_configs
         self.reviewer_factory = reviewer_factory
         self.run_agent = run_agent
         self.emit = emit
@@ -56,7 +56,7 @@ class IntegrityReviewExecutor:
     ) -> tuple[IntegrityReviewDecision, Path]:
         """Obtain a review for exactly these source, transcript, and option inputs."""
 
-        config = self.reviewer_config(profile)
+        config = self.reviewer_configs[profile]
         candidate_hash = tree_hash(candidate)
         parent_hash = tree_hash(parent)
         fingerprint = hashlib.sha256(json.dumps({

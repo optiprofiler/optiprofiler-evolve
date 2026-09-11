@@ -9,6 +9,7 @@ import re
 import types
 from collections.abc import Iterator, Mapping, Sequence
 from copy import deepcopy
+from functools import cached_property
 from pathlib import Path
 from typing import Any, Generic, TypeVar, Union, get_args, get_origin, get_type_hints
 from urllib.parse import unquote, urlsplit
@@ -21,6 +22,7 @@ _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _T = TypeVar("_T")
 _K = TypeVar("_K")
 _V = TypeVar("_V")
+ASSESSMENT_PROFILES = ("smoke", "public", "validation", "hidden")
 
 
 class FrozenDict(Mapping[_K, _V], Generic[_K, _V]):
@@ -652,39 +654,46 @@ class AssessmentConfig:
                 unknown = set(override).difference({"enabled", "weight", "mode", "options"})
                 if unknown:
                     raise ValueError(f"Unknown criterion override fields: {sorted(unknown)!r}")
-            self.resolve(profile)
+        # Validate all override keys before constructing the cached table.
+        self.resolved_profiles
 
     def resolve(self, profile: str) -> Mapping[str, CriterionConfig]:
-        if profile not in {"smoke", "public", "validation", "hidden"}:
+        if profile not in ASSESSMENT_PROFILES:
             raise ValueError(f"Unknown assessment profile: {profile!r}")
-        result = {}
-        for name, spec in self.criteria.items():
-            override = dict(self.profiles.get(profile, {}).get(name, {}))
-            override.pop("enabled", None)
-            options = {**spec.options, **override.pop("options", {})}
-            result[name] = dataclasses.replace(
-                spec, enabled=self.enabled(name, profile), options=options, **override
-            )
-        return freeze_value(result)
+        return self.resolved_profiles[profile]
+
+    @cached_property
+    def resolved_profiles(self) -> Mapping[str, Mapping[str, CriterionConfig]]:
+        profiles = {}
+        for profile in ASSESSMENT_PROFILES:
+            result = {}
+            for name, spec in self.criteria.items():
+                override = dict(self.profiles.get(profile, {}).get(name, {}))
+                enabled = override.pop("enabled", name != "integrity" or profile == "validation")
+                options = {**spec.options, **override.pop("options", {})}
+                result[name] = dataclasses.replace(
+                    spec, enabled=spec.enabled and enabled, options=options, **override
+                )
+            profiles[profile] = result
+        return freeze_value(profiles)
 
     def enabled(self, name: str, profile: str | None = None) -> bool:
-        if profile is not None and profile not in {"smoke", "public", "validation", "hidden"}:
-            raise ValueError(f"Unknown assessment profile: {profile!r}")
-        spec = self.criteria.get(name)
-        if spec is None or not spec.enabled:
-            return False
-        profiles = (profile,) if profile else ("smoke", "public", "validation", "hidden")
-        return any(
-            self.profiles.get(item, {}).get(name, {}).get(
-                "enabled", name != "integrity" or item == "validation",
-            )
-            for item in profiles
-        )
+        profiles = (self.resolve(profile),) if profile is not None else self.resolved_profiles.values()
+        return any(name in specs and specs[name].enabled for specs in profiles)
 
     def validate(self) -> None:
         formal = self.resolve("validation")
         if not any(item.enabled and item.weight > 0 for item in formal.values()):
             raise ValueError("Formal assessment needs an enabled criterion with positive weight.")
+
+
+@dataclasses.dataclass(frozen=True)
+class ResolvedAssessmentProfile:
+    """Derived execution inputs, excluded from declared configuration and its hash."""
+
+    criteria: Mapping[str, CriterionConfig]
+    performance: EvaluationConfig | None
+    integrity: IntegrityReviewConfig | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -699,27 +708,44 @@ class EvolveConfig:
     sandbox: SandboxConfig = dataclasses.field(default_factory=SandboxConfig)
     workflow: WorkflowConfig = dataclasses.field(default_factory=WorkflowConfig)
 
-    def evaluation_config(self, profile: str = "validation") -> EvaluationConfig:
-        spec = self.assessment.resolve(profile).get("performance", CriterionConfig(enabled=False))
+    @cached_property
+    def resolved_profiles(self) -> Mapping[str, ResolvedAssessmentProfile]:
         execution = plain_data(self.execution)
-        forbidden = set(spec.options).intersection(execution)
-        if forbidden:
-            raise ValueError(f"Performance options cannot override execution settings: {sorted(forbidden)}")
-        return _from_mapping(EvaluationConfig, {**execution, **spec.options},
-                             "assessment.criteria.performance.options")
+        profiles = {}
+        for name, criteria in self.assessment.resolved_profiles.items():
+            performance = integrity = None
+            spec = criteria.get("performance")
+            if spec is not None and spec.enabled:
+                forbidden = set(spec.options).intersection(execution)
+                if forbidden:
+                    raise ValueError(f"Performance options cannot override execution settings: {sorted(forbidden)}")
+                performance = _from_mapping(EvaluationConfig, {**execution, **spec.options},
+                                            "assessment.criteria.performance.options")
+            spec = criteria.get("integrity")
+            if spec is not None and spec.enabled:
+                integrity = _from_mapping(IntegrityReviewConfig, spec.options,
+                                          "assessment.criteria.integrity.options")
+            profiles[name] = ResolvedAssessmentProfile(criteria, performance, integrity)
+        return freeze_value(profiles)
 
-    def reviewer_config(self, profile: str = "validation") -> IntegrityReviewConfig:
-        spec = self.assessment.resolve(profile).get("integrity", CriterionConfig(enabled=False))
-        return _from_mapping(IntegrityReviewConfig, spec.options, "assessment.criteria.integrity.options")
+    @cached_property
+    def reference_name(self) -> str | None:
+        references = {profile.performance.reference for profile in self.resolved_profiles.values()
+                      if profile.performance is not None}
+        if len(references) > 1:
+            raise ValueError("Performance reference must be fixed across enabled assessment profiles.")
+        return next(iter(references), None)
 
-    def complexity_config(self, profile: str = "validation") -> ComplexityConfig | None:
-        spec = self.assessment.resolve(profile).get("complexity")
-        if spec is None or not spec.enabled:
-            return None
-        if "mode" in spec.options:
-            raise ValueError("Complexity mode belongs on the criterion, not inside options.")
-        return _from_mapping(ComplexityConfig, {**spec.options, "mode": spec.mode},
-                             "assessment.criteria.complexity.options")
+    @cached_property
+    def reference_max_eval_factor(self) -> float:
+        # A profile's benchmark override must not rewrite the shared reference.
+        spec = self.assessment.criteria.get("performance")
+        benchmark = spec.options.get("benchmark", {}) if spec is not None else {}
+        factor = benchmark.get("max_eval_factor", 500)
+        if (isinstance(factor, bool) or not isinstance(factor, (int, float))
+                or not math.isfinite(factor) or factor <= 0):
+            raise ValueError("Base benchmark.max_eval_factor must be finite and positive.")
+        return float(factor)
 
     def __post_init__(self) -> None:
         policies = tuple(
@@ -744,23 +770,23 @@ class EvolveConfig:
         self.data.validate()
         self.execution.validate()
         workers = list(self.workers.pool)
-        references = set()
-        for profile in ("smoke", "public", "validation", "hidden"):
-            if self.assessment.enabled("performance", profile):
-                evaluation = self.evaluation_config(profile)
-                evaluation.validate()
-                references.add(evaluation.reference)
-            if self.assessment.enabled("integrity", profile):
-                review = self.reviewer_config(profile)
+        for profile in self.resolved_profiles.values():
+            if profile.performance is not None:
+                profile.performance.validate()
+            if profile.integrity is not None:
+                review = profile.integrity
                 review.validate(self.workers)
                 reviewer = review.resolved_worker(self.workers)
                 if reviewer is not None:
                     workers.append(reviewer)
-            complexity = self.complexity_config(profile)
-            if complexity is not None:
-                complexity.validate()
-        if len(references) > 1:
-            raise ValueError("Performance reference must be fixed across enabled assessment profiles.")
+            spec = profile.criteria.get("complexity")
+            if spec is not None and spec.enabled:
+                if "mode" in spec.options:
+                    raise ValueError("Complexity mode belongs on the criterion, not inside options.")
+                _from_mapping(ComplexityConfig, {**spec.options, "mode": spec.mode},
+                              "assessment.criteria.complexity.options").validate()
+        if self.reference_name is not None:
+            self.reference_max_eval_factor
         self.evolution.validate()
         if (self.evolution.retention.name == "metric_pareto"
                 and not self.assessment.enabled("performance", "validation")):

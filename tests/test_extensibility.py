@@ -178,7 +178,7 @@ class ExtensibilityTests(unittest.TestCase):
         self.assertEqual(reordered.workflow.attempt_steps[-1].name, "static_audit")
         self.assertIn("inspect_context", [step.name for step in inserted.workflow.attempt_steps])
         with self.assertRaises(TypeError):
-            base.evaluation_config().benchmark["new"] = True  # type: ignore[index]
+            base.resolved_profiles["validation"].performance.benchmark["new"] = True  # type: ignore[index]
 
     def test_phase_options_are_immutable_ablation_variants(self) -> None:
         base = load_config(minimal_config()).with_phase(

@@ -178,7 +178,8 @@ class EvolutionRun:
             interface=self.interface,
             editable=self.editable,
             workers=config.workers,
-            reviewer_config=config.reviewer_config,
+            reviewer_configs={name: profile.integrity for name, profile in config.resolved_profiles.items()
+                              if profile.integrity is not None},
             reviewer_factory=lambda spec: build("reviewer", spec),
             run_agent=self.controller_services.run_trusted_agent,
             emit=self._emit,
@@ -274,14 +275,12 @@ class EvolutionRun:
         try:
             with _controller_cancellation(self._cancellation_event):
                 self.views.start(self.events)
-                reviewer_worker = (
-                    self.config.reviewer_config().resolved_worker(self.config.workers)
-                    if self.config.assessment.enabled("integrity", "validation")
-                    else None
-                )
-                provenance_workers = self.config.workers.pool
-                if reviewer_worker is not None and reviewer_worker not in provenance_workers:
-                    provenance_workers = (*provenance_workers, reviewer_worker)
+                provenance_workers = list(self.config.workers.pool)
+                for profile in self.config.resolved_profiles.values():
+                    if profile.integrity is not None:
+                        worker = profile.integrity.resolved_worker(self.config.workers)
+                        if worker is not None and worker not in provenance_workers:
+                            provenance_workers.append(worker)
                 provenance = build_run_provenance(
                     self.config,
                     run_id=self.run_id,

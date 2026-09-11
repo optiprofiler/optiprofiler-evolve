@@ -105,12 +105,12 @@ class ComplexityTests(unittest.TestCase):
         return ComplexityReport(**{f.name: saved[f.name] for f in fields(ComplexityReport)})
 
     def test_config_defaults_and_invalid_values(self):
-        self.assertIsNone(load_config(minimal_config()).complexity_config())
+        self.assertFalse(load_config(minimal_config()).resolved_profiles["validation"].criteria["complexity"].enabled)
         raw = minimal_config()
         raw["assessment"]["criteria"]["complexity"] = {"enabled": True, "mode": "warn"}
-        self.assertEqual(load_config(raw).complexity_config(), ComplexityConfig())
+        self.assertEqual(load_config(raw).resolved_profiles["validation"].criteria["complexity"].mode, "warn")
         raw["assessment"]["criteria"]["complexity"]["enabled"] = False
-        self.assertIsNone(load_config(raw).complexity_config())
+        self.assertFalse(load_config(raw).resolved_profiles["validation"].criteria["complexity"].enabled)
         for ratio in (0, -1, math.inf, math.nan, True, "1.2"):
             with self.subTest(ratio=ratio), self.assertRaises(ValueError):
                 ComplexityConfig(max_ratio=ratio).validate()

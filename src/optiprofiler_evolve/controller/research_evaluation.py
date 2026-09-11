@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from optiprofiler_evolve.agents.jobs import safe_identifier as _safe_identifier
@@ -51,7 +50,8 @@ class ResearchEvaluator:
                     initial=environment.initial,
                     destination=challenger_root,
                     interface=environment.interface,
-                    config=replace(environment.config.evaluation_config(), reference=reference),
+                    reference=reference,
+                    max_eval_factor=environment.config.reference_max_eval_factor,
                     ptype=ptype,
                 )
             reference_path = challenger_root
@@ -81,7 +81,7 @@ class ResearchEvaluator:
                     if evaluation_mode == "smoke"
                     else "public"
                 ),
-                "reference": reference or environment.config.evaluation_config().reference,
+                "reference": reference or environment.config.reference_name,
                 "output_dir": str(result.output_dir),
                 "success": result.success,
             },
