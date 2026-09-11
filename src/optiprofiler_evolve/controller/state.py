@@ -9,7 +9,7 @@ from types import MappingProxyType
 from typing import Any, TypeVar
 
 from optiprofiler_evolve.controller.contracts import VariantHandle
-from optiprofiler_evolve.criteria.performance.contracts import Evaluator
+from optiprofiler_evolve.criteria.contracts import CandidateAssessment
 from optiprofiler_evolve.data import DataPlan
 from optiprofiler_evolve.models import (
     CandidateRecord,
@@ -57,9 +57,9 @@ class RunState:
         return result.data if result else None
 
     @property
-    def evaluator(self) -> Evaluator | None:
+    def assessor(self) -> CandidateAssessment | None:
         result = self._last_result(PrepareResult)
-        return result.evaluator if result else None
+        return result.assessor if result else None
 
     @property
     def reference(self) -> Path | None:

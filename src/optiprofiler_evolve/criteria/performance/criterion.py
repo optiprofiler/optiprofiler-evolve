@@ -6,6 +6,7 @@ from pathlib import Path
 from optiprofiler_evolve.criteria.contracts import (
     AssessmentRequest,
     Criterion,
+    CriterionBackends,
     CriterionResult,
     GuidanceRequest,
 )
@@ -45,10 +46,13 @@ class PerformanceCriterion(Criterion):
 
     def __init__(self, evaluate: Callable[[AssessmentRequest], EvaluationResult]) -> None:
         self.evaluate = evaluate
-        self.result: EvaluationResult | None = None
+
+    @classmethod
+    def bind(cls, backends: CriterionBackends, *, mode: str) -> Criterion:
+        return cls(backends.benchmark)
 
     def assess(self, request: AssessmentRequest) -> CriterionResult:
-        self.result = result = self.evaluate(request)
+        result = self.evaluate(request)
         if not result.success:
             return CriterionResult("failed", error=result.error)
         return CriterionResult(

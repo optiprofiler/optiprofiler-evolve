@@ -11,7 +11,7 @@ from typing import Any, Mapping, Sequence
 
 from optiprofiler_evolve.agents.feedback import publish_feedback
 from optiprofiler_evolve.config import EvolveConfig
-from optiprofiler_evolve.criteria.performance.contracts import Evaluator
+from optiprofiler_evolve.criteria.contracts import CandidateAssessment
 from optiprofiler_evolve.criteria.performance.references import materialize_reference
 from optiprofiler_evolve.data import DataPlan, resolve_data_plan, write_data_manifests
 from optiprofiler_evolve.files import write_json as _write_json
@@ -22,7 +22,7 @@ from optiprofiler_evolve.solver import InterfaceSpec, copy_initial_source, tree_
 
 @dataclass(frozen=True)
 class PreparedArtifact:
-    """Public seed inputs consumed by research phases; no evaluator or private split."""
+    """Public seed inputs consumed by research phases; no assessor or private split."""
 
     seed: Path
     seed_public_evidence: Path
@@ -96,7 +96,7 @@ class PrepareContext(PhaseContext):
     runtime: str
     editable: tuple[str, ...]
     config: EvolveConfig
-    create_assessor: Callable[..., Evaluator]
+    create_assessor: Callable[..., CandidateAssessment]
     validate_candidate: Callable[[Path], None]
 
 
@@ -106,7 +106,7 @@ class PrepareResult(PhaseResult):
     prepared: PreparedArtifact
     data: DataPlan
     reference: Path | None
-    evaluator: Evaluator
+    assessor: CandidateAssessment
     seed: CandidateRecord
 
     def __post_init__(self) -> None:
@@ -168,11 +168,11 @@ class PreparePhase:
                 ),
             },
         )
-        evaluator = context.create_assessor(seed=seed_path, reference=reference, data=data)
+        assessor = context.create_assessor(seed=seed_path, reference=reference, data=data)
         seed_public_mode = (
             "public" if context.config.execution.feedback_mode != "score_only" else "public_score"
         )
-        seed_public = evaluator.evaluate(
+        seed_public = assessor.evaluate(
             seed_path,
             seed_public_mode,
             context.run_dir / "controller" / "evaluations" / "seed" / "public",
@@ -183,7 +183,7 @@ class PreparePhase:
             seed_public, context.run_dir / "controller" / "feedback" / "seed",
             mode=context.config.execution.feedback_mode, emit=context.emit,
         )
-        seed_validation = evaluator.evaluate(
+        seed_validation = assessor.evaluate(
             seed_path,
             "validation",
             context.run_dir / "controller" / "evaluations" / "seed" / "validation",
@@ -216,6 +216,6 @@ class PreparePhase:
             prepared=prepared,
             data=data,
             reference=reference,
-            evaluator=evaluator,
+            assessor=assessor,
             seed=seed,
         )

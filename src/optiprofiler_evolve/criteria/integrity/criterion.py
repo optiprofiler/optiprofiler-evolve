@@ -6,6 +6,7 @@ from pathlib import Path
 from optiprofiler_evolve.criteria.contracts import (
     AssessmentRequest,
     Criterion,
+    CriterionBackends,
     CriterionResult,
     GuidanceRequest,
 )
@@ -29,6 +30,10 @@ class IntegrityCriterion(Criterion):
         self, review: Callable[[AssessmentRequest], tuple[IntegrityReviewDecision, Path]]
     ) -> None:
         self.review = review
+
+    @classmethod
+    def bind(cls, backends: CriterionBackends, *, mode: str) -> Criterion:
+        return cls(backends.review)
 
     def assess(self, request: AssessmentRequest) -> CriterionResult:
         decision, path = self.review(request)

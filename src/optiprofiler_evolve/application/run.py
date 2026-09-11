@@ -156,7 +156,11 @@ class EvolutionRun:
             cancellation_event=self._cancellation_event,
         )
         self.attempt_runner = AttemptRunner(self.environment)
-        self.role_jobs = RoleJobs(self.environment)
+        self.role_jobs = RoleJobs(
+            initial=self.initial, run_dir=self.run_dir, workers=config.workers,
+            sandbox=config.sandbox, llm_client=self._llm_client,
+            cancellation_event=self._cancellation_event, emit=self._emit,
+        )
         self.controller_services = ControllerServices(
             run_trusted_agent=self.role_jobs.run,
             materialize_variant=VariantMaterializer(self.environment).materialize,

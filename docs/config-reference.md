@@ -47,7 +47,7 @@ See [Algorithm assessment](assessment.md) for scoring, privacy and migration.
 | `assessment.criteria` | mapping of named criteria | performance and integrity enabled, complexity disabled | Complete criterion map when supplied; omitted standards do not run. |
 | `assessment.profiles` | mapping | `{}` | One-level overrides for smoke, public, validation and hidden. Integrity defaults to validation only. |
 | `assessment.criteria.<name>.enabled` | boolean | `true` | Master switch; disabled standards allocate no backend resources. |
-| `assessment.criteria.<name>.weight` | finite nonnegative number | `1` | Independent contribution to the weighted average; zero means constraints/diagnostics only. |
+| `assessment.criteria.<name>.weight` | finite nonnegative number | `0` for integrity, `1` otherwise | Independent contribution to the weighted average; zero means constraints/diagnostics only. |
 | `assessment.criteria.<name>.mode` | warn or enforce | enforce; complexity default warn | Whether an unmet constraint blocks acceptance. |
 | `assessment.criteria.<name>.options` | mapping | `{}` | Standard-specific settings, overridden by key rather than recursively. |
 

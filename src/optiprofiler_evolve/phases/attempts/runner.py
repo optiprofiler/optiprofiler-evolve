@@ -145,9 +145,9 @@ class AttemptRunner:
                 raise RuntimeError(public_result.error or "public evaluation failed")
             public_score = public_result.score
             metrics["public_score"] = public_score
-            if self.environment.state.evaluator is None:
+            if self.environment.state.assessor is None:
                 raise RuntimeError("Evaluator is unavailable.")
-            validation = self.environment.state.evaluator.evaluate(
+            validation = self.environment.state.assessor.evaluate(
                 workspace,
                 "validation",
                 self.environment.run_dir / "controller" / "evaluations" / attempt_id / "validation",

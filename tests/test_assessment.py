@@ -32,6 +32,35 @@ class ConstantCriterion(Criterion):
 
 
 class AssessmentTests(unittest.TestCase):
+    def test_backend_binding_does_not_require_performance_implementation_state(self):
+        class BoundPerformance(ConstantCriterion):
+            @classmethod
+            def bind(cls, backends, *, mode):
+                criterion = cls()
+                criterion.benchmark = backends.benchmark
+                return criterion
+
+            def assess(self, request):
+                result = self.benchmark(request)
+                return CriterionResult("succeeded", score=result.score, satisfied=True)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "solver.py"
+            source.write_text("def solver(fun, x0):\n    return x0\n")
+            engine = EvolutionRun(
+                initial=source, interface=InterfaceSpec.parse("solver.py:solver"), runtime="python",
+                editable=(".",), config=load_config(minimal_config()), run_dir=root / "run",
+                worker_adapter=RunnerAdapter(fake_agent_runner),
+                evaluator_factory=fake_evaluator_factory,
+            )
+            engine.criterion_factories["performance"] = BoundPerformance
+            result = engine.run()
+            self.assertEqual(result.assessment_score, result.validation_score)
+            self.assertIsNotNone(result.final_score)
+            self.assertFalse(hasattr(engine.role_jobs, "environment"))
+            self.assertFalse(hasattr(engine.role_jobs, "state"))
+
     def test_enabled_queries_preserve_master_switch_and_profile_defaults(self):
         config = AssessmentConfig(criteria={
             "performance": CriterionConfig(),
@@ -299,6 +328,7 @@ class AssessmentTests(unittest.TestCase):
                 raw = minimal_config()
                 selected = raw["assessment"]["criteria"].get(name, {})
                 selected["enabled"] = True
+                selected["weight"] = 1
                 raw["assessment"]["criteria"] = {name: selected}
                 if name != "performance":
                     raw["data"] = {"library": "must_not_import"}

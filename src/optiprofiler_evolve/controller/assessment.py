@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from optiprofiler_evolve.config import EvolveConfig, WorkerConfig
 from optiprofiler_evolve.criteria.complexity.analyzer import ComplexityChecker
-from optiprofiler_evolve.criteria.contracts import AssessmentRequest, Criterion
+from optiprofiler_evolve.criteria.contracts import AssessmentRequest, Criterion, CriterionBackends
 from optiprofiler_evolve.criteria.performance.contracts import Evaluator
 from optiprofiler_evolve.criteria.runner import AssessmentRunner
 from optiprofiler_evolve.data import DataPlan
@@ -71,7 +71,10 @@ class CandidateAssessor:
                 raise ValueError("required lockbox has no hidden problems")
             specs = {**specs, "performance": replace(specs["performance"], enabled=False)}
 
+        performance_result = None
+
         def benchmark(request: AssessmentRequest) -> EvaluationResult:
+            nonlocal performance_result
             key = (profile, reference or self.reference)
             with self._evaluator_lock:
                 if key not in self._evaluators:
@@ -80,7 +83,8 @@ class CandidateAssessor:
                         data=self.data, config=self.config.evaluation_config(profile),
                     )
                 evaluator = self._evaluators[key]
-            return evaluator.evaluate(request.candidate, mode, request.output_dir.parent)
+            performance_result = evaluator.evaluate(request.candidate, mode, request.output_dir.parent)
+            return performance_result
 
         def review(request: AssessmentRequest):
             base = parent or self.seed
@@ -92,26 +96,17 @@ class CandidateAssessor:
             )
 
         # Bind inexpensive/source constraints before benchmark execution.
+        backends = CriterionBackends(benchmark, review, self.complexity)
         criteria = {}
         for name in dict.fromkeys(("complexity", "integrity", "performance", *specs)):
             if name not in specs or not specs[name].enabled:
                 continue
-            factory = self.criterion_factories[name]
-            if name == "complexity":
-                criterion = factory(self.complexity, mode=specs[name].mode)
-            elif name == "integrity":
-                criterion = factory(review)
-            elif name == "performance":
-                criterion = factory(benchmark)
-            else:
-                criterion = factory()
-            criteria[name] = criterion
+            criteria[name] = self.criterion_factories[name].bind(backends, mode=specs[name].mode)
         report = AssessmentRunner(criteria).run(
             AssessmentRequest(candidate, tree_hash(candidate), profile, output_dir,
                               input_fingerprint=self.input_fingerprint), specs
         )
-        performance = criteria.get("performance")
-        raw = performance.result if performance is not None else None
+        raw = performance_result
         if raw is None:
             raw = EvaluationResult(mode, None, None, None, 0, output_dir)
         error = None

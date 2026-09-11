@@ -73,8 +73,10 @@ assessment:
 Use a dedicated reviewer worker for scientific runs; `allow_same_model` is an
 explicit experiment choice. If `criteria` is supplied, it is the complete
 criterion map, not a patch to defaults. Omitted criteria do not run. Without an
-assessment block, performance and integrity are enabled with weight 1;
-complexity is disabled. Integrity defaults to validation only. Other criteria
+assessment block, performance has weight 1 and integrity is an enforced,
+zero-weight constraint; complexity is disabled. An integrity mapping without a
+weight also defaults to 0. Set a positive integrity weight explicitly when its
+score should influence selection. Integrity defaults to validation only. Other criteria
 default to all four profiles. Profile overrides can change enabled, weight,
 mode and options; options merge by key, not recursively. A global disabled
 criterion cannot be re-enabled by a profile.
@@ -112,7 +114,9 @@ An initial solver that cannot complete formal assessment fails preparation.
 Population retention, configured parent sampling and champion selection use the
 formal weighted score. The weighted sampler derives nonnegative sampling
 weights with `max(total, 1e-6)`; it does not rewrite stored scores. Ranking uses
-the unmodified total and stable lineage/ID tie breaks. No criterion toggle
+the unmodified total, then available public performance, then stable lineage/ID
+tie breaks. With complexity disabled and default integrity settings, the score
+and seeded parent sampling retain the original performance-only behavior. No criterion toggle
 implicitly switches the selection algorithm. Explicit Pareto research policies
 continue to require their configured raw metric bundles.
 

@@ -55,6 +55,7 @@ class ValidationLexicographicRetention:
             unique.values(),
             key=lambda record: (
                 -record.ranking_score,
+                -(record.public_score if record.public_score is not None else float("-inf")),
                 -record.iteration,
                 record.candidate_id,
             ),

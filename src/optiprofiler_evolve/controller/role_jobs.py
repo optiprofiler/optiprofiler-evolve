@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from optiprofiler_evolve.controller.runtime import RunEnvironment
-
 import hashlib
 import re
 import secrets
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
 from types import MappingProxyType
 
 from optiprofiler_evolve.agents.broker import BrokerConnection
@@ -25,7 +22,8 @@ from optiprofiler_evolve.agents.jobs import copy_role_input as _copy_role_input
 from optiprofiler_evolve.agents.jobs import redact_role_input as _redact_role_input
 from optiprofiler_evolve.agents.jobs import safe_identifier as _safe_identifier
 from optiprofiler_evolve.agents.jobs import worker_exit_warning as _worker_exit_warning
-from optiprofiler_evolve.config import ToolConfig
+from optiprofiler_evolve.agents.llm import LLMClient
+from optiprofiler_evolve.config import SandboxConfig, ToolConfig, WorkersConfig
 from optiprofiler_evolve.errors import RunCancelled as _RunCancelled
 from optiprofiler_evolve.files import safe_relative_path
 from optiprofiler_evolve.solver import validate_tree_safety
@@ -34,22 +32,31 @@ from optiprofiler_evolve.solver import validate_tree_safety
 class RoleJobs:
     """Prepare sanitized research and review jobs without granting evaluation access."""
 
-    def __init__(self, environment: RunEnvironment) -> None:
-        self.environment = environment
+    def __init__(
+        self, *, initial: Path, run_dir: Path, workers: WorkersConfig,
+        sandbox: SandboxConfig, llm_client: Callable[[WorkerRequest], LLMClient],
+        cancellation_event: Event, emit: Callable,
+    ) -> None:
+        self.initial = initial
+        self.run_dir = run_dir
+        self.workers = workers
+        self.sandbox = sandbox
+        self.llm_client = llm_client
+        self.cancellation_event = cancellation_event
+        self.emit = emit
 
     def run(self, job: AgentJob) -> AgentJobResult:
-        environment = self.environment
         role = _safe_identifier(job.role, "role")
         job_id = _safe_identifier(job.job_id, "job_id")
-        if job.worker is None and not 0 <= job.worker_index < len(environment.config.workers.pool):
+        if job.worker is None and not 0 <= job.worker_index < len(self.workers.pool):
             raise ValueError(f"Agent job worker_index is out of range: {job.worker_index}")
-        workspace = environment.run_dir / "research" / "roles" / role / job_id
+        workspace = self.run_dir / "research" / "roles" / role / job_id
         if workspace.exists():
             raise FileExistsError(f"Role workspace already exists: {workspace}")
         workspace.mkdir(parents=True)
         replacements = {
-            str(environment.run_dir): "<run_dir>",
-            str(environment.initial): "<initial_solver>",
+            str(self.run_dir): "<run_dir>",
+            str(self.initial): "<initial_solver>",
         }
         for relative, source in job.inputs.items():
             destination = workspace / safe_relative_path(relative)
@@ -58,8 +65,8 @@ class RoleJobs:
                 _redact_role_input(destination, replacements)
         validate_tree_safety(
             workspace,
-            max_files=environment.config.sandbox.max_candidate_files * 8,
-            max_bytes=environment.config.sandbox.max_candidate_bytes * 8,
+            max_files=self.sandbox.max_candidate_files * 8,
+            max_bytes=self.sandbox.max_candidate_bytes * 8,
         )
 
         tools = job.tools or ToolConfig(
@@ -69,33 +76,33 @@ class RoleJobs:
             compilers=False,
         )
         tools.validate()
-        worker = job.worker or environment.config.workers.pool[job.worker_index]
+        worker = job.worker or self.workers.pool[job.worker_index]
         worker.validate()
         workers = replace(
-            environment.config.workers,
+            self.workers,
             pool=(worker,),
             tools=tools,
-            timeout_seconds=job.timeout_seconds or environment.config.workers.timeout_seconds,
+            timeout_seconds=job.timeout_seconds or self.workers.timeout_seconds,
             token_budget=(
                 job.token_budget
                 if job.token_budget is not None
-                else environment.config.workers.token_budget
+                else self.workers.token_budget
             ),
             max_budget_usd=(
                 job.max_budget_usd
                 if job.max_budget_usd is not None
-                else environment.config.workers.max_budget_usd
+                else self.workers.max_budget_usd
             ),
         )
-        tools_dir = environment.run_dir / "controller" / "role_tools" / role / job_id
+        tools_dir = self.run_dir / "controller" / "role_tools" / role / job_id
         tools_dir.mkdir(parents=True, exist_ok=True)
-        broker_root = environment.run_dir / "controller" / "role_brokers" / role / job_id
+        broker_root = self.run_dir / "controller" / "role_brokers" / role / job_id
         exchange = broker_root / "exchange"
         artifacts = broker_root / "artifacts"
         (exchange / "requests").mkdir(parents=True, exist_ok=True)
         (exchange / "responses").mkdir(parents=True, exist_ok=True)
         artifacts.mkdir(parents=True, exist_ok=True)
-        if environment.config.sandbox.backend == "docker":
+        if self.sandbox.backend == "docker":
             broker_directory = "/opt/optiprofiler-evolve/broker"
             artifacts_directory = "/opt/optiprofiler-evolve/artifacts"
         else:
@@ -108,7 +115,7 @@ class RoleJobs:
             exchange,
             artifacts,
         )
-        transcript = environment.run_dir / "research" / "transcripts" / role / f"{job_id}.jsonl"
+        transcript = self.run_dir / "research" / "transcripts" / role / f"{job_id}.jsonl"
         role_phase = {
             "direction-scout": "direction_scout",
             "strategy-analyst": "strategy_analysis",
@@ -132,7 +139,7 @@ class RoleJobs:
             if "island" in scope and scope["island"] != linked_island:
                 raise ValueError("Agent job island conflicts with its trace link.")
             scope["island"] = linked_island
-        environment.emit(
+        self.emit(
             "role_agent_started",
             "running",
             scope=scope,
@@ -147,17 +154,17 @@ class RoleJobs:
             },
         )
         try:
-            client = environment.llm_client(
+            client = self.llm_client(
                 WorkerRequest(
                     worker=worker,
                     workers=workers,
-                    sandbox=environment.config.sandbox,
+                    sandbox=self.sandbox,
                     workspace=workspace,
                     tools_dir=tools_dir,
                     broker=connection,
                     prompt=job.prompt,
                     transcript=transcript,
-                    trace_dir=environment.run_dir / "research" / "traces" / role / job_id,
+                    trace_dir=self.run_dir / "research" / "traces" / role / job_id,
                     trace_context={
                         "schema": "trace_input/1",
                         "join": {
@@ -170,7 +177,7 @@ class RoleJobs:
                         },
                         "inputs": sorted(job.inputs),
                     },
-                    cancellation_event=environment.cancellation_event,
+                    cancellation_event=self.cancellation_event,
                 )
             )
             result = client.run(job)
@@ -185,13 +192,13 @@ class RoleJobs:
             result = AgentJobResult(workspace, outcome, {}, job.expected_outputs, False)
         validate_tree_safety(
             workspace,
-            max_files=environment.config.sandbox.max_candidate_files * 8,
-            max_bytes=environment.config.sandbox.max_candidate_bytes * 8,
+            max_files=self.sandbox.max_candidate_files * 8,
+            max_bytes=self.sandbox.max_candidate_bytes * 8,
         )
         outputs = dict(result.outputs)
         missing_outputs = list(result.missing_outputs)
         succeeded = result.success
-        environment.emit(
+        self.emit(
             "role_agent_finished",
             "cancelled" if outcome.cancelled else "succeeded" if succeeded else "failed",
             scope=scope,

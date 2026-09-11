@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from optiprofiler_evolve.criteria.performance.contracts import Evaluator
+from optiprofiler_evolve.criteria.contracts import CandidateAssessment
 from optiprofiler_evolve.models import CandidateRecord, FinalistResult
 from optiprofiler_evolve.phases.contracts import PhaseContext, PhaseResult
 from optiprofiler_evolve.solver import copy_solver_tree
@@ -15,7 +15,7 @@ from optiprofiler_evolve.solver import copy_solver_tree
 @dataclass(frozen=True)
 class HiddenContext(PhaseContext):
     champion: tuple[int, CandidateRecord]
-    evaluator: Evaluator
+    assessor: CandidateAssessment
     begin_hidden: Callable[[], None]
 
 
@@ -43,7 +43,7 @@ class HiddenPhase:
         island, champion = context.champion
         context.begin_hidden()
         final_result = _evaluate_hidden_champion(
-            context.run_dir, island, champion, context.evaluator
+            context.run_dir, island, champion, context.assessor
         )
         if not final_result.success:
             raise RuntimeError(f"Controller-only hidden evaluation failed: {final_result.error}")
@@ -59,10 +59,10 @@ def _evaluate_hidden_champion(
     run_dir: Path,
     island: int,
     record: CandidateRecord,
-    evaluator: Evaluator,
+    assessor: CandidateAssessment,
 ) -> FinalistResult:
     output_dir = run_dir / "controller" / "final_evaluations" / record.candidate_id
-    result = evaluator.evaluate(record.path, "hidden", output_dir)
+    result = assessor.evaluate(record.path, "hidden", output_dir)
     skipped = all(item["status"] == "skipped" for item in result.assessment["results"].values())
     return FinalistResult(
         candidate_id=record.candidate_id,

@@ -4,14 +4,31 @@ from __future__ import annotations
 
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from optiprofiler_evolve.config import freeze_value
 
+if TYPE_CHECKING:
+    from optiprofiler_evolve.config import WorkerConfig
+    from optiprofiler_evolve.criteria.complexity.analyzer import ComplexityChecker
+    from optiprofiler_evolve.criteria.integrity.reviewer import IntegrityReviewDecision
+    from optiprofiler_evolve.models import EvaluationResult
+
 Profile = Literal["smoke", "public", "validation", "hidden"]
+
+
+class CandidateAssessment(Protocol):
+    """Controller assessment, distinct from the numerical Evaluator backend."""
+
+    def evaluate(
+        self, candidate: Path, mode: str, output_dir: Path, *,
+        candidate_id: str | None = None, parent: Path | None = None,
+        mutation_transcript: Path | None = None, mutation_worker: WorkerConfig | None = None,
+        reference: Path | None = None,
+    ) -> EvaluationResult: ...
 
 
 @dataclass(frozen=True)
@@ -44,6 +61,15 @@ class AssessmentRequest:
 
 
 @dataclass(frozen=True)
+class CriterionBackends:
+    """Trusted measurement ports; no population, commits, or workflow authority."""
+
+    benchmark: Callable[[AssessmentRequest], EvaluationResult]
+    review: Callable[[AssessmentRequest], tuple[IntegrityReviewDecision, Path]]
+    complexity: ComplexityChecker | None
+
+
+@dataclass(frozen=True)
 class CriterionResult:
     status: Literal["succeeded", "failed", "skipped"]
     score: float | None = None
@@ -71,6 +97,11 @@ class Criterion(ABC):
 
     version = "1"
     guidance_fields: tuple[str, ...] = ()
+
+    @classmethod
+    def bind(cls, backends: CriterionBackends, *, mode: str) -> Criterion:
+        """Construct a criterion; backend users override this explicit binding hook."""
+        return cls()
 
     @classmethod
     @abstractmethod

@@ -59,6 +59,7 @@ class ValidatePhase:
             finalists,
             key=lambda item: (
                 item[1].ranking_score,
+                item[1].public_score if item[1].public_score is not None else float("-inf"),
                 item[1].iteration,
                 item[1].candidate_id,
             ),

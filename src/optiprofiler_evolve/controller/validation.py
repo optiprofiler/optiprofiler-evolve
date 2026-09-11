@@ -60,9 +60,9 @@ class ValidationSelector:
                 raise RuntimeError(f"Research variant {candidate_id!r} has no recorded base tree.")
             result = environment.state.variant_validation.get(candidate_id)
             if result is None:
-                if environment.state.evaluator is None:
+                if environment.state.assessor is None:
                     raise RuntimeError("Validation selection requires a prepared evaluator.")
-                result = environment.state.evaluator.evaluate(
+                result = environment.state.assessor.evaluate(
                     handle.path,
                     "validation",
                     environment.run_dir

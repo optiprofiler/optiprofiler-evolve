@@ -112,6 +112,11 @@ The supported extension slots are `Phase`, `AttemptStep`,
   verdicts; only the controller admits candidates. Formal assessment requires
   an enabled positive-weight criterion. Disabled checks never fabricate scores
   or approval, and execution safety boundaries remain mandatory.
+  Criteria bind their own measurement dependencies through `Criterion.bind`;
+  controller assessment does not depend on concrete criterion instance fields.
+  `CandidateAssessment` is the controller assessment contract, while `Evaluator`
+  remains the numerical backend contract. Role job preparation receives worker
+  and trace dependencies only, never run state or commit authority.
 
 ## 5. Trust and isolation
 

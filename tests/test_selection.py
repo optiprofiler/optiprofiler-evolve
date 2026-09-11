@@ -3,14 +3,18 @@ from __future__ import annotations
 import random
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
+from optiprofiler_evolve.config import AssessmentConfig
 from optiprofiler_evolve.controller.selection import (
     MetricParetoRetention,
     MetricSelectionError,
     TopBiasedValidationWeightedSampler,
     ValidationLexicographicRetention,
 )
+from optiprofiler_evolve.criteria.contracts import CriterionResult
+from optiprofiler_evolve.criteria.runner import ScoreAggregator
 from optiprofiler_evolve.models import CandidateRecord, EvaluationResult, MetricBundle, MetricValue
 
 
@@ -54,6 +58,39 @@ def two_metric_bundle(
 
 
 class SelectionTests(unittest.TestCase):
+    def test_default_integrity_preserves_sampling_weights_and_explicit_weight_is_honored(self):
+        for config in (AssessmentConfig(), AssessmentConfig(criteria={
+            "performance": {}, "integrity": {},
+        })):
+            specs = config.resolve("validation")
+            population = []
+            for name, score in (("high", 0.9), ("low", 0.1)):
+                results = {
+                    "performance": CriterionResult("succeeded", score=score, satisfied=True),
+                    "integrity": CriterionResult("succeeded", score=1.0, satisfied=True),
+                }
+                total, accepted = ScoreAggregator.aggregate(results, specs)
+                self.assertTrue(accepted)
+                self.assertEqual(total, score)
+                population.append(replace(candidate(name, score, score), assessment_score=total))
+            sampler = TopBiasedValidationWeightedSampler(greedy_ratio=0)
+            for seed in range(30):
+                rng = random.Random(seed)
+                rng.random()
+                expected = rng.choices(population, weights=[0.9, 0.1])[0]
+                self.assertEqual(sampler.select(population, random.Random(seed)), expected)
+            results["integrity"] = CriterionResult("succeeded", score=0, satisfied=False)
+            self.assertFalse(ScoreAggregator.aggregate(results, specs)[1])
+        explicit = AssessmentConfig(criteria={"integrity": {"weight": 2}})
+        self.assertEqual(explicit.resolve("validation")["integrity"].weight, 2)
+
+    def test_public_score_breaks_formal_ties_before_iteration(self):
+        older_better = candidate("older", 0.7, 0.9, iteration=1)
+        newer_worse = candidate("newer", 0.7, 0.1, iteration=2)
+        self.assertEqual(ValidationLexicographicRetention().retain(
+            (newer_worse, older_better), 1,
+        ), (older_better,))
+
     def test_metric_bundle_validates_primary_and_comparability(self) -> None:
         bundle = two_metric_bundle(0.7, 0.6)
         self.assertEqual(bundle.metric("speed").value, 0.7)

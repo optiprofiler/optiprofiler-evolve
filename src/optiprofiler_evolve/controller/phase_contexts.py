@@ -43,8 +43,8 @@ def context_factories(
         )
 
     def explore_context(base: PhaseContext) -> ExploreContext:
-        if environment.state.evaluator is None or environment.state.data is None:
-            raise RuntimeError("Explore phase requires prepared evaluator and data.")
+        if environment.state.assessor is None or environment.state.data is None:
+            raise RuntimeError("Explore phase requires prepared assessor and data.")
         return ExploreContext(
             **_common_inputs(base),
             evolution=environment.config.evolution,
@@ -76,11 +76,11 @@ def context_factories(
 
     def hidden_context(base: PhaseContext) -> HiddenContext:
         champion = environment.state.champion
-        evaluator = environment.state.evaluator
-        if champion is None or evaluator is None:
+        assessor = environment.state.assessor
+        if champion is None or assessor is None:
             raise RuntimeError("Hidden phase requires a validation-selected champion.")
         return HiddenContext(
-            **_common_inputs(base), champion=champion, evaluator=evaluator,
+            **_common_inputs(base), champion=champion, assessor=assessor,
             begin_hidden=environment.commits.begin_hidden,
         )
 

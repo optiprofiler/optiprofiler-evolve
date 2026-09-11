@@ -358,20 +358,20 @@ class ComplexityTests(unittest.TestCase):
             engine._initialize_run_directory()
             engine.coordinator.run_phase(PreparePhase(), {})
             evaluator.calls.clear()
-            original_assess = engine.state.evaluator.complexity.measure
+            original_assess = engine.state.assessor.complexity.measure
 
             def assess(snapshot):
                 report = original_assess(snapshot)
                 (self.candidate / "solver.py").write_text(SEED)
                 return report
 
-            engine.state.evaluator.complexity.measure = assess
+            engine.state.assessor.complexity.measure = assess
 
             (self.candidate / "solver.py").write_text(LARGE)
             broker = EvaluationBroker(
                 workspace=self.candidate,
                 control_dir=self.root / mode,
-                evaluator=PublicAssessment(engine.state.evaluator.evaluate),
+                evaluator=PublicAssessment(engine.state.assessor.evaluate),
                 max_smoke_calls=1,
                 max_public_calls=1,
             )
@@ -463,7 +463,7 @@ class ComplexityTests(unittest.TestCase):
                 self.assertIn("All candidate Python files count", prompt)
                 self.assertIn("rather than compress formatting or remove documentation", prompt)
                 self.assertEqual(prompt.count("Complexity budget ("), 1)
-                self.assertNotIn(engine.state.evaluator.complexity.baseline_hash, prompt)
+                self.assertNotIn(engine.state.assessor.complexity.baseline_hash, prompt)
                 self.assertNotIn(str(self.seed), prompt)
 
     def test_research_role_prompt_keeps_no_criterion_guidance(self):

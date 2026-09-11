@@ -12,6 +12,7 @@ from optiprofiler_evolve.criteria.complexity.analyzer import (
 from optiprofiler_evolve.criteria.contracts import (
     AssessmentRequest,
     Criterion,
+    CriterionBackends,
     CriterionResult,
     GuidanceRequest,
 )
@@ -107,6 +108,12 @@ class ComplexityCriterion(Criterion):
     def __init__(self, checker: ComplexityChecker, *, mode: str) -> None:
         self.checker = checker
         self.mode = mode
+
+    @classmethod
+    def bind(cls, backends: CriterionBackends, *, mode: str) -> Criterion:
+        if backends.complexity is None:
+            raise ValueError("Complexity criterion requires a prepared source analyzer.")
+        return cls(backends.complexity, mode=mode)
 
     def assess(self, request: AssessmentRequest) -> CriterionResult:
         error = None

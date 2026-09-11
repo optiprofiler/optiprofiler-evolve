@@ -53,14 +53,14 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
 
     def run_worker(self) -> WorkerOutcome:
         environment = self._environment
-        if environment.state.evaluator is None or environment.state.data is None:
+        if environment.state.assessor is None or environment.state.data is None:
             raise RuntimeError("Worker capability requires prepared evaluator and data.")
         tools_dir = environment.run_dir / "controller" / "worker_tools" / self._attempt_id
         transcript = environment.run_dir / "transcripts" / f"{self._attempt_id}.jsonl"
         broker = EvaluationBroker(
             workspace=self._workspace,
             control_dir=environment.run_dir / "controller" / "brokers" / self._attempt_id,
-            evaluator=PublicAssessment(environment.state.evaluator.evaluate,
+            evaluator=PublicAssessment(environment.state.assessor.evaluate,
                                        candidate_id=self._attempt_id, parent=self._parent.path),
             max_smoke_calls=environment.config.execution.max_smoke_calls_per_worker,
             max_public_calls=environment.config.execution.max_public_calls_per_worker,
@@ -184,7 +184,7 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
         if mode not in {"smoke", "public", "public_score"}:
             raise ValueError(f"Attempt steps cannot evaluate controller-only mode {mode!r}.")
         self.audit_candidate()
-        if self._environment.state.evaluator is None:
+        if self._environment.state.assessor is None:
             raise RuntimeError("Evaluator is unavailable.")
         directory_name = "public" if mode in {"public", "public_score"} else mode
         count = self._evaluation_counts.get(directory_name, 0) + 1
@@ -192,13 +192,17 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
         if count > 1:
             directory_name = f"{directory_name}-{count:03d}"
         evaluated_hash = tree_hash(self._workspace)
-        result = self._environment.state.evaluator.evaluate(
+        evaluation_mode = (
+            "public" if mode == "public_score"
+            and self._environment.config.execution.feedback_mode == "full_artifacts" else mode
+        )
+        result = self._environment.state.assessor.evaluate(
             self._workspace,
-            mode,
+            evaluation_mode,
             self._environment.run_dir / "controller" / "evaluations" / self._attempt_id / directory_name,
             candidate_id=self._attempt_id, parent=self._parent.path,
         )
-        if mode == "public_score":
+        if mode in {"public", "public_score"}:
             self.public_evaluation = (evaluated_hash, result)
         return result
 

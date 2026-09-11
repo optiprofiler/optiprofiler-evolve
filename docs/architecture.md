@@ -289,12 +289,21 @@ feedback bundles. Scout and analyst inputs consume these same projections as the
 worker broker; they never fall back to a private evaluation directory or an
 unmatched last broker call. Transfer jobs use `SolverJob` and receive the same
 criterion guidance as exploration jobs.
+With full-artifact feedback, the final public candidate evaluation retains
+configured benchmark artifacts, so the analyst receives evidence for the actual
+admitted tree without another benchmark call.
 Complexity analysis caches only source measurements. Each criterion invocation
 applies its profile policy once and persists `complexity/complexity.json` beside
 the assessment, so diagnostic and admission evidence describe the same rules.
 Integrity completion events record profile-specific decision paths. Owner pages
 and evidence archives consume those paths, including fingerprinted review runs,
 rather than reconstructing directories from attempt IDs.
+`CandidateAssessment` names the composite assessment port; `Evaluator` names only
+the numerical backend. Criteria bind their dependencies through `Criterion.bind`
+and return evidence through their declared contract. Raw benchmark output is
+captured by the controller's benchmark callback, not read from a concrete
+criterion's mutable attributes. Research role preparation receives explicit
+worker, sandbox and trace dependencies without the shared run environment.
 
 ### EvalReport evidence
 

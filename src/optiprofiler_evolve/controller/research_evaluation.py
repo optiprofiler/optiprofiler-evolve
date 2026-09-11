@@ -33,9 +33,9 @@ class ResearchEvaluator:
         label = _safe_identifier(label, "evaluation label")
         if tree_hash(handle.path) != handle.tree_hash:
             raise ValueError(f"Variant tree changed after materialization: {handle.variant_id}")
-        if environment.state.evaluator is None or environment.state.data is None:
-            raise RuntimeError("Public variant evaluation requires a prepared evaluator.")
-        evaluator = environment.state.evaluator
+        if environment.state.assessor is None or environment.state.data is None:
+            raise RuntimeError("Public variant evaluation requires a prepared assessor.")
+        assessor = environment.state.assessor
         reference_path = None
         if mode not in {"smoke", "public_score"}:
             raise ValueError("Research variants may use only smoke or public_score evaluation.")
@@ -59,12 +59,12 @@ class ResearchEvaluator:
         output_dir = (
             environment.run_dir / "controller" / "research_evaluations" / handle.variant_id / label
         )
-        result = evaluator.evaluate(
+        result = assessor.evaluate(
             handle.path,
             evaluation_mode,
             output_dir,
             candidate_id=handle.variant_id,
-            parent=environment.state.variant_bases.get(handle.variant_id, environment.state.evaluator.seed),
+            parent=environment.state.variant_bases.get(handle.variant_id, environment.state.candidates["seed"].path),
             reference=reference_path,
         )
         if reference is None and evaluation_mode == "public_score":

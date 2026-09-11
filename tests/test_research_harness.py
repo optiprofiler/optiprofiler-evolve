@@ -345,7 +345,8 @@ class ResearchHarnessTests(unittest.TestCase):
                 benchmark = output_dir / "benchmark"
                 shutil.copytree(fixture, benchmark)
                 (output_dir / "private.json").write_text('{"secret": "PRIVATE_CANARY"}')
-                (benchmark / "plot.svg").write_text("<svg>public plot</svg>")
+                if mode != "public_score":
+                    (benchmark / "plot.svg").write_text("<svg>public plot</svg>")
                 return result
 
         with tempfile.TemporaryDirectory() as directory:

@@ -55,6 +55,7 @@ assessment:
         smoke_overrides:
           max_eval_factor: 5
     integrity:
+      weight: 0  # Enforced constraint; preserve performance-based sampling.
       options:
         component:
           name: agent_integrity

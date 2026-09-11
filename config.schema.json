@@ -949,7 +949,8 @@
         },
         "weight": {
           "type": "number",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Defaults to 0 for integrity and 1 for other criteria; explicit weights override these defaults."
         },
         "mode": {
           "enum": [

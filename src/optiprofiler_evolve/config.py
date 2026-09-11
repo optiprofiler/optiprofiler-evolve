@@ -617,7 +617,7 @@ def _default_criteria() -> Mapping[str, CriterionConfig]:
     return {
         "performance": CriterionConfig(),
         "complexity": CriterionConfig(enabled=False, mode="warn"),
-        "integrity": CriterionConfig(),
+        "integrity": CriterionConfig(weight=0.0),
     }
 
 
@@ -627,9 +627,12 @@ class AssessmentConfig:
     profiles: Mapping[str, Mapping[str, Mapping[str, Any]]] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        defaults = _default_criteria()
         criteria = {
             name: value if isinstance(value, CriterionConfig) else _from_mapping(
-                CriterionConfig, value, f"assessment.criteria.{name}"
+                CriterionConfig,
+                {"weight": defaults.get(name, CriterionConfig()).weight, **value},
+                f"assessment.criteria.{name}",
             )
             for name, value in self.criteria.items()
         }
