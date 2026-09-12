@@ -9,17 +9,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from optiprofiler_evolve.broker import EvaluationBroker
+from optiprofiler_evolve.agents.broker import EvaluationBroker
 from optiprofiler_evolve.config import EvaluationConfig
-from optiprofiler_evolve.data import DataPlan
-from optiprofiler_evolve.evaluation import (
+from optiprofiler_evolve.criteria.performance.evaluator import (
     DockerOptiProfilerEvaluator,
     PythonOptiProfilerEvaluator,
-    _profile_scores_mean_fitness,
     _problems_for_mode,
+    _profile_scores_mean_fitness,
     _sanitize_worker_artifacts,
     _scoped_data_manifest,
 )
+from optiprofiler_evolve.data import DataPlan
 from optiprofiler_evolve.solver import InterfaceSpec
 
 
@@ -78,7 +78,7 @@ class OptiProfilerEvaluationTests(unittest.TestCase):
                 hidden=(),
                 smoke=("ROSENBR",),
                 split_seed=0,
-                manifest_hash="test",
+                split_fingerprint="test",
                 aliases={"ROSENBR": "P_OPAQUE"},
             )
             config = EvaluationConfig(
@@ -105,7 +105,8 @@ class OptiProfilerEvaluationTests(unittest.TestCase):
             self.assertTrue(breakdown["normalized_profile_advantage"])
             serialized = (root / "output" / "result.json").read_text(encoding="utf-8")
             self.assertNotIn("ROSENBR", serialized)
-            self.assertTrue((root / "output" / "artifact_index.json").is_file())
+            self.assertFalse((root / "output" / "artifact_index.json").exists())
+            self.assertFalse((root / "output" / "feedback.md").exists())
             for path in (root / "output").rglob("*"):
                 self.assertNotIn("ROSENBR", path.name)
                 if path.suffix in {".json", ".log", ".md", ".txt"}:
@@ -129,7 +130,7 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
                 hidden=(),
                 smoke=("PUBLIC",),
                 split_seed=0,
-                manifest_hash="test",
+                split_fingerprint="test",
                 aliases={"PUBLIC": "P_PUBLIC"},
             )
             evaluator = DockerOptiProfilerEvaluator(
@@ -143,7 +144,7 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
                 ),
             )
             completed = types.SimpleNamespace(returncode=1, stdout="expected test failure")
-            with patch("optiprofiler_evolve.evaluation.subprocess.run", return_value=completed):
+            with patch("optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", return_value=completed):
                 result = evaluator.evaluate(candidate, "public", root / "output")
             self.assertFalse(result.success)
             self.assertIn("code 1", result.error or "")
@@ -160,7 +161,7 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
                 hidden=(),
                 smoke=("SECRET_NAME",),
                 split_seed=0,
-                manifest_hash="test",
+                split_fingerprint="test",
                 aliases={"SECRET_NAME": "P_OPAQUE"},
             )
             leaked = root / "SECRET_NAME" / "details.txt"
@@ -208,7 +209,7 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
                 hidden=(),
                 smoke=("SECRET_NAME",),
                 split_seed=0,
-                manifest_hash="test",
+                split_fingerprint="test",
                 aliases={"SECRET_NAME": "P_OPAQUE"},
             )
             evaluator = DockerOptiProfilerEvaluator(
@@ -248,7 +249,7 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
             hidden=("HIDDEN",),
             smoke=("PUBLIC",),
             split_seed=0,
-            manifest_hash="test",
+            split_fingerprint="test",
             aliases={
                 "PUBLIC": "P_PUBLIC",
                 "VALIDATION": "P_VALIDATION",
@@ -275,7 +276,7 @@ class DockerRequestStagingTests(unittest.TestCase):
             hidden=(),
             smoke=("SECRET_NAME",),
             split_seed=0,
-            manifest_hash="test",
+            split_fingerprint="test",
             aliases={"SECRET_NAME": "P_OPAQUE"},
         )
         reference = root / "reference"
@@ -305,7 +306,7 @@ class DockerRequestStagingTests(unittest.TestCase):
             return types.SimpleNamespace(returncode=7, stdout="evaluator refused")
 
         with patch(
-            "optiprofiler_evolve.evaluation.subprocess.run", side_effect=fake_run
+            "optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", side_effect=fake_run
         ):
             result = evaluator.evaluate(candidate, "smoke", output_dir)
         return seen, result
@@ -399,7 +400,7 @@ class DockerRequestStagingTests(unittest.TestCase):
                 return types.SimpleNamespace(returncode=7, stdout="refused")
 
             with patch(
-                "optiprofiler_evolve.evaluation.subprocess.run", side_effect=fake_run
+                "optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", side_effect=fake_run
             ):
                 broker._evaluate_and_publish("smoke", output)
 

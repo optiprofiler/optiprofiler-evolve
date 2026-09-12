@@ -75,7 +75,7 @@ MATLAB-specific process settings should live under the evaluator adapter, not
 in `evolve(...)`:
 
 ```yaml
-evaluation:
+execution:
   backend: unsafe_local
   matlab:
     executable: matlab

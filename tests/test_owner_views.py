@@ -5,17 +5,19 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import unquote
 
-from optiprofiler_evolve.owner_views import (
+from optiprofiler_evolve.observability.projections import project_public_events
+from optiprofiler_evolve.observability.views.owner import (
     _lineage_lanes,
     _ordered_islands,
     _render_lineage_graph,
+    _render_owner_index,
     _render_score_chart,
     render_owner_views,
 )
-from optiprofiler_evolve.projections import project_public_events
-from optiprofiler_evolve.viewers import (
+from optiprofiler_evolve.observability.views.public import (
     materialize_public_bundle,
     render_final_report,
     render_public_report,
@@ -129,13 +131,14 @@ def _attempt_rows(run_dir: Path, *, terminal: bool = True, accepted: bool = True
             _ts(3, 2),
             "integrity_review_attempt_finished",
             "succeeded",
-            review_scope,
+            {**review_scope, "job_id": REVIEW_JOB},
             {
                 "review_attempt": 1,
                 "verdict": "approve",
                 "finding_count": 1,
                 "report": str(
-                    run_dir / "controller" / "integrity_reviews" / ATTEMPT / "attempt_01.json"
+                    run_dir / "controller" / "integrity_reviews" /
+                    f"{ATTEMPT}-validation-fingerprint" / "attempt_01.json"
                 ),
             },
         ),
@@ -144,7 +147,9 @@ def _attempt_rows(run_dir: Path, *, terminal: bool = True, accepted: bool = True
             "integrity_review_finished",
             "succeeded",
             review_scope,
-            {"gate": "approved" if accepted else "quarantined"},
+            {"gate": "approved" if accepted else "quarantined", "profile": "validation",
+             "report": str(run_dir / "controller/integrity_reviews" /
+                           f"{ATTEMPT}-validation-fingerprint" / "decision.json")},
         ),
     ]
     if terminal:
@@ -161,7 +166,6 @@ def _attempt_rows(run_dir: Path, *, terminal: bool = True, accepted: bool = True
                         "guidance": "card-7",
                         "public_score": 0.75,
                         "validation_score": float(VALIDATION_CANARY),
-                        "review_verdict": "approve" if accepted else "quarantine",
                         "valid": accepted,
                         "accepted": accepted,
                         "error": None,
@@ -239,7 +243,7 @@ def _build_run_dir(root: Path, *, terminal: bool = True, accepted: bool = True) 
         "def solver(fun, x0):\n    return improved(x0)\n", encoding="utf-8"
     )
 
-    reviews = run_dir / "controller" / "integrity_reviews" / ATTEMPT
+    reviews = run_dir / "controller" / "integrity_reviews" / f"{ATTEMPT}-validation-fingerprint"
     reviews.mkdir(parents=True)
     decision = {
         "verdict": "approve",
@@ -289,6 +293,44 @@ def _hrefs(page: Path) -> list[str]:
 
 
 class OwnerViewTests(unittest.TestCase):
+    def test_index_reads_validation_scores_once_per_attempt(self):
+        state = {"attempts": [
+            {"attempt_id": "a", "iteration": 1, "status": "succeeded"},
+            {"attempt_id": "b", "iteration": 1, "status": "failed"},
+        ]}
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "optiprofiler_evolve.observability.views.owner._attempt_validation_score",
+            side_effect=[0.125, 0.875],
+        ) as read_score:
+            document = _render_owner_index(state, {}, Path(directory), None)
+        self.assertEqual(read_score.call_count, 2)
+        self.assertIn("Val 0.1250", document)
+        self.assertIn("Val 0.8750", document)
+
+    def test_iteration_groups_preserve_order_and_expansion(self):
+        from optiprofiler_evolve.observability.views._html import _render_attempt_groups
+
+        attempts = [
+            {"iteration": 2, "status": "succeeded", "attempt_id": "a"},
+            {"iteration": 1, "status": "failed", "attempt_id": "b"},
+            {"iteration": 3, "status": "succeeded", "attempt_id": "c"},
+            {"status": "succeeded", "attempt_id": "d"},
+            {"iteration": 2, "status": "succeeded", "attempt_id": "e"},
+        ]
+        groups = []
+
+        def render_members(members):
+            groups.append([member["attempt_id"] for member in members])
+            return ""
+
+        document = _render_attempt_groups(attempts, render_members)
+        self.assertEqual(groups, [["a", "e"], ["b"], ["c"], ["d"]])
+        self.assertEqual(
+            re.findall(r'<details class="iter-group"( open)?><summary>([^<]+)', document),
+            [("", "Iteration 2"), (" open", "Iteration 1"),
+             (" open", "Iteration 3"), ("", "Other attempts")],
+        )
+
     def test_all_island_lineage_highlights_cross_island_migration(self) -> None:
         points = [
             {
@@ -1221,7 +1263,9 @@ class OwnerViewTests(unittest.TestCase):
             self.assertIn(ATTEMPT, attempt_entries)
             evidence = attempt_entries[ATTEMPT]["evidence"]
             self.assertIn("transcript", evidence)
-            self.assertIn("integrity_reviews", evidence)
+            self.assertIn("integrity_review_validation", evidence)
+            self.assertEqual(evidence["integrity_review_validation"]["path"],
+                             f"controller/integrity_reviews/{ATTEMPT}-validation-fingerprint")
             text = json.dumps(manifest)
             for item in re.findall(r'"path": "([^"]+)"', text):
                 self.assertFalse(Path(item).is_absolute(), item)

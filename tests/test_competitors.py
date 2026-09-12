@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from optiprofiler_evolve.competitors import (
+from optiprofiler_evolve.criteria.performance.competitors import (
     competitor_names,
     get_competitor,
     materialize_competitor,
@@ -62,7 +62,7 @@ class CompetitorRegistryTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        names = schema["$defs"]["EvaluationConfig"]["properties"]["reference"]["enum"]
+        names = schema["$defs"]["performance_options"]["properties"]["reference"]["enum"]
         self.assertEqual(names, ["initial", *competitor_names()])
 
     def test_default_evaluator_image_installs_both_powell_family_packages(self) -> None:

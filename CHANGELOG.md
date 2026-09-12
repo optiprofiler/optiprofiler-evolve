@@ -2,77 +2,122 @@
 
 ## Unreleased
 
-- Owner console workflow is now a continuous pan/zoom canvas (Fit, zoom in,
-  zoom out; drag or scroll to pan) so long research pipelines keep unbroken
-  connectors at every width; the sanitized public page stays a script-free
-  scrollable strip. Every phase node links to a private
-  `owner/phases/<phase>.html` page derived from the event ledger and run
-  evidence: status and duration, configured options from provenance, phase
-  roles, evidence links, and a bounded phase-event table. The explore node
-  shows an islands/iterations/attempts/accepted/quarantined summary and its
-  page carries the full island-by-iteration matrix plus the effective
-  population-policy mode (metric_pareto reports its scalar fallback when
-  only one objective is configured).
+### Breaking changes and migration
 
-- Turn the run-directory root `status.html` into the PRIVATE owner console:
-  every attempt, integrity-review invocation, and research-role job links to a
-  static per-invocation evidence page (transcript and tool calls, bounded
-  stdout/stderr previews, source diff, benchmark artifacts, reviewer findings,
-  gateway outcome, owner-only validation/hidden results). The sanitized public
-  page is now rendered to `public_status.html` and published unchanged as
-  `public/status.html` through an explicit source-to-target bundle allowlist.
-- Add a derived owner evidence manifest plus `scripts/pack_owner_evidence.py`
-  for explicit per-attempt/per-job packaging with symlink and path-traversal
-  protection. Nothing owner-side is ever uploaded by the Actions templates.
-- Add the external algorithm-repository GitHub Actions example
-  (`examples/external-repository/`) with a pinned package fetch outside the
-  solver tree.
+- Replace top-level `evaluation` with `execution`. Performance options move to
+  `assessment.criteria.performance.options` and `integrity_review` moves to
+  `assessment.criteria.integrity.options`. `assessment.criteria` is the
+  **complete** criterion map rather than a patch, so a criterion left out does not
+  run at all; omitting `integrity` drops the review gate. The loader warns by
+  name for every default-enabled criterion that is missing. The loader error
+  prints a complete starting block.
+- Remove the `structured_numeric` feedback mode. It required an `agent_report/1`
+  validator that never shipped, so the mode could only fail closed. An unscored
+  evaluation can no longer fall through to the `full_artifacts` branch.
+- Remove the `evolution.rounds`, `feedback_mode: summary|agent` and
+  `backend: local` aliases. Use `iterations`, `score_only`/`full_artifacts` and
+  `unsafe_local`. Note `summary`/`agent` were never accepted mode values, only
+  translated aliases.
+- Remove `integrity_review.strict`. Exhausted reviewer retries reject that
+  candidate and exploration continues; this is not a fail-fast outage policy.
+- `experiment_fingerprints.json` moves to `schema_version` 2. The hashing code is
+  unchanged but it hashes the resolved configuration, whose key space changed, so
+  fingerprints recorded before this release do not compare with new ones.
+- Named competitors now honor bounds and constraints, so historical scores using
+  them are not directly comparable. Reference `initial` is unchanged.
+- `metric_pareto` with a single objective no longer delegates to
+  `validation_lexicographic`; it retains by the objective's metric value and can
+  therefore retain a different candidate when that metric and the assessed score
+  disagree.
+- The adaptive `evo` provider route is removed in favour of an explicit endpoint.
+- Quick-start defaults are unchanged from the previous release: 1 iteration,
+  1 island, population 2, no migration, `mutate -> smoke -> public_evaluate`,
+  evaluation factor 20 and smoke 5. Earlier releases used larger search budgets
+  and tool sets; read that difference against those releases, not this one.
 
-- Keep the controller event ledger private and derive all shareable status data
-  through a centralized default-deny event projection.
-- Add a versioned public run-state projection, an Actions-style server-free
-  workflow/island view, a sanitized Markdown summary, and an exact allowlisted
-  `public/` bundle for the single-job GitHub Actions template.
-- Remove problem-library identity, reference raw scores, and scoring-formula
-  details from worker manifests and evaluation responses.
-- Preserve built-in CLI worker and research-role stdout/stderr incrementally in
-  private per-invocation traces, including partial output on timeout, while
-  keeping readable transcripts as derived artifacts.
-- Add trace invocation/outcome manifests, process-group timeout cleanup,
-  cooperative SIGINT/SIGTERM cancellation, idempotent interrupted-run recovery,
-  and a controller-owned fallback for injected worker adapters.
-- Route Docker worker model traffic through a pinned per-invocation provider
-  sidecar, with separate internal/egress networks, credential separation,
-  metadata-only request audit, terminal recovery, and labeled best-effort GC.
-- Make island retention and parent sampling explicit registered components while
-  preserving the seeded legacy default, and add validated controller-only metric
-  bundles plus scalar-compatible Pareto retention.
-- Add a mandatory pre-validation semantic integrity reviewer with strict JSON
-  evidence, retry/quarantine behavior, separate model budgets, and complete
-  private reviewer traces.
-- Keep remote model-API transport enabled for strategy-analysis agents while
-  leaving their web-search tools disabled by default.
-- Preserve nested component options as structured JSON in provenance and run
-  events.
-- Pair the PRIMA challenger example with an auditable candidate-import ban.
-- Add an auditable `forbidden_candidate_imports` experiment policy for
-  external-solver-API ablations.
-- Require agent-feedback workers to inspect selected benchmark plots through a
-  raster-image tool before their final edit.
+### Added
 
-- Added collaborator onboarding, complete public API and YAML configuration
-  references, editor JSON Schema, and runnable Claude/Codex/multi-file examples.
-- Documented the planned host-MATLAB evaluator and its candidate/reference path
-  isolation boundary.
-- Added tests that keep config dataclasses, schema, reference docs, and example
-  YAML files synchronized.
-- Fixed Docker prompt delivery and Claude Code stream-JSON compatibility, and
-  added a tested Anthropic-compatible provider example.
-- Give every worker a dedicated temporary Docker network. Gateway-routed
-  workers have provider transport and harness-native search without general
-  shell egress; direct network access remains an explicit unsafe ablation.
-- Reduced quick-start container defaults and bounded the example solvers so
-  local worker tests cannot wait indefinitely.
+- Add the `complexity` assessment criterion: a static, baseline-relative source
+  budget measured with radon in an isolated subprocess that never imports the
+  candidate. It is disabled by default and, when enabled with a positive weight,
+  contributes to the selection score.
+- Integrate the OptiProfiler **EvalReport** consumer into `observability`, with
+  pinned companion schemas. It validates report/companion integrity, bounded file
+  reads, cross-references, history bins and numeric axes. It never supplies
+  fitness and enables no report production.
+- Exclude raw EvalReports and receipt-named companions from `full_artifacts`
+  worker feedback. An unusable receipt withholds additional artifacts while
+  preserving the completed score, and spends no further evaluation.
+- Custom workflows: `workflow.phases` may be any ordered list, including an empty
+  one, and `without_phase` can remove core stages. `EvolveResult` is constructed
+  independently of the report, with nullable winner/score fields and a read-only
+  `artifacts` mapping.
+
+### Behavior changes
+
+- Assessment profiles resolve once per immutable configuration and are reused for
+  execution, generation guidance and provenance.
+- Bind formal public-artifact requirements from phase declarations. A workflow
+  that includes `strategy_analysis` while `feedback_mode` is `full_artifacts` now
+  runs attempt public evaluations in `public` mode instead of `public_score`.
+- The fixed seed receives a controller-local baseline integrity approval, because
+  it equals its parent and has no mutation transcript. Reviewer budget is spent
+  only on real submissions, and a reviewer outage cannot abort a run before
+  exploration.
+- Reject configured optional-input producers placed after their consumers before
+  spending run budget. Absent optional producers remain valid.
+- Persist hidden-query consumption before execution, and restore result copying
+  and hashing with read-only artifacts.
+- Share competitor construction on the base performance benchmark budget (500 when
+  omitted), independent of profile overrides. Record the reference name, budget and
+  source identity in `controller/reference_manifest.json`.
+- Validate raw worker output before explanation capture: reject linked, special or
+  oversized explanation files before reading. Explanation JSON is capped at 1 MiB
+  and malformed metadata stays non-blocking.
+- Core phase artifacts and run-state views derive from committed typed results, so
+  champion and final-result facts are no longer separately writable. `RunState`
+  and `RunCommits` are the only registry and writer. Hidden identity and
+  champion-hash duplication is gone, the returned solver tree is validated, one
+  lockbox policy covers planned and committed stages, and unused attempt steps are
+  not constructed.
+- Failed/cancelled phase results are never committed. Successful and skipped
+  phases must publish exactly their declared outputs, and preflight checks unique
+  resolved phase names, unique artifact producers and inputs against preceding
+  outputs before any run directory exists.
+- Restore research public-score tie-breaking and report invalid direction
+  artifacts. Optional view failures no longer abort a run.
+- Retain observed gateway usage after truncated streams or corrupt audit lines as
+  explicitly labelled lower bounds. Unknown exact totals stay unavailable.
+- Preserve successful unscored matrix cells and report their count separately.
+  Matrix cancellation stops subsequent cells without discarding completed results.
+- Attempt public evaluations get suffixed directories when one attempt evaluates
+  more than once, instead of overwriting the previous result.
+
+### Removed
+
+- Remove the un-wired `complexity_checked` event path and its page rendering; no
+  production code ever emitted it, and the public page no longer promises a live
+  source-complexity block.
+- Remove never-emitted `trace_*` public allowlist keys. Add the emitted
+  `worker_cancelled`/`cancelled` fields to the public attempt and worker
+  projections, and unify the allowlists on `PUBLIC_TRACE_COVERAGE_KEYS`.
+
+### Internal
+
+Not user-visible; listed because they change module locations that external code
+may import.
+
+- The 2692-line `engine.py` is replaced by `application/`, `controller/`,
+  `criteria/{performance,complexity,integrity}/`, `observability/{views,schemas}/`
+  and per-phase modules under `phases/`.
+- `presets` is now `_presets`; `references`, `fingerprints`, `protocols`,
+  `feedback` and `review` are gone, with their contents relocated.
+- `agents` owns the worker harness, sandbox, broker and LLM entrypoint.
+  `UsageRecord` and the worker-exit projection live in the package root because
+  both `agents` and `observability` need them, which otherwise made those two
+  packages mutually dependent.
+- Add `tests/test_import_boundaries.py`, which enforces the dependency directions
+  declared in `docs/architecture-constitution.md` by reading imports with `ast`.
 
 ## 0.1.0a0
 

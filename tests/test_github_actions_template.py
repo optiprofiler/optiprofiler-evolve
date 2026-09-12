@@ -5,7 +5,6 @@ from pathlib import Path
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / "examples" / "github-actions" / "evolve.yml"
 SELF_HOSTED_WORKFLOW = ROOT / "examples" / "github-actions" / "evolve-self-hosted.yml"

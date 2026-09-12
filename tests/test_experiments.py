@@ -1,17 +1,62 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.config import ComponentConfig, load_config
-from optiprofiler_evolve.experiments import run_matrix
-from optiprofiler_evolve.models import EvolveResult
-
 from test_config import minimal_config
+
+from optiprofiler_evolve.application.experiments import run_matrix
+from optiprofiler_evolve.config import ComponentConfig, load_config
+from optiprofiler_evolve.errors import RunCancelled
+from optiprofiler_evolve.models import EvolveResult
 
 
 class ExperimentMatrixTests(unittest.TestCase):
+    def test_cancellation_stops_the_matrix_without_losing_completed_cells(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def run(**kwargs):
+                seed = kwargs["config"].evolution.random_seed
+                calls.append(seed)
+                if seed == 2:
+                    raise RunCancelled("cancelled")
+                return EvolveResult(kwargs["run_dir"], None, None, None, None, None, ())
+
+            with self.assertRaises(RunCancelled):
+                run_matrix(
+                    load_config(minimal_config()), {"oneshot": lambda config: config},
+                    seeds=(1, 2, 3), initial=root, run_root=root / "runs", run=run,
+                )
+            self.assertEqual(calls, [1, 2])
+            summary = json.loads((root / "runs" / "summary.json").read_text())
+            self.assertEqual([row["seed"] for row in summary["variants"]["oneshot"]["runs"]], [1])
+
+    def test_successful_unscored_cells_are_persisted_and_excluded_from_mean(self):
+        for scores in ((None, None), (None, 0.0, 2.0, None)):
+            with self.subTest(scores=scores), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+
+                def fake_run(**kwargs):
+                    score = scores[kwargs["config"].evolution.random_seed]
+                    return EvolveResult(Path(kwargs["run_dir"]), None, None, None, None, score, ())
+
+                summary = run_matrix(
+                    load_config(minimal_config()), {"partial": lambda config: config},
+                    seeds=tuple(range(len(scores))), initial=root,
+                    run_root=root / "runs", run=fake_run,
+                )
+                variant = summary["variants"]["partial"]
+                self.assertEqual(variant["n_ok"], len(scores))
+                self.assertEqual(variant["n_failed"], 0)
+                self.assertEqual(variant["n_unscored"], 2)
+                self.assertEqual(variant["mean_final_score"], None if len(scores) == 2 else 1.0)
+                persisted = json.loads((root / "runs" / "summary.json").read_text())
+                self.assertEqual(persisted["variants"]["partial"], variant)
+
     def test_variants_record_only_their_diff_from_base(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

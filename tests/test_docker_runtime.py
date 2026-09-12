@@ -9,21 +9,21 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from optiprofiler_evolve.broker import BrokerConnection
-from optiprofiler_evolve.config import (
-    ProviderGatewayConfig,
-    SandboxConfig,
-    ToolConfig,
-    WorkerConfig,
-    WorkersConfig,
-)
-from optiprofiler_evolve.docker_runtime import (
+from optiprofiler_evolve.agents.broker import BrokerConnection
+from optiprofiler_evolve.agents.docker_runtime import (
     DockerInvocationRuntime,
     DockerResource,
     read_gateway_outcome,
     recover_gateway_trace,
     remove_managed_resources,
     select_gc_resources,
+)
+from optiprofiler_evolve.config import (
+    ProviderGatewayConfig,
+    SandboxConfig,
+    ToolConfig,
+    WorkerConfig,
+    WorkersConfig,
 )
 
 
@@ -121,7 +121,7 @@ class DockerInvocationRuntimeTests(unittest.TestCase):
 
             with (
                 patch(
-                    "optiprofiler_evolve.docker_runtime._docker_run",
+                    "optiprofiler_evolve.agents.docker_runtime._docker_run",
                     side_effect=fake_docker,
                 ),
                 self.assertRaisesRegex(ValueError, "must be supplied"),
@@ -177,7 +177,7 @@ class DockerInvocationRuntimeTests(unittest.TestCase):
 
             with (
                 patch(
-                    "optiprofiler_evolve.docker_runtime._docker_run",
+                    "optiprofiler_evolve.agents.docker_runtime._docker_run",
                     side_effect=fake_docker,
                 ),
                 self.assertRaisesRegex(RuntimeError, "could not start"),
@@ -253,7 +253,7 @@ class DockerInvocationRuntimeTests(unittest.TestCase):
                 trace_dir=trace,
             )
             with patch(
-                "optiprofiler_evolve.docker_runtime._docker_run",
+                "optiprofiler_evolve.agents.docker_runtime._docker_run",
                 side_effect=fake_docker,
             ):
                 routed, values = runtime.start()
@@ -354,7 +354,7 @@ class DockerInvocationRuntimeTests(unittest.TestCase):
                 return _completed(command)
 
             with patch(
-                "optiprofiler_evolve.docker_runtime._docker_run",
+                "optiprofiler_evolve.agents.docker_runtime._docker_run",
                 side_effect=fake_docker,
             ):
                 runtime.ensure_worker_terminal()
@@ -494,7 +494,7 @@ class DockerInvocationRuntimeTests(unittest.TestCase):
             return _completed(command)
 
         with patch(
-            "optiprofiler_evolve.docker_runtime._docker_run",
+            "optiprofiler_evolve.agents.docker_runtime._docker_run",
             side_effect=fake_docker,
         ):
             errors = remove_managed_resources(resources)

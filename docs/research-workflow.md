@@ -9,8 +9,8 @@ prepare -> explore -> validate -> hidden -> report
 Each default exploration attempt runs only `mutate -> smoke ->
 public_evaluate`. Whole-candidate migration, web search, compilers, additional
 audit evidence, feedback injection, and research phases are explicit opt-ins.
-The mandatory controller safety gate and semantic integrity review are not
-removed by this smaller visible pipeline.
+Controller execution safety remains mandatory. Quality standards are configured
+independently; semantic integrity is enabled for formal assessment by default.
 
 For strategy-level research, use the ordered workflow in
 [`examples/experiment-research.yaml`](../examples/experiment-research.yaml):
@@ -52,7 +52,7 @@ variant for every mechanism that can safely be separated.
 
 For each proposed strategy, the controller independently evaluates both the
 finalist and its ablated variant. The default `evaluation_mode: smoke` keeps
-this pass bounded; `public` requests canonical public evaluation. Removing a
+this pass bounded; `public` requests canonical public execution. Removing a
 strategy yields one of three controller-owned conclusions:
 
 - `supported`: removal reduces fitness by at least `min_effect`;
@@ -65,8 +65,9 @@ states that this is a single measurement, not statistical certainty.
 
 The analyst can inspect existing profile and history plots through the public
 evidence index. Reliable automatic selection of the most discriminative
-problems awaits OptiProfiler's versioned `agent_report/1`; Evolve does not infer
-problem-level effects from filenames or duplicate Core's report schema.
+problems still requires a dedicated public evidence projection; the private
+EvalReport reader exists but no production code consumes it yet.
+See [EvalReport evidence](architecture.md#evalreport-evidence).
 Each ablation entry keeps the base and removed-variant artifact directories, so
 the owner can compare their profile and history plots instead of relying only
 on the scalar effect.
@@ -127,7 +128,7 @@ are preserved as separate evidence.
 Every worker that emits a solver is asked to write
 `.optiprofiler_evolve/solver_explanation.json`. The controller validates and
 moves this untrusted metadata outside the executable solver tree before audit
-and evaluation. Missing or malformed explanations are visible but do not turn
+and execution. Missing or malformed explanations are visible but do not turn
 into a numerical rejection.
 
 The final run contains:
@@ -157,7 +158,7 @@ research/variants/
 ```
 
 All machine-readable contracts carry schema strings. Agent workspaces contain
-only copied, sanitized inputs. The engine remains the sole writer of candidate
+only copied, sanitized inputs. The controller remains the sole writer of candidate
 registration, validation selection, authoritative events, and final promotion.
 
 Phase-level resume is not implemented yet. Iteration checkpoints do not claim

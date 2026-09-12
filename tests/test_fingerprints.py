@@ -4,30 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from test_config import minimal_config
+
 from optiprofiler_evolve.config import load_config
 from optiprofiler_evolve.data import resolve_data_plan
-from optiprofiler_evolve.fingerprints import build_experiment_fingerprints
+from optiprofiler_evolve.phases.prepare import build_experiment_fingerprints
 from optiprofiler_evolve.solver import InterfaceSpec
-
-
-def minimal_config() -> dict:
-    return {
-        "data": {
-            "problem_names": ["P1", "P2", "P3", "P4"],
-            "split": {"smoke_count": 1, "hidden_fraction": 0.25},
-        },
-        "evaluation": {"backend": "unsafe_local"},
-        "evolution": {"iterations": 1, "islands": 1},
-        "workers": {
-            "pool": [{"harness": "codex", "model": "test-model"}],
-            "max_parallel": 1,
-        },
-        "integrity_review": {
-            "component": {"name": "unsafe_approve"},
-            "allow_unsafe_stub": True,
-        },
-        "sandbox": {"backend": "unsafe_local"},
-    }
 
 
 class ExperimentFingerprintTests(unittest.TestCase):

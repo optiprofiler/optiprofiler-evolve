@@ -1,17 +1,44 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.explanations import (
-    capture_solver_explanation,
-    explanation_memory,
-)
+from optiprofiler_evolve.agents.explanations import capture_solver_explanation
+from optiprofiler_evolve.observability.attempts import explanation_memory
 
 
 class SolverExplanationTests(unittest.TestCase):
+    def test_unsafe_explanation_is_rejected_without_removing_evidence(self):
+        for kind in ("link", "parent_link", "dangling_link", "fifo", "oversized"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                workspace = root / "workspace"
+                metadata = workspace / ".optiprofiler_evolve"
+                metadata.mkdir(parents=True)
+                source = metadata / "solver_explanation.json"
+                outside = root / "outside.json"
+                outside.write_text('{"summary": "private sentinel"}')
+                if kind == "parent_link":
+                    metadata.rmdir()
+                    metadata.symlink_to(root, target_is_directory=True)
+                elif kind == "link":
+                    source.symlink_to(outside)
+                elif kind == "dangling_link":
+                    source.symlink_to(root / "absent")
+                elif kind == "fifo":
+                    os.mkfifo(source)
+                else:
+                    source.write_bytes(b" " * (1024 * 1024 + 1))
+                destination = root / "captured.json"
+                with self.assertRaises((ValueError, OSError)):
+                    capture_solver_explanation(workspace, destination, attempt_id="probe")
+                self.assertFalse(destination.exists())
+                self.assertTrue(metadata.is_symlink() or metadata.exists())
+                self.assertEqual(outside.read_text(), '{"summary": "private sentinel"}')
+
     def test_valid_worker_explanation_is_normalized_and_removed_from_solver_tree(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

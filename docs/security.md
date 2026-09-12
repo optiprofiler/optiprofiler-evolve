@@ -21,8 +21,11 @@
   expose a host port and does not write evaluation output through
   worker-controlled paths.
 - The trusted Docker evaluation request is created in a controller temporary
-  directory and mounted as one read-only file into the evaluator. It never
-  enters the worker-readable artifact tree.
+  directory and mounted into the evaluator as its parent directory, deliberately
+  writable rather than read-only: the in-container runner unlinks the request file
+  (which carries real problem names) before candidate code can run, and a
+  read-only bind would break that scrubbing. Candidate and reference are mounted
+  read-only. Nothing here enters the worker-readable artifact tree.
 - Canonical evaluation runs after the worker exits and rejects symbolic links,
   special files, excessive tree size, invalid interfaces, and edits outside the
   declared scope.
@@ -42,6 +45,10 @@
   and raw pickle/HDF5 state are withheld and counted in
   `redaction_report.json`. The completed directory is then published
   atomically into the worker's read-only artifact mount.
+- Unusable EvalReport receipts withhold additional worker artifacts, not the
+  completed evaluation score. Broker error responses and evaluation error fields
+  use generic messages; exception details and feedback-withholding diagnostics
+  remain controller-private.
 - The append-only `events.jsonl` ledger is controller-private. Shareable status
   and report files are rebuilt from a centralized default-deny projection;
   unknown event kinds, fields, errors, paths, model identities, validation
@@ -55,8 +62,10 @@
 - On POSIX, timeout and controller cancellation terminate the worker process
   group rather than only the CLI parent. Trace outcome manifests distinguish
   complete, truncated, timed-out, cancelled, and crash-inferred evidence.
-- Every candidate that survives public checks is reviewed by an isolated
-  semantic integrity agent before any validation query. The reviewer has no
+- On the default configuration, every candidate that survives public checks is
+  reviewed by an isolated semantic integrity agent before any validation query.
+  Integrity is an ordinary criterion, so a run can disable it explicitly and the
+  review is then skipped. The reviewer has no
   evaluator, problem manifest, validation/hidden data, network, or mutation
   capability. Quarantine prevents population admission.
 

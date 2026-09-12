@@ -3,27 +3,31 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 import os
 import re
 import types
+import warnings
 from collections.abc import Iterator, Mapping, Sequence
+from copy import deepcopy
+from functools import cached_property
 from pathlib import Path
 from typing import Any, Generic, TypeVar, Union, get_args, get_origin, get_type_hints
 from urllib.parse import unquote, urlsplit
 
 import yaml
 
-from .competitors import competitor_names
-
+from optiprofiler_evolve.criteria.performance.competitors import competitor_names
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _T = TypeVar("_T")
 _K = TypeVar("_K")
 _V = TypeVar("_V")
+ASSESSMENT_PROFILES = ("smoke", "public", "validation", "hidden")
 
 
 class FrozenDict(Mapping[_K, _V], Generic[_K, _V]):
-    """A small immutable mapping used inside frozen experiment configs."""
+    """A read-only mapping; configuration boundaries recursively freeze nested values."""
 
     def __init__(self, value: Mapping[_K, _V] | None = None) -> None:
         self._data = dict(value or {})
@@ -37,8 +41,11 @@ class FrozenDict(Mapping[_K, _V], Generic[_K, _V]):
     def __len__(self) -> int:
         return len(self._data)
 
-    def __deepcopy__(self, _memo: dict[int, object]) -> FrozenDict[_K, _V]:
-        return self
+    def __deepcopy__(self, memo: dict[int, object]) -> FrozenDict[_K, _V]:
+        copied = type(self)()
+        memo[id(self)] = copied
+        copied._data = deepcopy(self._data, memo)
+        return copied
 
     def __repr__(self) -> str:
         return f"FrozenDict({self._data!r})"
@@ -55,7 +62,7 @@ class ComponentConfig:
     def __post_init__(self) -> None:
         if not self.name or not self.name.replace("-", "_").isidentifier():
             raise ValueError(f"Invalid component name: {self.name!r}")
-        object.__setattr__(self, "options", _freeze_value(self.options))
+        object.__setattr__(self, "options", freeze_value(self.options))
 
     @classmethod
     def from_component(cls, component: object, *, name: str | None = None) -> ComponentConfig:
@@ -110,45 +117,8 @@ class WorkflowConfig:
     )
 
     def validate(self) -> None:
-        _validate_unique_components(self.phases, "workflow.phases")
         _validate_unique_components(self.attempt_steps, "workflow.attempt_steps")
         _validate_unique_components(self.after_iteration, "workflow.after_iteration")
-        phase_names = [item.name for item in self.phases]
-        for required in ("prepare", "explore", "validate", "hidden", "report"):
-            if required not in phase_names:
-                raise ValueError(f"workflow.phases must include the core phase {required!r}.")
-        positions = {name: phase_names.index(name) for name in phase_names}
-        core_order = [positions[name] for name in ("prepare", "explore", "validate", "hidden", "report")]
-        if core_order != sorted(core_order):
-            raise ValueError(
-                "Core workflow phases must stay ordered as prepare, explore, validate, hidden, report."
-            )
-        if "direction_scout" in positions and positions["direction_scout"] > positions["explore"]:
-            raise ValueError("direction_scout must run before explore.")
-        if "strategy_analysis" in positions and not (
-            positions["explore"] < positions["strategy_analysis"] < positions["validate"]
-        ):
-            raise ValueError("strategy_analysis must run between explore and validate.")
-        if "strategy_transfer" in positions:
-            if "strategy_analysis" not in positions:
-                raise ValueError("strategy_transfer requires strategy_analysis.")
-            if not positions["strategy_analysis"] < positions["strategy_transfer"] < positions["validate"]:
-                raise ValueError(
-                    "strategy_transfer must run after strategy_analysis and before validate."
-                )
-        if "recombine" in positions:
-            if "strategy_analysis" not in positions:
-                raise ValueError("recombine requires strategy_analysis.")
-            if not positions["strategy_analysis"] < positions["recombine"] < positions["validate"]:
-                raise ValueError("recombine must run after strategy_analysis and before validate.")
-        if "challenger" in positions and not (
-            positions["hidden"] < positions["challenger"] < positions["report"]
-        ):
-            raise ValueError("challenger must run after hidden and before report.")
-        step_names = {item.name for item in self.attempt_steps}
-        for required in ("mutate", "public_evaluate"):
-            if required not in step_names:
-                raise ValueError(f"workflow.attempt_steps must include {required!r}.")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -214,7 +184,7 @@ class DataConfig:
     split: SplitConfig = dataclasses.field(default_factory=SplitConfig)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "selection", _freeze_value(self.selection))
+        object.__setattr__(self, "selection", freeze_value(self.selection))
 
     def validate(self) -> None:
         if not self.library or not self.library.isidentifier():
@@ -225,11 +195,9 @@ class DataConfig:
 
 
 @dataclasses.dataclass(frozen=True)
-class EvaluationConfig:
-    """OptiProfiler benchmark execution settings."""
+class EvaluationExecutionConfig:
+    """Execution resources, public projection, and broker quotas."""
 
-    benchmark: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    smoke_overrides: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     backend: str = "docker"
     docker_image: str | None = None
     timeout_seconds: int = 3600
@@ -237,22 +205,15 @@ class EvaluationConfig:
     memory: str = "4g"
     pids_limit: int = 512
     feedback_mode: str = "score_only"
-    reference: str = "initial"
-    fitness_source: str = "solver_scores"
     forbidden_candidate_imports: tuple[str, ...] = ()
     max_smoke_calls_per_worker: int = 20
     max_public_calls_per_worker: int = 5
     adapter: str = "optiprofiler"
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "benchmark", _freeze_value(self.benchmark))
-        object.__setattr__(self, "smoke_overrides", _freeze_value(self.smoke_overrides))
 
     def validate(self) -> None:
         if self.backend not in {"docker", "unsafe_local"}:
             raise ValueError("evaluation.backend must be 'docker' or 'unsafe_local'.")
-        if self.backend == "docker" and not self.docker_image:
-            raise ValueError("evaluation.docker_image is required for Docker evaluation.")
         if self.timeout_seconds < 1:
             raise ValueError("evaluation.timeout_seconds must be positive.")
         if self.cpus <= 0 or self.pids_limit < 16 or not self.memory:
@@ -261,15 +222,39 @@ class EvaluationConfig:
             )
         if self.feedback_mode not in {
             "score_only",
-            "structured_numeric",
             "full_artifacts",
         }:
             raise ValueError(
-                "evaluation.feedback_mode must be 'score_only', "
-                "'structured_numeric', or 'full_artifacts'."
+                "evaluation.feedback_mode must be 'score_only' or 'full_artifacts'."
             )
         if not self.adapter or not self.adapter.replace("-", "_").isidentifier():
             raise ValueError("evaluation.adapter must be a registered component name.")
+        for name in self.forbidden_candidate_imports:
+            if not name or any(not part.isidentifier() for part in name.split(".")):
+                raise ValueError(
+                    "evaluation.forbidden_candidate_imports must contain dotted "
+                    "Python module names."
+                )
+        if self.max_smoke_calls_per_worker < 0 or self.max_public_calls_per_worker < 0:
+            raise ValueError("Evaluation call quotas cannot be negative.")
+
+@dataclasses.dataclass(frozen=True)
+class EvaluationConfig(EvaluationExecutionConfig):
+    """Resolved backend request; quality options come from a criterion profile."""
+
+    benchmark: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    smoke_overrides: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    reference: str = "initial"
+    fitness_source: str = "solver_scores"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "benchmark", freeze_value(self.benchmark))
+        object.__setattr__(self, "smoke_overrides", freeze_value(self.smoke_overrides))
+
+    def validate(self) -> None:
+        super().validate()
+        if self.backend == "docker" and not self.docker_image:
+            raise ValueError("evaluation.docker_image is required for Docker evaluation.")
         if self.reference != "initial" and self.reference not in competitor_names():
             raise ValueError(
                 "evaluation.reference must be 'initial' or a registered DFO competitor."
@@ -279,14 +264,6 @@ class EvaluationConfig:
                 "evaluation.fitness_source must be 'solver_scores' or "
                 "'profile_scores_mean'."
             )
-        for name in self.forbidden_candidate_imports:
-            if not name or any(not part.isidentifier() for part in name.split(".")):
-                raise ValueError(
-                    "evaluation.forbidden_candidate_imports must contain dotted "
-                    "Python module names."
-                )
-        if self.max_smoke_calls_per_worker < 0 or self.max_public_calls_per_worker < 0:
-            raise ValueError("Evaluation call quotas cannot be negative.")
         forbidden = {"load", "solvers_to_load"}
         configured = forbidden.intersection(self.benchmark) | forbidden.intersection(
             self.smoke_overrides
@@ -312,12 +289,6 @@ class EvolutionConfig:
     finalists_per_island: int = 1
     retention: ComponentConfig = dataclasses.field(default_factory=_default_retention)
     parent_sampler: ComponentConfig = dataclasses.field(default_factory=_default_parent_sampler)
-
-    @property
-    def rounds(self) -> int:
-        """Compatibility alias for pre-constitution internal callers."""
-
-        return self.iterations
 
     def validate(self) -> None:
         for name in (
@@ -399,7 +370,7 @@ class WorkerConfig:
     provider_gateway: ProviderGatewayConfig | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "env", _freeze_value(self.env))
+        object.__setattr__(self, "env", freeze_value(self.env))
 
     def validate(self) -> None:
         if self.harness not in {"codex", "claude"}:
@@ -520,7 +491,6 @@ class IntegrityReviewConfig:
     allow_same_model: bool = False
     allow_unsafe_stub: bool = False
     retries: int = 1
-    strict: bool = False
     timeout_seconds: int = 600
     token_budget: int | None = 4_000
     max_budget_usd: float | None = None
@@ -611,18 +581,228 @@ class SandboxConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class ComplexityConfig:
+    """Seed-relative source complexity budget, separate from fitness."""
+
+    mode: str = "warn"
+    max_ratio: float = 1.2
+
+    def validate(self) -> None:
+        if self.mode not in {"warn", "enforce"}:
+            raise ValueError("complexity.mode must be 'warn' or 'enforce'.")
+        if (
+            isinstance(self.max_ratio, bool)
+            or not isinstance(self.max_ratio, (int, float))
+            or not math.isfinite(self.max_ratio)
+            or self.max_ratio <= 0
+        ):
+            raise ValueError("complexity.max_ratio must be a finite positive number.")
+
+
+@dataclasses.dataclass(frozen=True)
+class CriterionConfig:
+    enabled: bool = True
+    weight: float = 1.0
+    mode: str = "enforce"
+    options: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("Criterion enabled must be boolean.")
+        if (isinstance(self.weight, bool) or not isinstance(self.weight, (int, float))
+                or not math.isfinite(self.weight) or self.weight < 0):
+            raise ValueError("Criterion weight must be finite and nonnegative.")
+        if self.mode not in {"warn", "enforce"}:
+            raise ValueError("Criterion mode must be warn or enforce.")
+        if not isinstance(self.options, Mapping):
+            raise ValueError("Criterion options must be a mapping.")
+        object.__setattr__(self, "options", freeze_value(self.options))
+
+
+def _default_criteria() -> Mapping[str, CriterionConfig]:
+    return {
+        "performance": CriterionConfig(),
+        "complexity": CriterionConfig(enabled=False, mode="warn"),
+        "integrity": CriterionConfig(weight=0.0),
+    }
+
+
+# Criteria whose options are validated against a strict dataclass. A disabled
+# criterion is usually not reached by the enabled-only option validation, so
+# without this an omitted or misspelled key would be stored verbatim and only
+# surface later, when the criterion is re-enabled.
+_CRITERION_OPTION_SCHEMAS: Mapping[str, type] = {
+    "complexity": ComplexityConfig,
+    "integrity": IntegrityReviewConfig,
+}
+
+# Option keys retired by this branch, reported by name so a migration is told
+# that the setting no longer has any effect instead of silently keeping it.
+_RETIRED_CRITERION_OPTIONS: Mapping[str, frozenset[str]] = {
+    "integrity": frozenset({"strict"}),
+}
+
+
+# Option keys that exist as fields on the option schema but must not be written
+# there, mapped to the reason. `mode` is a criterion-level field: the enabled-only
+# guard below already rejects it, which meant a disabled criterion silently
+# accepted it and then hard-failed the moment it was turned on.
+_MISPLACED_CRITERION_OPTIONS: Mapping[str, Mapping[str, str]] = {
+    "complexity": {
+        "mode": "Complexity mode belongs on the criterion rather than in options.",
+    },
+}
+
+
+def _validate_criterion_option_keys(name: str, options: Mapping[str, Any]) -> None:
+    """Key-check one criterion's options regardless of whether it is enabled."""
+
+    schema = _CRITERION_OPTION_SCHEMAS.get(name)
+    if schema is None:
+        return
+    path = f"assessment.criteria.{name}.options"
+    misplaced = sorted(
+        _MISPLACED_CRITERION_OPTIONS.get(name, {}).keys() & set(options)
+    )
+    if misplaced:
+        raise ValueError(f"{_MISPLACED_CRITERION_OPTIONS[name][misplaced[0]]} Found in {path}.")
+    retired = sorted(_RETIRED_CRITERION_OPTIONS.get(name, frozenset()).intersection(options))
+    if retired:
+        raise ValueError(
+            f"Removed config fields at {path}: {retired}. This key was dropped by this "
+            "branch and no longer has any effect; delete it."
+        )
+    known = {field.name for field in dataclasses.fields(schema)}
+    unknown = sorted(set(options).difference(known))
+    if unknown:
+        raise ValueError(f"Unknown keys at {path}: {unknown}")
+
+
+@dataclasses.dataclass(frozen=True)
+class AssessmentConfig:
+    criteria: Mapping[str, CriterionConfig] = dataclasses.field(default_factory=_default_criteria)
+    profiles: Mapping[str, Mapping[str, Mapping[str, Any]]] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        defaults = _default_criteria()
+        criteria = {
+            name: value if isinstance(value, CriterionConfig) else _from_mapping(
+                CriterionConfig,
+                {**plain_data(defaults.get(name, CriterionConfig())), **value},
+                f"assessment.criteria.{name}",
+            )
+            for name, value in self.criteria.items()
+        }
+        object.__setattr__(self, "criteria", freeze_value(criteria))
+        object.__setattr__(self, "profiles", freeze_value(self.profiles))
+        # Key-check every criterion, including disabled ones: enabled-only
+        # validation would let a disabled criterion accumulate removed or
+        # misspelled options that only surface once it is re-enabled.
+        for name, spec in criteria.items():
+            _validate_criterion_option_keys(name, spec.options)
+        for profile, overrides in self.profiles.items():
+            if profile not in {"smoke", "public", "validation", "hidden"}:
+                raise ValueError(f"Unknown assessment profile: {profile!r}")
+            for name, override in overrides.items():
+                if name not in criteria:
+                    raise ValueError(f"Assessment override references unknown criterion {name!r}.")
+                if "enabled" in override and not isinstance(override["enabled"], bool):
+                    raise ValueError("Criterion enabled must be boolean.")
+                unknown = set(override).difference({"enabled", "weight", "mode", "options"})
+                if unknown:
+                    raise ValueError(f"Unknown criterion override fields: {sorted(unknown)!r}")
+        # Validate all override keys before constructing the cached table.
+        self.resolved_profiles
+
+    def resolve(self, profile: str) -> Mapping[str, CriterionConfig]:
+        if profile not in ASSESSMENT_PROFILES:
+            raise ValueError(f"Unknown assessment profile: {profile!r}")
+        return self.resolved_profiles[profile]
+
+    @cached_property
+    def resolved_profiles(self) -> Mapping[str, Mapping[str, CriterionConfig]]:
+        profiles = {}
+        for profile in ASSESSMENT_PROFILES:
+            result = {}
+            for name, spec in self.criteria.items():
+                override = dict(self.profiles.get(profile, {}).get(name, {}))
+                enabled = override.pop("enabled", name != "integrity" or profile == "validation")
+                options = {**spec.options, **override.pop("options", {})}
+                result[name] = dataclasses.replace(
+                    spec, enabled=spec.enabled and enabled, options=options, **override
+                )
+            profiles[profile] = result
+        return freeze_value(profiles)
+
+    def enabled(self, name: str, profile: str | None = None) -> bool:
+        profiles = (self.resolve(profile),) if profile is not None else self.resolved_profiles.values()
+        return any(name in specs and specs[name].enabled for specs in profiles)
+
+    def validate(self) -> None:
+        formal = self.resolve("validation")
+        if not any(item.enabled and item.weight > 0 for item in formal.values()):
+            raise ValueError("Formal assessment needs an enabled criterion with positive weight.")
+
+
+@dataclasses.dataclass(frozen=True)
+class ResolvedAssessmentProfile:
+    """Derived execution inputs, excluded from declared configuration and its hash."""
+
+    criteria: Mapping[str, CriterionConfig]
+    performance: EvaluationConfig | None
+    integrity: IntegrityReviewConfig | None
+
+
+@dataclasses.dataclass(frozen=True)
 class EvolveConfig:
     """Complete experiment configuration."""
 
     data: DataConfig = dataclasses.field(default_factory=DataConfig)
-    evaluation: EvaluationConfig = dataclasses.field(default_factory=EvaluationConfig)
+    execution: EvaluationExecutionConfig = dataclasses.field(default_factory=EvaluationExecutionConfig)
     evolution: EvolutionConfig = dataclasses.field(default_factory=EvolutionConfig)
     workers: WorkersConfig = dataclasses.field(default_factory=WorkersConfig)
-    integrity_review: IntegrityReviewConfig = dataclasses.field(
-        default_factory=IntegrityReviewConfig
-    )
+    assessment: AssessmentConfig = dataclasses.field(default_factory=AssessmentConfig)
     sandbox: SandboxConfig = dataclasses.field(default_factory=SandboxConfig)
     workflow: WorkflowConfig = dataclasses.field(default_factory=WorkflowConfig)
+
+    @cached_property
+    def resolved_profiles(self) -> Mapping[str, ResolvedAssessmentProfile]:
+        execution = plain_data(self.execution)
+        profiles = {}
+        for name, criteria in self.assessment.resolved_profiles.items():
+            performance = integrity = None
+            spec = criteria.get("performance")
+            if spec is not None and spec.enabled:
+                forbidden = set(spec.options).intersection(execution)
+                if forbidden:
+                    raise ValueError(f"Performance options cannot override execution settings: {sorted(forbidden)}")
+                performance = _from_mapping(EvaluationConfig, {**execution, **spec.options},
+                                            "assessment.criteria.performance.options")
+            spec = criteria.get("integrity")
+            if spec is not None and spec.enabled:
+                integrity = _from_mapping(IntegrityReviewConfig, spec.options,
+                                          "assessment.criteria.integrity.options")
+            profiles[name] = ResolvedAssessmentProfile(criteria, performance, integrity)
+        return freeze_value(profiles)
+
+    @cached_property
+    def reference_name(self) -> str | None:
+        references = {profile.performance.reference for profile in self.resolved_profiles.values()
+                      if profile.performance is not None}
+        if len(references) > 1:
+            raise ValueError("Performance reference must be fixed across enabled assessment profiles.")
+        return next(iter(references), None)
+
+    @cached_property
+    def reference_max_eval_factor(self) -> float:
+        # A profile's benchmark override must not rewrite the shared reference.
+        spec = self.assessment.criteria.get("performance")
+        benchmark = spec.options.get("benchmark", {}) if spec is not None else {}
+        factor = benchmark.get("max_eval_factor", 500)
+        if (isinstance(factor, bool) or not isinstance(factor, (int, float))
+                or not math.isfinite(factor) or factor <= 0):
+            raise ValueError("Base benchmark.max_eval_factor must be finite and positive.")
+        return float(factor)
 
     def __post_init__(self) -> None:
         policies = tuple(
@@ -642,17 +822,34 @@ class EvolveConfig:
             )
 
     def validate(self) -> None:
-        self.data.validate()
-        self.evaluation.validate()
-        self.evolution.validate()
+        self.assessment.validate()
         self.workers.validate()
-        self.integrity_review.validate(self.workers)
+        self.data.validate()
+        self.execution.validate()
+        workers = list(self.workers.pool)
+        for profile in self.resolved_profiles.values():
+            if profile.performance is not None:
+                profile.performance.validate()
+            if profile.integrity is not None:
+                review = profile.integrity
+                review.validate(self.workers)
+                reviewer = review.resolved_worker(self.workers)
+                if reviewer is not None:
+                    workers.append(reviewer)
+            spec = profile.criteria.get("complexity")
+            if spec is not None and spec.enabled:
+                if "mode" in spec.options:
+                    raise ValueError("Complexity mode belongs on the criterion, not inside options.")
+                _from_mapping(ComplexityConfig, {**spec.options, "mode": spec.mode},
+                              "assessment.criteria.complexity.options").validate()
+        if self.reference_name is not None:
+            self.reference_max_eval_factor
+        self.evolution.validate()
+        if (self.evolution.retention.name == "metric_pareto"
+                and not self.assessment.enabled("performance", "validation")):
+            raise ValueError("metric_pareto requires formal performance metric bundles.")
         self.sandbox.validate()
         self.workflow.validate()
-        workers = list(self.workers.pool)
-        reviewer = self.integrity_review.resolved_worker(self.workers)
-        if reviewer is not None:
-            workers.append(reviewer)
         gateway_workers = [worker for worker in workers if worker.provider_gateway is not None]
         if gateway_workers and self.workers.adapter != "cli":
             raise ValueError(
@@ -686,12 +883,18 @@ class EvolveConfig:
                 key: "<redacted>" if _is_secret_name(key) else value
                 for key, value in worker["env"].items()
             }
-        reviewer = result["integrity_review"].get("worker")
-        if reviewer is not None:
-            reviewer["env"] = {
-                key: "<redacted>" if _is_secret_name(key) else value
-                for key, value in reviewer["env"].items()
-            }
+        def redact(value: Any) -> None:
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if (_is_secret_name(key) and not isinstance(item, (int, float, bool))
+                            and key not in {"token_budget", "credential_env", "auth_mode"}):
+                        value[key] = "<redacted>"
+                    else:
+                        redact(item)
+            elif isinstance(value, list):
+                for item in value:
+                    redact(item)
+        redact(result["assessment"])
         return result
 
     def resolved_dict(self) -> dict[str, Any]:
@@ -710,11 +913,14 @@ class EvolveConfig:
             workflow=dataclasses.replace(self.workflow, attempt_steps=steps),
         )
 
-    def without_phase(self, name: str) -> EvolveConfig:
-        """Return a config with one optional outer phase removed."""
+    def with_criterion(self, name: str, **changes: Any) -> EvolveConfig:
+        """Derive a criterion ablation without mutating the shared experiment."""
+        current = self.assessment.criteria.get(name, CriterionConfig())
+        criteria = {**self.assessment.criteria, name: dataclasses.replace(current, **changes)}
+        return dataclasses.replace(self, assessment=dataclasses.replace(self.assessment, criteria=criteria))
 
-        if name in {"prepare", "explore", "validate", "hidden", "report"}:
-            raise ValueError(f"Core phase {name!r} cannot be removed.")
+    def without_phase(self, name: str) -> EvolveConfig:
+        """Remove a phase; dependency validation happens before execution."""
         phases = tuple(phase for phase in self.workflow.phases if phase.name != name)
         if len(phases) == len(self.workflow.phases):
             raise KeyError(f"Phase {name!r} is not configured.")
@@ -796,24 +1002,12 @@ class EvolveConfig:
             workflow=dataclasses.replace(self.workflow, attempt_steps=ordered),
         )
 
-    def with_worker(self, harness: str, *, model: str | None = None) -> EvolveConfig:
-        """Return a single-worker variant while preserving common worker budgets."""
-
-        if not self.workers.pool:
-            raise ValueError("Cannot replace an empty worker pool.")
-        template = self.workers.pool[0]
-        worker = dataclasses.replace(template, harness=harness, model=model or template.model)
-        return dataclasses.replace(
-            self,
-            workers=dataclasses.replace(self.workers, pool=(worker,)),
-        )
-
     def with_evaluator(self, adapter: str) -> EvolveConfig:
         """Return a config that resolves a different trusted evaluator factory."""
 
         return dataclasses.replace(
             self,
-            evaluation=dataclasses.replace(self.evaluation, adapter=adapter),
+            execution=dataclasses.replace(self.execution, adapter=adapter),
         )
 
     def with_iterations(self, iterations: int) -> EvolveConfig:
@@ -840,8 +1034,44 @@ def load_config(config: EvolveConfig | Mapping[str, Any] | str | Path) -> Evolve
             raise TypeError("config must be an EvolveConfig, mapping, or YAML path.")
         if not isinstance(raw, Mapping):
             raise TypeError("The experiment config must contain a mapping at its root.")
-        normalized = _normalize_legacy_config(dict(raw))
-        loaded = _from_mapping(EvolveConfig, _expand_environment(normalized), "config")
+        assessment = _from_mapping(AssessmentConfig, raw.get("assessment", {}), "assessment")
+        # A supplied `criteria` map replaces the defaults rather than patching them.
+        # That is deliberate - it is how a single standard is exercised in
+        # isolation - but it means an omitted criterion is removed rather than
+        # disabled, so a gate can disappear with no error. Warn instead of
+        # rejecting, because isolating a criterion is a supported use.
+        supplied = raw.get("assessment", {}).get("criteria")
+        if supplied is not None:
+            omitted = sorted(
+                name for name, spec in _default_criteria().items()
+                if spec.enabled and name not in supplied
+            )
+            if omitted:
+                warnings.warn(
+                    f"assessment.criteria omits {omitted}, which the defaults enable. "
+                    "This mapping is the complete criterion map, not a patch, so the "
+                    "omitted criteria do not run and their gates do not apply. List every "
+                    "criterion explicitly (enabled: false to disable one on purpose) to "
+                    "silence this warning.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+        criteria = {
+            name: dataclasses.replace(spec, options=_expand_environment(spec.options))
+            if assessment.enabled(name) else spec
+            for name, spec in assessment.criteria.items()
+        }
+        profiles = {
+            profile: {
+                name: _expand_environment(override)
+                if assessment.enabled(name, profile) else override
+                for name, override in overrides.items()
+            }
+            for profile, overrides in assessment.profiles.items()
+        }
+        expanded = _expand_environment({key: value for key, value in raw.items() if key != "assessment"})
+        expanded["assessment"] = plain_data(AssessmentConfig(criteria=criteria, profiles=profiles))
+        loaded = _from_mapping(EvolveConfig, expanded, "config")
     loaded.validate()
     return loaded
 
@@ -863,6 +1093,21 @@ def _expand_environment(value: Any) -> Any:
 
 
 def _from_mapping(cls: type[_T], raw: Mapping[str, Any], path: str) -> _T:
+    if cls is EvolveConfig:
+        retired = set(raw).intersection({"evaluation", "complexity", "integrity_review"})
+        if retired:
+            raise ValueError(
+                f"Removed config fields {sorted(retired)}. Rename 'evaluation' to 'execution' "
+                "and move quality options into 'assessment.criteria'. That mapping is the "
+                "COMPLETE criterion map, not a patch, so every criterion you want to run must "
+                "be listed; one that is left out does not run at all and its gate is dropped:\n\n"
+                "execution: {}            # former 'evaluation', minus the moved quality options\n"
+                "assessment:\n"
+                "  criteria:\n"
+                "    performance: {}      # former evaluation.benchmark / smoke_overrides\n"
+                "    integrity: {}        # former 'integrity_review'; omit only to drop the gate\n"
+                "    complexity: {enabled: false, mode: warn}"
+            )
     fields = {field.name: field for field in dataclasses.fields(cls)}
     private = sorted(key for key in raw if str(key).startswith("_"))
     if private:
@@ -920,36 +1165,13 @@ def _is_secret_name(name: str) -> bool:
     )
 
 
-def _normalize_legacy_config(raw: dict[str, Any]) -> dict[str, Any]:
-    """Translate early-alpha spellings to their explicit canonical names."""
-
-    evolution = raw.get("evolution")
-    if isinstance(evolution, Mapping) and "rounds" in evolution:
-        if "iterations" in evolution:
-            raise ValueError("Use only evolution.iterations; rounds is a legacy alias.")
-        translated = dict(evolution)
-        translated["iterations"] = translated.pop("rounds")
-        raw["evolution"] = translated
-    evaluation = raw.get("evaluation")
-    if isinstance(evaluation, Mapping):
-        translated = dict(evaluation)
-        if translated.get("backend") == "local":
-            translated["backend"] = "unsafe_local"
-        feedback_aliases = {"summary": "score_only", "agent": "full_artifacts"}
-        feedback_mode = translated.get("feedback_mode")
-        if feedback_mode in feedback_aliases:
-            translated["feedback_mode"] = feedback_aliases[feedback_mode]
-        raw["evaluation"] = translated
-    return raw
-
-
-def _freeze_value(value: Any) -> Any:
+def freeze_value(value: Any) -> Any:
     if isinstance(value, FrozenDict):
         return value
     if isinstance(value, Mapping):
-        return FrozenDict({str(key): _freeze_value(item) for key, item in value.items()})
+        return FrozenDict({str(key): freeze_value(item) for key, item in value.items()})
     if isinstance(value, (list, tuple)):
-        return tuple(_freeze_value(item) for item in value)
+        return tuple(freeze_value(item) for item in value)
     return value
 
 

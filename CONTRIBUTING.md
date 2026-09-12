@@ -14,6 +14,9 @@ python -m pip install -e '.[dev]'
 
 Run the lightweight checks before spending model tokens:
 
+The development dependency pins Ruff; `pyproject.toml` also declares the lint
+rules explicitly so a different installed version does not change the baseline.
+
 ```bash
 ruff check src tests scripts examples
 python scripts/check_markdown_links.py
@@ -32,18 +35,30 @@ example invokes a model provider and OptiProfiler and should be run separately.
 | Public function behavior | `src/optiprofiler_evolve/api.py` | API reference and public-surface tests |
 | Add or change a config field | `src/optiprofiler_evolve/config.py` | JSON Schema, config reference, validation tests |
 | Problem selection/splitting | `src/optiprofiler_evolve/data.py` | deterministic manifest tests |
-| Evaluator/runtime adapter | `src/optiprofiler_evolve/evaluation.py` | runner, result-contract tests, security notes |
-| Codex/Claude command | `src/optiprofiler_evolve/harness.py` | command tests and worker-image check |
-| Worker mounts/resources | `src/optiprofiler_evolve/sandbox.py` | isolation tests and security notes |
-| Worker evaluation tools | `src/optiprofiler_evolve/broker.py` | quota and hidden-access tests |
-| Worker task/context | `src/optiprofiler_evolve/prompt.py` | prompt tests and experiment note |
-| Population scheduling | `src/optiprofiler_evolve/engine.py` | deterministic lineage/checkpoint tests |
+| Evaluator/runtime adapter | `src/optiprofiler_evolve/criteria/performance/evaluator.py` | runner, result-contract tests, security notes |
+| Codex/Claude command | `src/optiprofiler_evolve/agents/harness.py` | command tests and worker-image check |
+| Worker mounts/resources | `src/optiprofiler_evolve/agents/sandbox.py` | isolation tests and security notes |
+| Worker evaluation tools | `src/optiprofiler_evolve/agents/broker.py` | quota and hidden-access tests |
+| Worker task/context | `src/optiprofiler_evolve/phases/attempts/prompt.py` | prompt tests and experiment note |
+| Run composition/lifecycle | `src/optiprofiler_evolve/application/run.py` | startup, cancellation, cleanup tests |
+| Population scheduling/state | `src/optiprofiler_evolve/controller/coordinator.py`, `commits.py`, `state.py` | deterministic lineage/checkpoint and dependency-boundary tests |
 | Solver copying/interface rules | `src/optiprofiler_evolve/solver.py` | single-file and repository tests |
+| Phase implementation/context | `src/optiprofiler_evolve/phases/`, `controller/phase_contexts.py` | stage contracts, staged-state and deterministic workflow tests |
+| Unified model invocation | `src/optiprofiler_evolve/agents/llm.py` | backend lifecycle, authority, output and trace tests |
 
 The complete flow and ownership boundaries are documented in
 [Architecture](docs/architecture.md). Keep the top-level public surface limited
 to `evolve` and `__version__`; new capabilities should normally be config fields
 or internal adapters.
+
+Every phase has its own class and module, with its specific context and result
+types in the same file. Keep model invocation in `LLMClient`, stage-specific
+prompts with their stage, and subsystem contracts inside their owning package.
+Only cross-subsystem foundations belong at the package root. Move complete
+modules with `mv` when reorganizing; update
+all imports and subprocess/Docker entrypoints rather than leaving old internal
+module forwarding shims. The documented `serve` and `docker_gc` commands remain
+supported entrypoints.
 
 ## Change discipline
 

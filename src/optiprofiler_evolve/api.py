@@ -7,11 +7,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .config import EvolveConfig, load_config
-from .engine import EvolutionEngine
-from .models import EvolveResult
-from .presets import dfo_default
-from .solver import InterfaceSpec
+from optiprofiler_evolve._presets import dfo_default
+from optiprofiler_evolve.application.run import EvolutionRun
+from optiprofiler_evolve.config import EvolveConfig, load_config
+from optiprofiler_evolve.models import EvolveResult
+from optiprofiler_evolve.solver import InterfaceSpec
 
 
 def evolve(
@@ -55,7 +55,7 @@ def evolve(
         resolved_run_dir = Path.cwd() / "runs" / f"evolve_{stamp}"
     else:
         resolved_run_dir = Path(run_dir)
-    engine = EvolutionEngine(
+    engine = EvolutionRun(
         initial=initial,
         interface=declared_interface,
         runtime=detected_runtime,
@@ -64,6 +64,3 @@ def evolve(
         run_dir=resolved_run_dir,
     )
     return engine.run()
-
-
-__all__: list[str] = []

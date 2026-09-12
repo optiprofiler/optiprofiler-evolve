@@ -8,9 +8,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.owner_views import render_owner_views
-
 from test_owner_views import ATTEMPT, REVIEW_JOB, _build_run_dir
+
+from optiprofiler_evolve.observability.views.owner import render_owner_views
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "pack_owner_evidence.py"
 

@@ -5,7 +5,6 @@ from pathlib import Path
 
 from optiprofiler_evolve import evolve
 
-
 ROOT = Path(__file__).resolve().parents[1]
 RUN_DIR = Path(
     os.environ.get(

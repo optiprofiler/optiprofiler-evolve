@@ -1,8 +1,9 @@
-"""Solver source snapshots and entrypoint validation."""
+"""Solver interfaces, immutable source snapshots, safety checks and diffs."""
 
 from __future__ import annotations
 
 import ast
+import difflib
 import fnmatch
 import hashlib
 import os
@@ -12,6 +13,47 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterable
+
+
+def source_diff(before: Path, after: Path) -> str:
+    """Return a bounded, deterministic unified diff between two solver trees."""
+
+    names = sorted(_text_files(before).union(_text_files(after)))
+    chunks: list[str] = []
+    for name in names:
+        left = _read_text(before / name)
+        right = _read_text(after / name)
+        if left == right:
+            continue
+        chunks.extend(
+            difflib.unified_diff(
+                left.splitlines(keepends=True),
+                right.splitlines(keepends=True),
+                fromfile=f"seed/{name}",
+                tofile=f"finalist/{name}",
+            )
+        )
+    return "".join(chunks) or "# No text-file differences were detected.\n"
+
+
+def _text_files(root: Path) -> set[str]:
+    names: set[str] = set()
+    if not root.is_dir():
+        return names
+    for path in root.rglob("*"):
+        if path.is_file() and path.stat().st_size <= 2_000_000:
+            try:
+                path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            names.add(path.relative_to(root).as_posix())
+    return names
+
+
+def _read_text(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8")
 
 
 _IGNORED_NAMES = {
@@ -27,6 +69,8 @@ _IGNORED_NAMES = {
     "__pycache__",
     "node_modules",
 }
+
+
 _IGNORED_SUFFIXES = {".pyc", ".pyo"}
 
 
@@ -266,11 +310,17 @@ def tree_hash(root: Path) -> str:
 
 def _file_hashes(root: Path) -> dict[str, str]:
     hashes: dict[str, str] = {}
-    for path in sorted(root.rglob("*")):
-        if not path.is_file() or _ignored_relative(path.relative_to(root)):
-            continue
+    for path in source_files(root):
         hashes[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     return hashes
+
+
+def source_files(root: Path) -> Iterable[Path]:
+    """Enumerate exactly the files included in a solver snapshot hash."""
+    return (
+        path for path in sorted(root.rglob("*"))
+        if path.is_file() and not _ignored_relative(path.relative_to(root))
+    )
 
 
 def _matches_any(path: str, patterns: tuple[str, ...]) -> bool:
@@ -317,6 +367,3 @@ def _check_symlinks(root: Path) -> None:
             path = Path(current, name)
             if path.is_symlink():
                 raise ValueError(f"Solver source contains a symbolic link: {path}")
-
-
-__all__: list[str] = []

@@ -9,7 +9,6 @@ import unittest
 import uuid
 from pathlib import Path
 
-
 RUN_DOCKER = os.environ.get("OPE_RUN_DOCKER_TESTS") == "1"
 GATEWAY_IMAGE = os.environ.get(
     "OPE_GATEWAY_IMAGE",
@@ -271,8 +270,8 @@ class DockerEvaluatorIntegrationTests(unittest.TestCase):
 
     def test_evaluator_scores_a_seed_candidate_in_container(self) -> None:
         from optiprofiler_evolve.config import EvaluationConfig
+        from optiprofiler_evolve.criteria.performance.evaluator import DockerOptiProfilerEvaluator
         from optiprofiler_evolve.data import DataPlan
-        from optiprofiler_evolve.evaluation import DockerOptiProfilerEvaluator
         from optiprofiler_evolve.solver import InterfaceSpec
 
         solver_source = (
@@ -309,7 +308,7 @@ class DockerEvaluatorIntegrationTests(unittest.TestCase):
                 hidden=(),
                 smoke=("ROSENBR",),
                 split_seed=0,
-                manifest_hash="ci-smoke",
+                split_fingerprint="ci-smoke",
                 aliases={"ROSENBR": "P_OPAQUE_CI"},
             )
             evaluator = DockerOptiProfilerEvaluator(

@@ -6,7 +6,7 @@ import argparse
 import json
 from datetime import datetime, timezone
 
-from .docker_runtime import (
+from optiprofiler_evolve.agents.docker_runtime import (
     list_managed_resources,
     remove_managed_resources,
     select_gc_resources,
@@ -68,6 +68,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-__all__: list[str] = []

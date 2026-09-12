@@ -3,20 +3,19 @@ from __future__ import annotations
 import random
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
-from optiprofiler_evolve.models import (
-    CandidateRecord,
-    EvaluationResult,
-    MetricBundle,
-    MetricValue,
-)
-from optiprofiler_evolve.selection import (
+from optiprofiler_evolve.config import AssessmentConfig
+from optiprofiler_evolve.controller.selection import (
     MetricParetoRetention,
     MetricSelectionError,
     TopBiasedValidationWeightedSampler,
     ValidationLexicographicRetention,
 )
+from optiprofiler_evolve.criteria.contracts import CriterionResult
+from optiprofiler_evolve.criteria.runner import ScoreAggregator
+from optiprofiler_evolve.models import CandidateRecord, EvaluationResult, MetricBundle, MetricValue
 
 
 def candidate(
@@ -37,6 +36,7 @@ def candidate(
         tree_hash=candidate_id,
         public_score=public,
         validation_score=validation,
+        assessment_score=validation,
         selection_metrics=metrics,
     )
 
@@ -58,6 +58,39 @@ def two_metric_bundle(
 
 
 class SelectionTests(unittest.TestCase):
+    def test_default_integrity_preserves_sampling_weights_and_explicit_weight_is_honored(self):
+        for config in (AssessmentConfig(), AssessmentConfig(criteria={
+            "performance": {}, "integrity": {},
+        })):
+            specs = config.resolve("validation")
+            population = []
+            for name, score in (("high", 0.9), ("low", 0.1)):
+                results = {
+                    "performance": CriterionResult("succeeded", score=score, satisfied=True),
+                    "integrity": CriterionResult("succeeded", score=1.0, satisfied=True),
+                }
+                total, accepted = ScoreAggregator.aggregate(results, specs)
+                self.assertTrue(accepted)
+                self.assertEqual(total, score)
+                population.append(replace(candidate(name, score, score), assessment_score=total))
+            sampler = TopBiasedValidationWeightedSampler(greedy_ratio=0)
+            for seed in range(30):
+                rng = random.Random(seed)
+                rng.random()
+                expected = rng.choices(population, weights=[0.9, 0.1])[0]
+                self.assertEqual(sampler.select(population, random.Random(seed)), expected)
+            results["integrity"] = CriterionResult("succeeded", score=0, satisfied=False)
+            self.assertFalse(ScoreAggregator.aggregate(results, specs)[1])
+        explicit = AssessmentConfig(criteria={"integrity": {"weight": 2}})
+        self.assertEqual(explicit.resolve("validation")["integrity"].weight, 2)
+
+    def test_public_score_breaks_formal_ties_before_iteration(self):
+        older_better = candidate("older", 0.7, 0.9, iteration=1)
+        newer_worse = candidate("newer", 0.7, 0.1, iteration=2)
+        self.assertEqual(ValidationLexicographicRetention().retain(
+            (newer_worse, older_better), 1,
+        ), (older_better,))
+
     def test_metric_bundle_validates_primary_and_comparability(self) -> None:
         bundle = two_metric_bundle(0.7, 0.6)
         self.assertEqual(bundle.metric("speed").value, 0.7)
@@ -141,11 +174,32 @@ class SelectionTests(unittest.TestCase):
             actual = sampler.select(population, random.Random(seed))
             self.assertEqual(actual.candidate_id, expected.candidate_id)
 
-    def test_single_objective_pareto_delegates_to_scalar_retention(self) -> None:
-        records = [candidate("a", 0.5, 0.8), candidate("b", 0.7, 0.4)]
+    def test_single_objective_pareto_ranks_by_the_objective_metric(self) -> None:
+        # `metric_pareto` with one objective and epsilon 0 does NOT delegate to
+        # `validation_lexicographic`; it orders by the objective's metric value.
+        # The fixture makes those two orders disagree on purpose, because when
+        # `assessment_score` equals the bundle value (as the old fixture had it)
+        # both orders coincide and the assertion would hold by construction.
+        records = [
+            candidate("a", 0.5, 0.8, metrics=MetricBundle.scalar(0.9, invariants_hash="fixed")),
+            candidate("b", 0.9, 0.4, metrics=MetricBundle.scalar(0.8, invariants_hash="fixed")),
+        ]
         scalar = ValidationLexicographicRetention().retain(records, 1)
         pareto = MetricParetoRetention(objectives=("fitness",)).retain(records, 1)
-        self.assertEqual(pareto, scalar)
+        self.assertEqual([item.candidate_id for item in scalar], ["b"])
+        self.assertEqual([item.candidate_id for item in pareto], ["a"])
+
+    def test_single_objective_pareto_agrees_with_scalar_when_orders_coincide(self) -> None:
+        # The narrow case the previous test name claimed: when the assessed score
+        # and the objective value rank the same way, both policies agree.
+        records = [
+            candidate("a", 0.5, 0.8, metrics=MetricBundle.scalar(0.5, invariants_hash="fixed")),
+            candidate("b", 0.7, 0.4, metrics=MetricBundle.scalar(0.7, invariants_hash="fixed")),
+        ]
+        scalar = ValidationLexicographicRetention().retain(records, 1)
+        pareto = MetricParetoRetention(objectives=("fitness",)).retain(records, 1)
+        self.assertEqual([item.candidate_id for item in pareto],
+                         [item.candidate_id for item in scalar])
 
     def test_multiobjective_pareto_keeps_nondominated_front(self) -> None:
         records = [

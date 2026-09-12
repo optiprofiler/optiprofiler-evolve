@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import unittest
-import json
 from pathlib import Path
 from unittest.mock import patch
 
-from optiprofiler_evolve.events import EventWriter, read_events, rebuild_run_state
-from optiprofiler_evolve.projections import project_public_events
+from optiprofiler_evolve.observability.events import EventWriter, read_events, rebuild_run_state
+from optiprofiler_evolve.observability.projections import project_public_events
 
 
 class EventLedgerTests(unittest.TestCase):

@@ -5,6 +5,9 @@ invalid combinations fail before workers start. The checked-in
 [JSON Schema](../config.schema.json) provides editor completion and structural
 validation; Python validation in `config.py` remains authoritative for
 cross-field rules.
+Tests validate serialized Python presets against this schema as well as YAML
+examples. Reviewer component defaults may be omitted; an empty worker pool is
+rejected before reviewer resolution.
 
 Defaults shown below are package defaults. Calling `evolve(..., config=None)`
 uses the same bounded quick-start values: one iteration, one island, one
@@ -35,39 +38,101 @@ Workers receive only the two evaluation capabilities and an anonymous count/hash
 manifest; names, aliases, validation results, and hidden results remain in the
 controller directory.
 
+## Assessment
+
+See [Algorithm assessment](assessment.md) for scoring, privacy and migration.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `assessment.criteria` | mapping of named criteria | performance and integrity enabled, complexity disabled | Complete criterion map when supplied; omitted standards do not run. |
+| `assessment.profiles` | mapping | `{}` | One-level overrides for smoke, public, validation and hidden. Integrity defaults to validation only. |
+| `assessment.criteria.<name>.enabled` | boolean | `true`; complexity `false` | Master switch; disabled standards allocate no backend resources. |
+| `assessment.criteria.<name>.weight` | finite nonnegative number | `0` for integrity, `1` otherwise | Independent contribution to the weighted average; zero means constraints/diagnostics only. |
+| `assessment.criteria.<name>.mode` | warn or enforce | enforce; complexity default warn | Whether an unmet constraint blocks acceptance. |
+| `assessment.criteria.<name>.options` | mapping | `{}` | Standard-specific settings, overridden by key rather than recursively. |
+
+Scores may be negative or exceed one; no framework clipping or normalization is
+applied. Formal assessment must have an enabled, positive-weight standard.
+Missing weighted evidence makes the total unavailable, never zero. Raw
+performance and weighted totals are stored separately.
+
+## Complexity
+
+Set `assessment.criteria.complexity.enabled: true` to enable this standard.
+It preserves raw benchmark fitness but contributes independently to the total.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `assessment.criteria.complexity.mode` | `warn` or `enforce` | `warn` | Advise simplification, or block over-budget/unavailable candidates before evaluation and admission. |
+| `assessment.criteria.complexity.options.max_ratio` | finite positive number | `1.2` | Maximum candidate-to-initial ratio for both decision complexity and logical code lines. Equality passes. |
+
+The baseline is the frozen initial solver, never the current parent or benchmark
+reference. Radon 6.0.1 counts decisions across all candidate Python files and
+lexical scopes, with one base point for the complete tree. Logical lines exclude
+comments, blanks and actual docstrings. Existing snapshot exclusions apply;
+test-named directories are not specially excluded. Installed dependencies are
+outside this source budget. The analyzer score is `1 / (1 + max(ratios))`, matching
+the criterion score; `complexity_percent` is 100 times the larger ratio;
+the branch denominator is the initial decision complexity and the size
+denominator is `max(initial logical lines, 1)`.
+
+Both worker tools return complexity diagnostics in every feedback mode. Enforced
+rejections consume the normal call quota and return no invented fitness score.
+The worker may edit and resubmit. Analysis is static, cached by source hash and
+run-fixed metric/analyzer versions, and limited to 30 seconds per subprocess.
+Positive-weight analysis failures make the total unavailable even in warn mode;
+zero-weight failures follow warn/enforce. Baseline failures abort preparation.
+Source changes invalidate previous results. Research variants use the same
+assessment profiles. An enforced ratio below one rejects the initial solver
+during preparation; use a soft score to search for strict simplifications.
+
+The baseline analysis and per-criterion diagnostics are written under `controller/complexity/` and
+`controller/evaluations/<candidate>/<profile>/complexity/`; worker feedback contains
+only numeric baseline totals and candidate locations, never backend errors or hashes.
+These are source complexity heuristics, not
+algorithmic runtime complexity or proof against dynamically generated code.
+
 ## Evaluation
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `evaluation.benchmark` | mapping | `{}` | Options forwarded to `optiprofiler.benchmark`; data and solver identity fields are controller-owned. |
-| `evaluation.smoke_overrides` | mapping | `{}` | Benchmark options overlaid only for `smoke_test`. |
-| `evaluation.backend` | `docker` or `unsafe_local` | `docker` | Execution boundary for Python candidate code. `unsafe_local` executes untrusted solver code in the controller process and is for trusted development only. |
-| `evaluation.docker_image` | string or `null` | `null` | Evaluator image; **required** when backend is `docker`. |
-| `evaluation.timeout_seconds` | positive integer | `3600` | Wall-time limit for one Docker evaluator process; `unsafe_local` has no process timeout. |
-| `evaluation.cpus` | positive number | `2.0` | CPU limit passed to the evaluator container; ignored by `unsafe_local`. |
-| `evaluation.memory` | Docker memory string | `4g` | Evaluator-container memory limit; ignored by `unsafe_local`. |
-| `evaluation.pids_limit` | integer at least `16` | `512` | Evaluator-container process limit; ignored by `unsafe_local`. |
-| `evaluation.feedback_mode` | `score_only`, `structured_numeric`, or `full_artifacts` | `score_only` | Worker-visible projection of controller-owned benchmark evidence. `structured_numeric` requires the formal Core `agent_report/1` validator. |
-| `evaluation.reference` | registered competitor name | `initial` | Fixed reference solver paired with every candidate benchmark. Use `initial` for seed-relative evolution; reserve a strong solver for post-selection comparison. |
-| `evaluation.fitness_source` | `solver_scores` or `profile_scores_mean` | `solver_scores` | Population fitness source. `profile_scores_mean` computes each entry as `(candidate-reference+1)/2`, clips it to `[0, 1]`, and averages the complete OptiProfiler profile tensor. |
-| `evaluation.forbidden_candidate_imports` | list of dotted Python module names | `[]` | Reject candidate source that uses these imports. This is an auditable experiment ablation, not a security boundary. |
-| `evaluation.max_smoke_calls_per_worker` | nonnegative integer | `20` | Broker quota for worker `smoke_test` calls. |
-| `evaluation.max_public_calls_per_worker` | nonnegative integer | `5` | Broker quota for worker `evaluate` calls. |
-| `evaluation.adapter` | registered name | `optiprofiler` | Trusted evaluator adapter. Change this only for an owner-supplied evaluator implementation. |
+| `assessment.criteria.performance.options.benchmark` | mapping | `{}` | Options forwarded to `optiprofiler.benchmark`; data and solver identity fields are controller-owned. |
+| `assessment.criteria.performance.options.smoke_overrides` | mapping | `{}` | Benchmark options overlaid only for `smoke_test`. |
+| `execution.backend` | `docker` or `unsafe_local` | `docker` | Execution boundary for Python candidate code. `unsafe_local` executes untrusted solver code in the controller process and is for trusted development only. |
+| `execution.docker_image` | string or `null` | `null` | Evaluator image; **required** when the backend is `docker` and a profile actually constructs an evaluator. The loader enforces it per profile, and the JSON schema enforces it only inside a declared `execution` block, so the two disagree in both directions: omitting `execution` entirely passes the schema but fails the loader when performance is enabled, while declaring `execution` with performance disabled fails the schema but passes the loader. |
+| `execution.timeout_seconds` | positive integer | `3600` | Wall-time limit for one Docker evaluator process; `unsafe_local` has no process timeout. |
+| `execution.cpus` | positive number | `2.0` | CPU limit passed to the evaluator container; ignored by `unsafe_local`. |
+| `execution.memory` | Docker memory string | `4g` | Evaluator-container memory limit; ignored by `unsafe_local`. |
+| `execution.pids_limit` | integer at least `16` | `512` | Evaluator-container process limit; ignored by `unsafe_local`. |
+| `execution.feedback_mode` | `score_only` or `full_artifacts` | `score_only` | Worker-visible projection of controller-owned benchmark evidence. `full_artifacts` also copies allowlisted benchmark artifacts and an artifact index. |
+| `assessment.criteria.performance.options.reference` | registered competitor name | `initial` | Fixed reference solver paired with every candidate benchmark. Use `initial` for seed-relative evolution; reserve a strong solver for post-selection comparison. |
+| `assessment.criteria.performance.options.fitness_source` | `solver_scores` or `profile_scores_mean` | `solver_scores` | Population fitness source. `profile_scores_mean` computes each entry as `(candidate-reference+1)/2`, clips it to `[0, 1]`, and averages the complete OptiProfiler profile tensor. |
+| `execution.forbidden_candidate_imports` | list of dotted Python module names | `[]` | Reject candidate source that uses these imports. This is an auditable experiment ablation, not a security boundary. |
+| `execution.max_smoke_calls_per_worker` | nonnegative integer | `20` | Broker quota for worker `smoke_test` calls. |
+| `execution.max_public_calls_per_worker` | nonnegative integer | `5` | Broker quota for worker `evaluate` calls. |
+| `execution.adapter` | registered name | `optiprofiler` | Trusted evaluator adapter. Change this only for an owner-supplied evaluator implementation. |
 
 Evaluation quotas are local to one worker job and each invocation consumes one
-slot, including a failed evaluation. An exhausted quota is non-retryable;
+slot, including a failed execution. An exhausted quota is non-retryable;
 waiting does not restore it.
 
-`profile_scores_mean` writes `fitness_breakdown.json` beside each evaluation.
-The file records the normalized tensor, its axis meanings, and the exact mean
+The shared built-in reference solver's budget comes from the base
+`assessment.criteria.performance.options.benchmark.max_eval_factor` (500 when
+omitted). Profile benchmark overrides and `smoke_overrides` affect their own
+evaluations, never the shared reference source. Enabled performance profiles
+must agree on the reference name. The `controller/reference_manifest.json` manifest
+records its name, construction budget, and tree hash. It is private to workers; the
+owner console links the reference solver directory next to it, not the manifest.
+
+Each successful benchmark writes `fitness_breakdown.json` beside that execution, for
+either fitness source. The file records the normalized tensor, its axis meanings, and the exact mean
 used for retention. It changes only the controller-owned fitness reduction;
 workers still receive the configured public feedback and never see validation
 or hidden problem identities.
 
 When a post-selection challenger such as `prima_newuoa` is installed in the
 evaluator image, add its import root (`prima`) to
-`evaluation.forbidden_candidate_imports` if candidates must remain independent
+`execution.forbidden_candidate_imports` if candidates must remain independent
 of that implementation. Apply the same rule to any other installed solver API
 excluded by the experiment contract, such as `scipy.optimize`. This check makes
 the policy auditable; it is not a sandbox security boundary.
@@ -84,9 +149,11 @@ packages are imported inside the evaluator only; choosing PDFO or PRIMA does
 not make either package a mandatory dependency of the controller.
 The checked-in evaluator image includes SciPy, PDFO, and independent PRIMA. It
 pins NumPy 1.26 because the current PDFO wheel is not compatible with NumPy 2.
-Custom evaluator images must provide the package named by the selected
-competitor; a missing runtime fails on its first evaluator call instead of
-silently falling back to another solver.
+A custom evaluator image must provide the package named by the selected
+competitor's `required_module`. That field is declarative: no preflight checks
+the image against it, so a missing runtime surfaces as the generated wrapper's
+failing import on its first evaluator call rather than as a startup error. It
+does not fall back to another solver.
 
 | Family | Unconstrained `u` | Bounds `b` | Linear `l` | Nonlinear `n` |
 |---|---|---|---|---|
@@ -123,7 +190,7 @@ names cannot drift apart.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `workers.pool` | list of worker mappings | **required** | Weighted Codex/Claude worker choices. At least one is required. |
-| `workers.max_parallel` | positive integer | `4` | Maximum concurrent coding workers and final evaluator calls. |
+| `workers.max_parallel` | positive integer | `4` | Maximum concurrently running coding-worker attempts. It does not bound evaluator or benchmark calls; profile `benchmark.n_jobs` does. |
 | `workers.timeout_seconds` | positive integer | `1800` | Wall-time limit for one coding-agent process. |
 | `workers.token_budget` | positive integer or `null` | `null` | Advisory token budget inserted into the worker task. |
 | `workers.max_budget_usd` | positive number or `null` | `null` | Claude Code per-worker cost limit. Other providers enforce their own limits. |
@@ -137,6 +204,7 @@ names cannot drift apart.
 | `workers.pool[].args` | list of strings | `[]` | Extra CLI arguments appended to the harness command. |
 | `workers.pool[].env` | string mapping | `{}` | Explicit environment values or `${ENV_NAME}` references passed to the worker. |
 | `workers.pool[].pass_env` | list of names | `[]` | Host environment variables copied into the worker; missing names fail early. |
+| `workers.pool[].provider_gateway` | object or null | `null` | Optional gateway configuration; direct mode still requires the documented opt-in. |
 | `workers.pool[].provider_gateway.upstream_base_url` | HTTPS base URL | **required for gateway mode** | Controller-owned provider origin. It is never supplied to the worker. A base path such as `/v1` or `/anthropic` is allowed. |
 | `workers.pool[].provider_gateway.credential_env` | environment name | **required for gateway mode** | Name of the one resolved credential delivered to the gateway sidecar, not the worker. |
 | `workers.pool[].provider_gateway.protocol` | `auto`, `anthropic`, or `openai_responses` | `auto` | Fixed wire protocol. `auto` maps Claude to Anthropic Messages and Codex to OpenAI Responses. |
@@ -158,41 +226,45 @@ rather than entering a worker container.
 
 ## Integrity review
 
-The semantic integrity gate is mandatory and runs after public checks but before
-any validation query or population admission. The default implementation uses a
+The semantic integrity criterion is enabled by default for formal assessment,
+after public checks and before validation execution. It can be disabled or
+configured as a warning like any other criterion. The default implementation uses a
 separate coding-agent invocation with no evaluation broker, network, problem
 manifest, population, validation data, or hidden data. It sees sanitized copies
 of the parent, candidate, changed-file list, solver contract, and mutation
-transcript.
+transcript. The fixed seed equals its parent and has no mutation transcript, so
+its integrity check is a controller-local baseline approval that never invokes
+the reviewer; only actual submissions consume reviewer budget. After configured
+retries, reviewer unavailability is failed evidence for that submission, never
+a fabricated approve or quarantine verdict.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `integrity_review.component.name` | registered reviewer name | `agent_integrity` | Reviewer implementation. `unsafe_approve` is restricted to explicit tests/ablations. |
-| `integrity_review.component.options` | object | `{}` | Constructor options for an owner-supplied reviewer. |
-| `integrity_review.worker` | worker mapping or `null` | `null` | Dedicated reviewer worker. Required unless same-model reuse is explicitly allowed. |
-| `integrity_review.worker.harness` | `claude` or `codex` | inherited only when worker is `null` | Dedicated reviewer CLI. |
-| `integrity_review.worker.model` | string | inherited only when worker is `null` | Dedicated reviewer model identifier. |
-| `integrity_review.worker.weight` | positive integer | `1` | Scheduling weight; retained for the shared worker schema. |
-| `integrity_review.worker.profile` | string or `null` | `null` | Codex profile; incompatible with gateway routing. |
-| `integrity_review.worker.args` | list of strings | `[]` | Extra non-provider CLI arguments. |
-| `integrity_review.worker.env` | string mapping | `{}` | Explicit reviewer environment values. |
-| `integrity_review.worker.pass_env` | list of names | `[]` | Reviewer host variables resolved by the controller. |
-| `integrity_review.worker.provider_gateway.upstream_base_url` | HTTPS base URL | **required for gateway mode** | Same pinned provider route as a mutation worker; may point to a different provider. |
-| `integrity_review.worker.provider_gateway.credential_env` | environment name | **required for gateway mode** | Reviewer gateway credential name. |
-| `integrity_review.worker.provider_gateway.protocol` | `auto`, `anthropic`, or `openai_responses` | `auto` | Reviewer wire protocol. |
-| `integrity_review.worker.provider_gateway.auth_mode` | `auto`, `bearer`, or `x-api-key` | `auto` | Reviewer upstream authentication mode. |
-| `integrity_review.worker.provider_gateway.max_request_bytes` | positive integer | `16000000` | Reviewer request-body limit. |
-| `integrity_review.worker.provider_gateway.connect_timeout_seconds` | positive integer | `15` | Reviewer upstream connection timeout. |
-| `integrity_review.worker.provider_gateway.response_timeout_seconds` | positive integer | `900` | Reviewer response-stream idle timeout. |
-| `integrity_review.allow_same_model` | boolean | `false` | Permit reuse of the first mutation worker identity. This is an explicit ablation, not the recommended research setup. |
-| `integrity_review.allow_unsafe_stub` | boolean | `false` | Required second opt-in when `component.name` is `unsafe_approve`. |
-| `integrity_review.retries` | nonnegative integer | `1` | Additional attempts after malformed output or reviewer unavailability. |
-| `integrity_review.strict` | boolean | `false` | Abort the run when all reviewer attempts are unavailable. Evidence-backed quarantine still rejects only that candidate. |
-| `integrity_review.timeout_seconds` | positive integer | `600` | Wall-time limit for one reviewer invocation. |
-| `integrity_review.token_budget` | positive integer or `null` | `4000` | Reviewer-specific advisory token budget. |
-| `integrity_review.max_budget_usd` | positive number or `null` | `null` | Reviewer-specific Claude Code cost cap. |
+| `assessment.criteria.integrity.options.component.name` | registered reviewer name | `agent_integrity` | Reviewer implementation. `unsafe_approve` is restricted to explicit tests/ablations. |
+| `assessment.criteria.integrity.options.component.options` | object | `{}` | Constructor options for an owner-supplied reviewer. |
+| `assessment.criteria.integrity.options.worker` | worker mapping or `null` | `null` | Dedicated reviewer worker. Required unless same-model reuse is explicitly allowed. |
+| `assessment.criteria.integrity.options.worker.harness` | `claude` or `codex` | inherited only when worker is `null` | Dedicated reviewer CLI. |
+| `assessment.criteria.integrity.options.worker.model` | string | inherited only when worker is `null` | Dedicated reviewer model identifier. |
+| `assessment.criteria.integrity.options.worker.weight` | positive integer | `1` | Scheduling weight; retained for the shared worker schema. |
+| `assessment.criteria.integrity.options.worker.profile` | string or `null` | `null` | Codex profile; incompatible with gateway routing. |
+| `assessment.criteria.integrity.options.worker.args` | list of strings | `[]` | Extra non-provider CLI arguments. |
+| `assessment.criteria.integrity.options.worker.env` | string mapping | `{}` | Explicit reviewer environment values. |
+| `assessment.criteria.integrity.options.worker.pass_env` | list of names | `[]` | Reviewer host variables resolved by the controller. |
+| `assessment.criteria.integrity.options.worker.provider_gateway.upstream_base_url` | HTTPS base URL | **required for gateway mode** | Same pinned provider route as a mutation worker; may point to a different provider. |
+| `assessment.criteria.integrity.options.worker.provider_gateway.credential_env` | environment name | **required for gateway mode** | Reviewer gateway credential name. |
+| `assessment.criteria.integrity.options.worker.provider_gateway.protocol` | `auto`, `anthropic`, or `openai_responses` | `auto` | Reviewer wire protocol. |
+| `assessment.criteria.integrity.options.worker.provider_gateway.auth_mode` | `auto`, `bearer`, or `x-api-key` | `auto` | Reviewer upstream authentication mode. |
+| `assessment.criteria.integrity.options.worker.provider_gateway.max_request_bytes` | positive integer | `16000000` | Reviewer request-body limit. |
+| `assessment.criteria.integrity.options.worker.provider_gateway.connect_timeout_seconds` | positive integer | `15` | Reviewer upstream connection timeout. |
+| `assessment.criteria.integrity.options.worker.provider_gateway.response_timeout_seconds` | positive integer | `900` | Reviewer response-stream idle timeout. |
+| `assessment.criteria.integrity.options.allow_same_model` | boolean | `false` | Permit reuse of the first mutation worker identity. This is an explicit ablation, not the recommended research setup. |
+| `assessment.criteria.integrity.options.allow_unsafe_stub` | boolean | `false` | Required second opt-in when `component.name` is `unsafe_approve`. |
+| `assessment.criteria.integrity.options.retries` | nonnegative integer | `1` | Additional attempts after malformed output or reviewer unavailability. |
+| `assessment.criteria.integrity.options.timeout_seconds` | positive integer | `600` | Wall-time limit for one reviewer invocation. |
+| `assessment.criteria.integrity.options.token_budget` | positive integer or `null` | `4000` | Reviewer-specific advisory token budget. |
+| `assessment.criteria.integrity.options.max_budget_usd` | positive number or `null` | `null` | Reviewer-specific Claude Code cost cap. |
 
-The nested `integrity_review.worker` accepts the same fields as
+The nested `assessment.criteria.integrity.options.worker` accepts the same fields as
 `workers.pool[]`, including `provider_gateway`. When `allow_same_model` is false,
 its harness/model identity must not
 appear in the mutation pool. Every review attempt retains a complete private
@@ -241,8 +313,11 @@ agent.
 | `sandbox.max_candidate_bytes` | positive integer | `200000000` | Maximum total bytes accepted from one worker workspace. |
 | `sandbox.allow_direct_network` | boolean | `false` | Second unsafe opt-in for a Docker worker to bypass the provider gateway and use direct egress. |
 
-Gateway mode requires Docker Engine 28 or newer for deterministic gateway
-priority across the sidecar's internal and egress networks.
+Gateway mode requires a Docker CLI that accepts `--gw-priority`, which is Docker Engine 28
+or newer. The runtime sets one explicit priority, `--gw-priority 1` on the egress network
+connect; the sidecar joins its internal network at container creation with no priority flag
+and relies on Docker's default-route semantics there. No version preflight runs, so an older
+CLI fails when the flag is rejected rather than at startup.
 
 The worker receives only a private solver copy, public manifests, and bounded
 evaluation tools. It does not receive the immutable reference, hidden manifest,
@@ -257,11 +332,11 @@ the package.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `workflow.phases[].name` | registered name | `prepare`, `explore`, `validate`, `hidden`, `report` | Ordered run-level phases with declared artifact requirements and outputs. Core phases are mandatory in the alpha. |
+| `workflow.phases[].name` | registered name | `prepare`, `explore`, `validate`, `hidden`, `report` | Ordered run-level phases with declared inputs/outputs. The list may be empty; required inputs and configured optional producers must precede consumers. |
 | `workflow.phases[].options` | mapping | `{}` | Constructor options for one phase. |
-| `workflow.attempt_steps[].name` | registered name | `mutate`, `smoke`, `public_evaluate` | Ordered steps executed for each candidate attempt. `mutate` and `public_evaluate` are mandatory. |
+| `workflow.attempt_steps[].name` | registered name | `mutate`, `smoke`, `public_evaluate` | Ordered candidate-attempt steps. Explore validates mandatory `mutate` and `public_evaluate` steps before startup. Without an ExplorePhase, names are not resolved and steps are not constructed; defaults or an empty list are both valid. |
 | `workflow.attempt_steps[].options` | mapping | `{}` | Constructor options for one attempt step. |
-| `workflow.after_iteration[].name` | registered name | none | Optional policies evaluated after the iteration barrier. They propose edits; only the engine applies them. |
+| `workflow.after_iteration[].name` | registered name | none | Optional policies evaluated after the iteration barrier. They propose edits; only the controller applies them. |
 | `workflow.after_iteration[].options` | mapping | `{}` | Constructor options for one after-iteration policy. |
 
 Use immutable config helpers such as `without_step(...)`, `with_step(...)`,
@@ -269,11 +344,16 @@ Use immutable config helpers such as `without_step(...)`, `with_step(...)`,
 `with_evaluator(...)` to define ablations without editing a shared config in
 place. For example, one matrix can derive scout `off`, `shared`, and
 `per_island` variants with `with_phase_options`. Removing the `static_audit` step changes reported pipeline evidence, but
-does not remove the engine's mandatory final safety and edit-scope gate.
+does not remove the controller's mandatory final safety and edit-scope gate.
 
-`PopulationEdit.budget` is reserved but not implemented in the alpha. A custom
-policy returning a nonempty budget edit fails explicitly; it is not silently
-recorded as an effective scheduling ablation.
+`without_phase` may remove a built-in stage too. This does not remove its
+dependents: deleting prepare while retaining explore fails preflight. Empty and
+custom-only lists are supported, and `attempt_steps` may be empty as well, but
+only while no `ExplorePhase` or subclass is configured — once one is, assembly
+requires the `mutate` and `public_evaluate` steps. Champion
+selection still closes admission; a required lockbox cannot be omitted or have
+hidden performance disabled in a champion-returning run. See
+[custom workflows](custom-workflows.md) for return semantics and extension code.
 
 The recommended full research sequence is:
 
@@ -283,39 +363,37 @@ validate, hidden, challenger, report
 ```
 
 Its phase options live under `workflow.phases[].options` and are validated by
-the phase constructor before a run directory is created:
+the phase constructor and optional `validate_config(config)` hook before a run
+directory is created:
 
 | Phase | Option | Default | Meaning |
 |---|---|---:|---|
 | `direction_scout` | `mode` | `shared` | `off`, `shared`, or `per_island`. |
 | `direction_scout` | `guided_islands` | first half | Island indexes receiving scout cards. |
 | `direction_scout` | `max_directions` | `4` | Maximum direction cards. |
-| `direction_scout` | `worker_index` | `0` | Entry in `workers.pool`. |
-| `direction_scout` | `timeout_seconds` | worker default | Role wall time. |
-| `direction_scout` | `token_budget` | worker default | Advisory role token budget. |
-| `direction_scout` | `max_budget_usd` | worker default | Claude role cost cap. |
-| `direction_scout` | `tools` | network/web on | Role-specific `ToolConfig` overrides. Native search may use the provider tool loop; the role shell remains internal. |
-| `direction_scout` | `prompt_version` | `direction-scout/1` | Recorded prompt contract. |
+| `direction_scout` | `tools` | network/web on | Role-specific `ToolConfig` overrides. |
 | `strategy_analysis` | `max_strategies` | `6` | Cards normalized per island. |
 | `strategy_analysis` | `max_ablations` | `6` | Executable toggles tested per island. |
 | `strategy_analysis` | `min_effect` | `0.01` | Public-fitness support threshold. |
 | `strategy_analysis` | `n_repeats` | `1` | Repeated ablated evaluations. |
 | `strategy_analysis` | `evaluation_mode` | `smoke` | `smoke` for bounded attribution or `public` for canonical public attribution. |
-| `strategy_analysis` | `worker_index` | `0` | Entry in `workers.pool`. |
-| `strategy_analysis` | `timeout_seconds` | worker default | Role wall time. |
-| `strategy_analysis` | `token_budget` | worker default | Advisory role token budget. |
-| `strategy_analysis` | `max_budget_usd` | worker default | Claude role cost cap. |
-| `strategy_analysis` | `tools` | network on, web off | Role-specific `ToolConfig` overrides. Model transport uses the gateway; the role shell has no general egress. |
-| `strategy_analysis` | `prompt_version` | `strategy-analysis/1` | Recorded prompt contract. |
+| `strategy_analysis` | `tools` | network on, web off | Role-specific `ToolConfig` overrides. |
 | `strategy_transfer` | `max_strategies_per_island` | `3` | Controller-supported semantic strategies offered to each other island. |
 | `strategy_transfer` | `attempts_per_island` | `1` | Integration attempts made from each island's own selected base. |
-| `strategy_transfer` | `worker_index` | `0` | Integrator worker entry. |
-| `strategy_transfer` | `timeout_seconds` | worker default | Integrator wall time. |
-| `strategy_transfer` | `token_budget` | worker default | Advisory integrator token budget. |
-| `strategy_transfer` | `max_budget_usd` | worker default | Claude integrator cost cap. |
 | `strategy_transfer` | `tools` | network on, web off | Role-specific `ToolConfig` overrides. |
-| `strategy_transfer` | `prompt_version` | `strategy-transfer/1` | Recorded prompt contract. |
 | `challenger` | `reference` | `scipy_powell` | `initial` or any compatible registered competitor. This phase is post-selection only. |
+
+Every research role additionally accepts `worker_index` (default `0`, indexing
+`workers.pool`), and `timeout_seconds`, `token_budget` and `max_budget_usd`,
+each of which defaults to the corresponding `workers.*` value;
+`max_budget_usd` applies to Claude only. Each role also carries its own
+`prompt_version`: `direction_scout` and `strategy_analysis` write it into their
+phase artifact, `strategy_transfer` records it in the private trace only.
+
+The `tools` row is the one genuinely per-role setting: `direction_scout` enables
+network and native web search and keeps its shell on the internal network, while
+`strategy_analysis` and `strategy_transfer` reach the model through the gateway
+with web search off and no general shell egress.
 
 The older `recombine` phase remains available as an advanced compatibility
 component for portable-patch experiments, but it is not part of the recommended
@@ -354,7 +432,8 @@ behavior, patch portability, and validation-query semantics.
 
 ## Provider configuration
 
-Each Docker worker declares one pinned `provider_gateway`. Compatibility still
+Each Docker worker either pins one `provider_gateway` or takes the documented direct path
+that requires both unsafe opt-ins. Compatibility still
 depends on the selected CLI's wire protocol and tool loop; a model name and base
 URL alone are not sufficient. For Claude Code:
 
@@ -394,3 +473,11 @@ gateway URL. Direct Docker provider access requires both unsafe opt-ins and is
 recorded in provenance. See
 [Model providers and agent workers](providers.md) and the checked-in compatible
 provider examples for complete small runs.
+
+### Early stop policy
+
+`workflow.after_iteration` accepts `{name: early_stop, options: {min_iteration: 2,
+score: 0.8}}`. After the indicated iteration, it stops exploration when any
+population member's validation performance score reaches the threshold. It does
+not skip validation, hidden, or report phases. This threshold is not the weighted
+assessment total. Defaults are `min_iteration: 1` and `score: 1.0`.

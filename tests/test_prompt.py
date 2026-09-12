@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from optiprofiler_evolve.data import DataPlan
-from optiprofiler_evolve.prompt import build_worker_prompt
+from optiprofiler_evolve.phases.attempts.prompt import build_worker_prompt
 from optiprofiler_evolve.solver import InterfaceSpec
 
 
@@ -17,7 +17,7 @@ def _prompt_kwargs() -> dict:
         hidden=(),
         smoke=("P1",),
         split_seed=1,
-        manifest_hash="test",
+        split_fingerprint="test",
         aliases={"P1": "P_OPAQUE"},
     )
     return {
@@ -37,6 +37,13 @@ def _prompt_kwargs() -> dict:
 
 
 class PromptTests(unittest.TestCase):
+    def test_stage_prompt_does_not_own_criterion_instructions(self) -> None:
+        prompt = build_worker_prompt(**_prompt_kwargs())
+        for text in ("Complexity budget", "render_pdf", "history plots", "Semantic integrity"):
+            self.assertNotIn(text, prompt)
+        self.assertIn("canonical full public fitness", prompt)
+        self.assertIn("- Parent public fitness: 0.500000; higher is better", prompt)
+
     def test_prompt_note_renders_only_when_configured(self) -> None:
         kwargs = _prompt_kwargs()
         without_note = build_worker_prompt(**kwargs)
@@ -83,7 +90,7 @@ class PromptTests(unittest.TestCase):
             hidden=(),
             smoke=("P1",),
             split_seed=1,
-            manifest_hash="test",
+            split_fingerprint="test",
             aliases={"P1": "P_OPAQUE"},
         )
         prompt = build_worker_prompt(
@@ -105,7 +112,7 @@ class PromptTests(unittest.TestCase):
         self.assertIn("at most\n  1 calls", prompt)
         self.assertIn("waiting cannot restore it", prompt)
         self.assertIn("do not sleep or retry", prompt)
-        self.assertIn("render_pdf", prompt)
+        self.assertNotIn("render_pdf", prompt)
         self.assertIn("diagnostic outputs under `/tmp`", prompt)
         self.assertIn("strict scope audit rejects", prompt)
         self.assertIn("scipy.optimize", prompt)

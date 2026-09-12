@@ -4,6 +4,7 @@ import dataclasses
 import json
 import os
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
 from unittest.mock import patch
@@ -11,14 +12,35 @@ from unittest.mock import patch
 import jsonschema
 import yaml
 
-from optiprofiler_evolve.config import EvolveConfig, load_config
+from optiprofiler_evolve._presets import dfo_default
+from optiprofiler_evolve.config import EvolveConfig, load_config, plain_data
 from optiprofiler_evolve.solver import InterfaceSpec, validate_interface
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class DocumentationTests(unittest.TestCase):
+    def test_default_preset_round_trips_through_its_schema(self) -> None:
+        schema = json.loads((ROOT / "config.schema.json").read_text(encoding="utf-8"))
+        preset = dfo_default()
+        preset.validate()
+        raw = plain_data(preset)
+        jsonschema.Draft202012Validator(schema).validate(raw)
+        self.assertEqual(plain_data(load_config(raw)), raw)
+
+    def test_reference_defaults_match_resolved_values(self):
+        reference = (ROOT / "docs/config-reference.md").read_text()
+        rows = {parts[1].strip().strip("`"): parts[3].strip()
+                for line in reference.splitlines() if line.startswith("| `")
+                for parts in [line.split("|")] if len(parts) >= 5}
+        config = EvolveConfig()
+        for field in ("iterations", "islands", "population_per_island", "migration_interval"):
+            self.assertEqual(rows[f"evolution.{field}"], f"`{getattr(config.evolution, field)}`")
+        self.assertEqual(rows["assessment.criteria.complexity.mode"],
+                         f"`{config.assessment.criteria['complexity'].mode}`")
+        self.assertEqual(rows["execution.feedback_mode"], f"`{config.execution.feedback_mode}`")
+        self.assertEqual(rows["workers.pool[].provider_gateway"], "`null`")
+
     def test_schema_and_reference_cover_every_config_field(self) -> None:
         schema = json.loads((ROOT / "config.schema.json").read_text(encoding="utf-8"))
         expected = _dataclass_paths(EvolveConfig)
@@ -41,6 +63,11 @@ class DocumentationTests(unittest.TestCase):
             "OPTIPROFILER_EVOLVE_OPENAI_BASE_URL": "https://example.invalid/v1",
         }
         with patch.dict(os.environ, environment):
+            for example in (ROOT / "examples").rglob("*.yaml"):
+                payload = yaml.safe_load(example.read_text())
+                if isinstance(payload, dict) and "workers" in payload:
+                    validator.validate(payload)
+                    load_config(example)
             claude_path = ROOT / "examples" / "experiment.yaml"
             compatible_path = ROOT / "examples" / "experiment-claude-compatible.yaml"
             codex_path = ROOT / "examples" / "experiment-codex.yaml"
@@ -92,6 +119,9 @@ def _dataclass_paths(cls: type[Any], prefix: str = "") -> set[str]:
         annotation = hints[field.name]
         path = f"{prefix}.{field.name}" if prefix else field.name
         args = get_args(annotation)
+        if get_origin(annotation) is Mapping and len(args) == 2 and dataclasses.is_dataclass(args[1]):
+            paths.update(_dataclass_paths(args[1], f"{path}.<name>"))
+            continue
         if get_origin(annotation) is tuple and args and dataclasses.is_dataclass(args[0]):
             paths.update(_dataclass_paths(args[0], f"{path}[]"))
             continue
@@ -118,6 +148,10 @@ def _schema_paths(root: dict[str, Any], node: dict[str, Any], prefix: str = "") 
     for name, raw_child in node.get("properties", {}).items():
         path = f"{prefix}.{name}" if prefix else name
         child = _resolve_schema(root, raw_child)
+        additional = child.get("additionalProperties")
+        if child.get("type") == "object" and isinstance(additional, dict) and "$ref" in additional:
+            paths.update(_schema_paths(root, _resolve_schema(root, additional), f"{path}.<name>"))
+            continue
         if child.get("type") == "object" and "properties" in child:
             paths.update(_schema_paths(root, child, path))
             continue

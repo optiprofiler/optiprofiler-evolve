@@ -1,7 +1,3 @@
-# yaml-language-server: $schema=../config.schema.json
-
-# Full research harness. Start with examples/experiment.yaml for the smaller
-# exploration-only workflow.
 data:
   library: s2mpj
   selection:
@@ -13,49 +9,27 @@ data:
     hidden_fraction: 0.2
     smoke_count: 3
     seed: 20260721
-
-evaluation:
-  backend: docker
-  docker_image: optiprofiler-evolve-evaluator:latest
-  cpus: 2
-  memory: 4g
-  pids_limit: 512
-  feedback_mode: full_artifacts
-  reference: initial
-  # Keep the post-selection PRIMA challenger unavailable to candidates.
-  forbidden_candidate_imports:
-    - prima
-  benchmark:
-    max_eval_factor: 200
-    n_jobs: 4
-    score_only: false
-  smoke_overrides:
-    max_eval_factor: 10
-    n_jobs: 2
-
 evolution:
   iterations: 10
   islands: 4
   attempts_per_island: 1
   population_per_island: 4
-  # Keep whole solvers inside their islands. Cross-island learning below
-  # transfers only controller-supported semantic strategies.
   migration_interval: 0
   finalists_per_island: 1
   random_seed: 20260721
-
 workers:
   max_parallel: 4
   timeout_seconds: 1800
   token_budget: 80000
   pool:
-    - harness: claude
-      model: ${OPTIPROFILER_EVOLVE_MODEL}
-      pass_env: [ANTHROPIC_API_KEY]
-      provider_gateway:
-        upstream_base_url: https://api.anthropic.com
-        credential_env: ANTHROPIC_API_KEY
-        auth_mode: x-api-key
+  - harness: claude
+    model: ${OPTIPROFILER_EVOLVE_MODEL}
+    pass_env:
+    - ANTHROPIC_API_KEY
+    provider_gateway:
+      upstream_base_url: https://api.anthropic.com
+      credential_env: ANTHROPIC_API_KEY
+      auth_mode: x-api-key
   tools:
     preset: research
     web_search: true
@@ -66,71 +40,95 @@ workers:
     compilers: true
     package_install: false
     communication: island
-
-integrity_review:
-  component:
-    name: agent_integrity
-  allow_same_model: true  # Replace with a distinct worker before paper-grade runs.
-  retries: 1
-  strict: false
-  timeout_seconds: 600
-  token_budget: 12000
-
 sandbox:
   backend: docker
   worker_image: optiprofiler-evolve-worker:latest
   cpus: 2
   memory: 4g
   pids_limit: 512
-
 workflow:
   phases:
-    - name: prepare
-    - name: direction_scout
-      options:
-        mode: shared
-        guided_islands: [0, 1]
-        max_directions: 4
-        worker_index: 0
-        token_budget: 30000
-        prompt_version: direction-scout/1
-        tools:
-          network: true
-          web_search: true
-    - name: explore
-    - name: strategy_analysis
-      options:
-        max_strategies: 6
-        max_ablations: 6
-        min_effect: 0.01
-        n_repeats: 1
-        evaluation_mode: smoke
-        worker_index: 0
-        token_budget: 30000
-        prompt_version: strategy-analysis/1
-        tools:
-          network: true
-          web_search: false
-    - name: strategy_transfer
-      options:
-        max_strategies_per_island: 3
-        attempts_per_island: 1
-        worker_index: 0
-        token_budget: 30000
-        prompt_version: strategy-transfer/1
-        tools:
-          network: true
-          web_search: false
-    - name: validate
-    - name: hidden
-    - name: challenger
-      options:
-        reference: prima_newuoa
-    - name: report
+  - name: prepare
+  - name: direction_scout
+    options:
+      mode: shared
+      guided_islands:
+      - 0
+      - 1
+      max_directions: 4
+      worker_index: 0
+      token_budget: 30000
+      prompt_version: direction-scout/1
+      tools:
+        network: true
+        web_search: true
+  - name: explore
+  - name: strategy_analysis
+    options:
+      max_strategies: 6
+      max_ablations: 6
+      min_effect: 0.01
+      n_repeats: 1
+      evaluation_mode: smoke
+      worker_index: 0
+      token_budget: 30000
+      prompt_version: strategy-analysis/1
+      tools:
+        network: true
+        web_search: false
+  - name: strategy_transfer
+    options:
+      max_strategies_per_island: 3
+      attempts_per_island: 1
+      worker_index: 0
+      token_budget: 30000
+      prompt_version: strategy-transfer/1
+      tools:
+        network: true
+        web_search: false
+  - name: validate
+  - name: hidden
+  - name: challenger
+    options:
+      reference: prima_newuoa
+  - name: report
   attempt_steps:
-    - name: mutate
-    - name: static_audit
-    - name: smoke
-    - name: public_evaluate
-    - name: feedback
+  - name: mutate
+  - name: static_audit
+  - name: smoke
+  - name: public_evaluate
+  - name: feedback
   after_iteration: []
+execution:
+  backend: docker
+  docker_image: optiprofiler-evolve-evaluator:latest
+  cpus: 2
+  memory: 4g
+  pids_limit: 512
+  feedback_mode: full_artifacts
+  forbidden_candidate_imports:
+  - prima
+assessment:
+  criteria:
+    performance:
+      options:
+        reference: initial
+        benchmark:
+          max_eval_factor: 200
+          n_jobs: 4
+          score_only: false
+        smoke_overrides:
+          max_eval_factor: 10
+          n_jobs: 2
+    integrity:
+      options:
+        component:
+          name: agent_integrity
+        allow_same_model: true
+        retries: 1
+        timeout_seconds: 600
+        token_budget: 12000
+    complexity:
+      enabled: false
+      mode: warn
+      options: {}

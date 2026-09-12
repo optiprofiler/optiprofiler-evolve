@@ -7,22 +7,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from optiprofiler_evolve.config import ComponentConfig, load_config
-from optiprofiler_evolve.engine import EvolutionEngine
-from optiprofiler_evolve.models import CandidateRecord, EvaluationResult
-from optiprofiler_evolve.policies.builtin import MigrationPolicy
-from optiprofiler_evolve.protocols import (
-    ControllerServices,
-    IterationView,
-    PopulationEdit,
-    StepResult,
-)
-from optiprofiler_evolve.registry import build
-from optiprofiler_evolve.sandbox import AgentRunResult
-from optiprofiler_evolve.solver import InterfaceSpec
-from optiprofiler_evolve.viewers import materialize_public_bundle, render_status
-
 from test_config import minimal_config
+from worker_helpers import RunnerAdapter
+
+from optiprofiler_evolve.agents.contracts import WorkerOutcome
+from optiprofiler_evolve.application.run import EvolutionRun
+from optiprofiler_evolve.config import ComponentConfig, load_config
+from optiprofiler_evolve.controller.contracts import ControllerServices
+from optiprofiler_evolve.controller.registry import build
+from optiprofiler_evolve.models import CandidateRecord, EvaluationResult
+from optiprofiler_evolve.observability.views.public import materialize_public_bundle, render_status
+from optiprofiler_evolve.phases.attempts.contracts import IterationView, PopulationEdit, StepResult
+from optiprofiler_evolve.phases.attempts.policies import MigrationPolicy
+from optiprofiler_evolve.solver import InterfaceSpec
 
 
 class FakeEvaluator:
@@ -43,7 +40,7 @@ def evaluator_factory(**_kwargs: object) -> FakeEvaluator:
     return FakeEvaluator()
 
 
-def agent_runner(**kwargs: object) -> AgentRunResult:
+def agent_runner(**kwargs: object) -> WorkerOutcome:
     workspace = kwargs["workspace"]
     transcript = kwargs["transcript"]
     assert isinstance(workspace, Path)
@@ -52,10 +49,10 @@ def agent_runner(**kwargs: object) -> AgentRunResult:
     solver.write_text(solver.read_text(encoding="utf-8") + "\n# improved\n")
     transcript.parent.mkdir(parents=True, exist_ok=True)
     transcript.write_text("worker", encoding="utf-8")
-    return AgentRunResult(0, transcript)
+    return WorkerOutcome(0, transcript)
 
 
-def out_of_scope_runner(**kwargs: object) -> AgentRunResult:
+def out_of_scope_runner(**kwargs: object) -> WorkerOutcome:
     workspace = kwargs["workspace"]
     transcript = kwargs["transcript"]
     assert isinstance(workspace, Path)
@@ -63,7 +60,7 @@ def out_of_scope_runner(**kwargs: object) -> AgentRunResult:
     (workspace / "locked.txt").write_text("changed", encoding="utf-8")
     transcript.parent.mkdir(parents=True, exist_ok=True)
     transcript.write_text("worker", encoding="utf-8")
-    return AgentRunResult(0, transcript)
+    return WorkerOutcome(0, transcript)
 
 
 class InspectStep:
@@ -89,7 +86,7 @@ class StopAfterFirstIteration:
     name = "stop_after_first"
 
     def propose(self, view: object) -> PopulationEdit:
-        return PopulationEdit(stop=getattr(view, "iteration") >= 1, reason="test")
+        return PopulationEdit(stop=view.iteration >= 1, reason="test")
 
 
 class UnsupportedBudgetPolicy:
@@ -106,7 +103,7 @@ class SeedCaptureStep:
         self.seeds: dict[str, int] = {}
 
     def run(self, context: object) -> StepResult:
-        self.seeds[getattr(context, "attempt_id")] = getattr(context, "rng_seed")
+        self.seeds[context.attempt_id] = context.rng_seed
         return StepResult()
 
 
@@ -135,17 +132,17 @@ class ExtensibilityTests(unittest.TestCase):
                     return function(*args, **kwargs)
 
                 with patch(
-                    f"optiprofiler_evolve.engine.{name}",
+                    f"optiprofiler_evolve.observability.live_views.{name}",
                     side_effect=fail_after_first,
                 ):
-                    result = EvolutionEngine(
+                    result = EvolutionRun(
                         initial=source,
                         interface=InterfaceSpec.parse("solver.py:solver"),
                         runtime="python",
                         editable=(".",),
                         config=load_config(minimal_config()),
                         run_dir=root / "run",
-                        agent_runner=agent_runner,
+                        worker_adapter=RunnerAdapter(agent_runner),
                         evaluator_factory=evaluator_factory,
                     ).run()
 
@@ -181,7 +178,7 @@ class ExtensibilityTests(unittest.TestCase):
         self.assertEqual(reordered.workflow.attempt_steps[-1].name, "static_audit")
         self.assertIn("inspect_context", [step.name for step in inserted.workflow.attempt_steps])
         with self.assertRaises(TypeError):
-            base.evaluation.benchmark["new"] = True  # type: ignore[index]
+            base.resolved_profiles["validation"].performance.benchmark["new"] = True  # type: ignore[index]
 
     def test_phase_options_are_immutable_ablation_variants(self) -> None:
         base = load_config(minimal_config()).with_phase(
@@ -194,8 +191,9 @@ class ExtensibilityTests(unittest.TestCase):
         self.assertEqual(base.workflow.phases[1].options["mode"], "shared")
         self.assertEqual(disabled.workflow.phases[1].options["mode"], "off")
         self.assertNotIn("direction_scout", [phase.name for phase in removed.workflow.phases])
-        with self.assertRaisesRegex(ValueError, "Core phase"):
-            base.without_phase("explore")
+        self.assertNotIn(
+            "explore", [phase.name for phase in base.without_phase("explore").workflow.phases]
+        )
 
     def test_direction_scout_modes_form_independent_config_variants(self) -> None:
         base = load_config(minimal_config()).with_phase(
@@ -249,14 +247,14 @@ class ExtensibilityTests(unittest.TestCase):
                 ),
                 workflow=workflow,
             )
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
                 editable=(".",),
                 config=config,
                 run_dir=root / "run",
-                agent_runner=agent_runner,
+                worker_adapter=RunnerAdapter(agent_runner),
                 evaluator_factory=evaluator_factory,
             )
             result = engine.run()
@@ -288,14 +286,14 @@ class ExtensibilityTests(unittest.TestCase):
                 ),
                 after="smoke",
             )
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
                 editable=(".",),
                 config=config,
                 run_dir=root / "run",
-                agent_runner=agent_runner,
+                worker_adapter=RunnerAdapter(agent_runner),
                 evaluator_factory=evaluator_factory,
             )
             engine.run()
@@ -405,14 +403,14 @@ class ExtensibilityTests(unittest.TestCase):
             config = load_config(minimal_config()).with_step(
                 ComponentConfig("static_audit"), after="mutate"
             ).without_step("static_audit")
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
                 editable=("solver.py",),
                 config=config,
                 run_dir=root / "run",
-                agent_runner=out_of_scope_runner,
+                worker_adapter=RunnerAdapter(out_of_scope_runner),
                 evaluator_factory=evaluator_factory,
             )
             result = engine.run()
@@ -439,14 +437,14 @@ class ExtensibilityTests(unittest.TestCase):
                 )
                 if remove_smoke:
                     config = config.without_step("smoke")
-                EvolutionEngine(
+                EvolutionRun(
                     initial=source,
                     interface=InterfaceSpec.parse("solver.py:solver"),
                     runtime="python",
                     editable=(".",),
                     config=config,
                     run_dir=root / label,
-                    agent_runner=agent_runner,
+                    worker_adapter=RunnerAdapter(agent_runner),
                     evaluator_factory=evaluator_factory,
                 ).run()
                 captured.append(capture.seeds)
@@ -466,14 +464,14 @@ class ExtensibilityTests(unittest.TestCase):
                     after_iteration=(ComponentConfig.from_component(UnsupportedBudgetPolicy()),),
                 ),
             )
-            engine = EvolutionEngine(
+            engine = EvolutionRun(
                 initial=source,
                 interface=InterfaceSpec.parse("solver.py:solver"),
                 runtime="python",
                 editable=(".",),
                 config=config,
                 run_dir=root / "run",
-                agent_runner=agent_runner,
+                worker_adapter=RunnerAdapter(agent_runner),
                 evaluator_factory=evaluator_factory,
             )
             with self.assertRaisesRegex(NotImplementedError, "future scheduler"):
@@ -488,17 +486,17 @@ class ExtensibilityTests(unittest.TestCase):
                 tools=dataclasses.replace(base.workers.tools, communication="global"),
             ),
         )
-        engine = EvolutionEngine(
+        engine = EvolutionRun(
             initial=Path("solver"),
             interface=InterfaceSpec.parse("solver.py:solver"),
             runtime="python",
             editable=(".",),
             config=config,
             run_dir=Path("run"),
-            agent_runner=agent_runner,
+            worker_adapter=RunnerAdapter(agent_runner),
             evaluator_factory=evaluator_factory,
         )
-        engine.attempt_history = [
+        engine.state.attempt_history = [
             {
                 "attempt_id": "it001-i00-a00",
                 "candidate_id": "it001-i00-a00",
@@ -540,17 +538,17 @@ class ExtensibilityTests(unittest.TestCase):
                 ),
             ),
         )
-        engine = EvolutionEngine(
+        engine = EvolutionRun(
             initial=Path("solver"),
             interface=InterfaceSpec.parse("solver.py:solver"),
             runtime="python",
             editable=(".",),
             config=config,
             run_dir=Path("run"),
-            agent_runner=agent_runner,
+            worker_adapter=RunnerAdapter(agent_runner),
             evaluator_factory=evaluator_factory,
         )
-        engine.attempt_history = [
+        engine.state.attempt_history = [
             {
                 "attempt_id": "failed-before-evaluation",
                 "candidate_id": "failed-before-evaluation",

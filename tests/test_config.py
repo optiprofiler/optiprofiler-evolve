@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+import warnings
 from unittest.mock import patch
 
 from optiprofiler_evolve.config import load_config
@@ -13,38 +14,55 @@ def minimal_config() -> dict:
             "problem_names": ["P1", "P2", "P3", "P4"],
             "split": {"smoke_count": 1, "hidden_fraction": 0.25},
         },
-        "evaluation": {"backend": "unsafe_local"},
-        "evolution": {"rounds": 1, "islands": 2},
+        "execution": {"backend": "unsafe_local"},
+        "evolution": {"iterations": 1, "islands": 2},
         "workers": {
             "pool": [{"harness": "codex", "model": "test-model"}],
             "max_parallel": 2,
         },
-        "integrity_review": {
-            "component": {"name": "unsafe_approve"},
-            "allow_unsafe_stub": True,
-        },
+        "assessment": {"criteria": {
+            "performance": {"options": {}},
+            "integrity": {"options": {
+                "component": {"name": "unsafe_approve"}, "allow_unsafe_stub": True,
+            }},
+            "complexity": {"enabled": False, "mode": "warn"},
+        }},
         "sandbox": {"backend": "unsafe_local"},
     }
 
 
 class ConfigTests(unittest.TestCase):
 
-    def test_feedback_modes_are_explicit_and_legacy_names_normalize(self) -> None:
-        for mode in ("score_only", "structured_numeric", "full_artifacts"):
-            raw = minimal_config()
-            raw["evaluation"]["feedback_mode"] = mode
-            self.assertEqual(load_config(raw).evaluation.feedback_mode, mode)
-
-        aliases = {"summary": "score_only", "agent": "full_artifacts"}
-        for legacy, canonical in aliases.items():
-            raw = minimal_config()
-            raw["evaluation"]["feedback_mode"] = legacy
-            self.assertEqual(load_config(raw).evaluation.feedback_mode, canonical)
-
+    def test_empty_pool_is_rejected_before_resolving_the_reviewer(self) -> None:
         raw = minimal_config()
-        raw["evaluation"]["feedback_mode"] = "everything"
-        with self.assertRaisesRegex(ValueError, "feedback_mode"):
+        raw["workers"]["pool"] = []
+        raw["assessment"]["criteria"]["integrity"] = {
+            "options": {"allow_same_model": True},
+        }
+        with self.assertRaisesRegex(ValueError, "workers.pool must contain"):
             load_config(raw)
+
+    def test_removed_config_aliases_are_rejected(self) -> None:
+        raw = minimal_config()
+        raw["evolution"]["rounds"] = raw["evolution"].pop("iterations")
+        with self.assertRaisesRegex(ValueError, "Unknown keys"):
+            load_config(raw)
+        raw = minimal_config()
+        raw["execution"]["backend"] = "local"
+        with self.assertRaisesRegex(ValueError, "backend"):
+            load_config(raw)
+
+    def test_feedback_modes_are_explicit_and_legacy_names_are_rejected(self) -> None:
+        for mode in ("score_only", "full_artifacts"):
+            raw = minimal_config()
+            raw["execution"]["feedback_mode"] = mode
+            self.assertEqual(load_config(raw).resolved_profiles["validation"].performance.feedback_mode, mode)
+
+        for mode in ("summary", "agent", "everything", "structured_numeric"):
+            raw = minimal_config()
+            raw["execution"]["feedback_mode"] = mode
+            with self.assertRaisesRegex(ValueError, "feedback_mode"):
+                load_config(raw)
 
     def test_required_lockbox_rejects_a_configuration_without_hidden_data(self) -> None:
         raw = minimal_config()
@@ -87,30 +105,30 @@ class ConfigTests(unittest.TestCase):
             "top_biased_validation_weighted",
         )
         self.assertEqual(config.evolution.parent_sampler.options["greedy_ratio"], 0.7)
-        self.assertEqual(config.integrity_review.component.name, "unsafe_approve")
+        self.assertEqual(config.resolved_profiles["validation"].integrity.component.name, "unsafe_approve")
 
     def test_agent_reviewer_requires_a_distinct_model_or_explicit_override(self) -> None:
         raw = minimal_config()
-        raw["integrity_review"] = {"component": {"name": "agent_integrity"}}
+        raw["assessment"]["criteria"]["integrity"]["options"] = {"component": {"name": "agent_integrity"}}
         with self.assertRaisesRegex(ValueError, "dedicated integrity_review.worker"):
             load_config(raw)
 
-        raw["integrity_review"]["allow_same_model"] = True
+        raw["assessment"]["criteria"]["integrity"]["options"]["allow_same_model"] = True
         config = load_config(raw)
         self.assertEqual(
-            config.integrity_review.resolved_worker(config.workers).model,
+            config.resolved_profiles["validation"].integrity.resolved_worker(config.workers).model,
             "test-model",
         )
 
     def test_unsafe_reviewer_requires_double_opt_in(self) -> None:
         raw = minimal_config()
-        raw["integrity_review"].pop("allow_unsafe_stub")
+        raw["assessment"]["criteria"]["integrity"]["options"].pop("allow_unsafe_stub")
         with self.assertRaisesRegex(ValueError, "allow_unsafe_stub=true"):
             load_config(raw)
 
     def test_dedicated_reviewer_must_differ_and_its_secrets_are_redacted(self) -> None:
         raw = minimal_config()
-        raw["integrity_review"] = {
+        raw["assessment"]["criteria"]["integrity"]["options"] = {
             "component": {"name": "agent_integrity"},
             "worker": {
                 "harness": "claude",
@@ -119,15 +137,15 @@ class ConfigTests(unittest.TestCase):
             },
         }
         config = load_config(raw)
-        self.assertEqual(config.integrity_review.worker.model, "review-model")
+        self.assertEqual(config.resolved_profiles["validation"].integrity.worker.model, "review-model")
         self.assertEqual(
-            config.redacted_dict()["integrity_review"]["worker"]["env"][
+            config.redacted_dict()["assessment"]["criteria"]["integrity"]["options"]["worker"]["env"][
                 "ANTHROPIC_API_KEY"
             ],
             "<redacted>",
         )
-        raw["integrity_review"]["worker"]["harness"] = "codex"
-        raw["integrity_review"]["worker"]["model"] = "test-model"
+        raw["assessment"]["criteria"]["integrity"]["options"]["worker"]["harness"] = "codex"
+        raw["assessment"]["criteria"]["integrity"]["options"]["worker"]["model"] = "test-model"
         with self.assertRaisesRegex(ValueError, "outside the mutation pool"):
             load_config(raw)
 
@@ -139,29 +157,29 @@ class ConfigTests(unittest.TestCase):
 
     def test_evaluator_cannot_reuse_previous_benchmark_results(self) -> None:
         raw = minimal_config()
-        raw["evaluation"]["benchmark"] = {"load": "old-run"}
+        raw["assessment"]["criteria"]["performance"]["options"]["benchmark"] = {"load": "old-run"}
         with self.assertRaisesRegex(ValueError, "cannot load previous"):
             load_config(raw)
 
     def test_profile_tensor_fitness_source_is_strict(self) -> None:
         raw = minimal_config()
-        raw["evaluation"]["fitness_source"] = "profile_scores_mean"
+        raw["assessment"]["criteria"]["performance"]["options"]["fitness_source"] = "profile_scores_mean"
         config = load_config(raw)
-        self.assertEqual(config.evaluation.fitness_source, "profile_scores_mean")
+        self.assertEqual(config.resolved_profiles["validation"].performance.fitness_source, "profile_scores_mean")
 
-        raw["evaluation"]["fitness_source"] = "unknown"
+        raw["assessment"]["criteria"]["performance"]["options"]["fitness_source"] = "unknown"
         with self.assertRaisesRegex(ValueError, "fitness_source"):
             load_config(raw)
 
     def test_forbidden_candidate_imports_are_typed_and_validated(self) -> None:
         raw = minimal_config()
-        raw["evaluation"]["forbidden_candidate_imports"] = ["scipy.optimize", "pdfo"]
+        raw["execution"]["forbidden_candidate_imports"] = ["scipy.optimize", "pdfo"]
         config = load_config(raw)
         self.assertEqual(
-            config.evaluation.forbidden_candidate_imports,
+            config.resolved_profiles["validation"].performance.forbidden_candidate_imports,
             ("scipy.optimize", "pdfo"),
         )
-        raw["evaluation"]["forbidden_candidate_imports"] = ["not valid"]
+        raw["execution"]["forbidden_candidate_imports"] = ["not valid"]
         with self.assertRaisesRegex(ValueError, "dotted Python module names"):
             load_config(raw)
 
@@ -203,7 +221,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_docker_provider_transport_is_gateway_first_and_direct_is_double_opt_in(self) -> None:
         raw = minimal_config()
-        raw["evaluation"] = {
+        raw["execution"] = {
             "backend": "docker",
             "docker_image": "evaluator:test",
         }
@@ -222,7 +240,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_gateway_route_is_strict_and_credential_value_is_redacted(self) -> None:
         raw = minimal_config()
-        raw["evaluation"] = {
+        raw["execution"] = {
             "backend": "docker",
             "docker_image": "evaluator:test",
         }
@@ -271,7 +289,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_custom_worker_adapter_cannot_claim_the_builtin_gateway(self) -> None:
         raw = minimal_config()
-        raw["evaluation"] = {
+        raw["execution"] = {
             "backend": "docker",
             "docker_image": "evaluator:test",
         }
@@ -288,6 +306,85 @@ class ConfigTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "requires workers.adapter='cli'"):
             load_config(raw)
+
+
+    def test_disabled_criterion_options_are_still_key_checked(self):
+        # A disabled criterion is not reached by enabled-only option validation,
+        # so without this an omitted key stays stored until it is re-enabled.
+        raw = minimal_config()
+        raw["assessment"]["criteria"]["integrity"] = {
+            "enabled": False,
+            "options": {"allow_same_model": True, "bogus": 1},
+        }
+        with self.assertRaisesRegex(ValueError, "Unknown keys at assessment.criteria.integrity.options"):
+            load_config(raw)
+
+        raw["assessment"]["criteria"]["complexity"] = {"enabled": False, "options": {"nope": 1}}
+        raw["assessment"]["criteria"]["integrity"] = {"enabled": False, "options": {}}
+        with self.assertRaisesRegex(ValueError, "Unknown keys at assessment.criteria.complexity.options"):
+            load_config(raw)
+
+    def test_retired_option_key_is_named_rather_than_buried(self):
+        raw = minimal_config()
+        raw["assessment"]["criteria"]["integrity"] = {
+            "enabled": False,
+            "options": {"allow_same_model": True, "strict": True},
+        }
+        with self.assertRaisesRegex(ValueError, r"Removed config fields .*\['strict'\]"):
+            load_config(raw)
+
+    def test_misplaced_mode_in_options_is_caught_while_disabled(self):
+        # `mode` is a criterion-level field. The enabled-only guard rejected it, so a
+        # disabled criterion accepted it and then hard-failed once enabled. The key
+        # check now runs regardless of enablement.
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                raw = minimal_config()
+                raw["assessment"]["criteria"]["complexity"] = {
+                    "enabled": enabled, "weight": 1.0, "mode": "warn",
+                    "options": {"mode": "warn"},
+                }
+                with self.assertRaisesRegex(ValueError, "belongs on the criterion"):
+                    load_config(raw)
+
+    def test_valid_complexity_options_load_while_disabled(self):
+        raw = minimal_config()
+        raw["assessment"]["criteria"]["complexity"] = {
+            "enabled": False, "weight": 1.0, "mode": "warn",
+            "options": {"max_ratio": 1.2},
+        }
+        config = load_config(raw)
+        self.assertEqual(config.assessment.criteria["complexity"].options["max_ratio"], 1.2)
+
+    def test_omitting_a_default_enabled_criterion_warns_by_name(self):
+        # `criteria` replaces the defaults instead of patching them, so an omitted
+        # criterion is removed rather than disabled. That stays supported (it is
+        # how one standard is isolated) but must not be silent.
+        raw = minimal_config()
+        raw["assessment"] = {"criteria": {"performance": {"weight": 7}}}
+        with self.assertWarnsRegex(UserWarning, r"omits \['integrity'\]"):
+            load_config(raw)
+
+    def test_complete_criteria_map_does_not_warn(self):
+        raw = minimal_config()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            load_config(raw)
+        self.assertEqual(
+            [item for item in caught if "assessment.criteria omits" in str(item.message)], []
+        )
+
+    def test_disabled_criterion_keeps_placeholder_environment_reference(self):
+        # Disabling a criterion is a supported way to park a role whose provider
+        # is not configured yet, so its ${VAR} must not be resolved eagerly.
+        raw = minimal_config()
+        raw["assessment"]["criteria"]["integrity"] = {
+            "enabled": False,
+            "options": {"worker": {"harness": "codex", "model": "${OPE_UNSET_REVIEW_MODEL}"}},
+        }
+        with patch.dict(os.environ, {}, clear=True):
+            config = load_config(raw)
+        self.assertFalse(config.assessment.enabled("integrity"))
 
 
 if __name__ == "__main__":

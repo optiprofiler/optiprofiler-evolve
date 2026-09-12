@@ -25,16 +25,20 @@ agent, or problem libraries while working here. They are independent packages.
 
 ## Stable invariants
 
-- The engine is the sole writer of population state, candidate acceptance,
-  checkpoints, and authoritative events.
+- Controller commits are the sole writer of run state, candidate acceptance,
+  and checkpoints. The coordinator orders phases; application binds infrastructure
+  and the authoritative event sink.
 - Workers edit private candidate copies. They cannot see validation or hidden
   data, the immutable reference, OptiProfiler source, sibling repositories, the
   host home, or the Docker socket.
 - Public evaluation may guide workers. Validation is controller-only. Hidden is
   evaluated once after the champion is fixed and never feeds back.
-- Core workflow order remains `prepare -> explore -> validate -> hidden ->
-  report`. Optional research phases use the declared phase contracts; do not add
-  a generic DAG compiler.
+- The default workflow remains `prepare -> explore -> validate -> hidden ->
+  report`. Custom ordered lists, including empty lists, use declared artifact
+  contracts and preflight validation; do not add a generic DAG compiler.
+- Selecting a champion closes candidate admission and reselection. Hidden is
+  single-use even on failure; a required lockbox cannot be omitted when returning
+  a champion. Application constructs `EvolveResult`, independently of report.
 - A worker harness is a real Codex or Claude Code agent process, not a raw text
   completion. Provider support depends on the CLI's API dialect and tool loop.
 - Keep credentials in environment variables. Never write them into YAML, CLI
@@ -46,13 +50,37 @@ agent, or problem libraries while working here. They are independent packages.
 |---|---|
 | Public call | `src/optiprofiler_evolve/api.py` |
 | Typed config | `config.py`, `config.schema.json`, `docs/config-reference.md` |
-| Workflow contracts | `protocols.py`, `registry.py`, `phases/`, `steps/`, `policies/` |
-| Population and selection | `engine.py` |
-| CLI agents and isolation | `workers.py`, `harness.py`, `sandbox.py` |
-| OptiProfiler calls and public broker | `evaluation.py`, `broker.py` |
+| Workflow contracts | `phases/contracts.py`, `controller/contracts.py`, `controller/registry.py` |
+| Run composition and infrastructure lifecycle | `application/run.py` |
+| Population and selection | `controller/state.py`, `controller/commits.py`, `controller/coordinator.py`, `controller/selection.py` |
+| Phase input binding | `controller/phase_contexts.py` (see the layering note below), `controller/runtime.py` |
+| Attempts and policies | `phases/attempts/runner.py`, `phases/attempts/steps.py`, `phases/attempts/policies.py` |
+| Unified LLM entry and isolation | `agents/llm.py`, `agents/workers.py`, `agents/harness.py`, `agents/sandbox.py` |
+| OptiProfiler calls and public broker | `criteria/performance/evaluator.py`, `agents/broker.py` |
 | Solver/data boundaries | `solver.py`, `data.py` |
-| Research evidence | `research.py`, `phases/research.py` |
-| Events and local views | `events.py`, `provenance.py`, `viewers.py` |
+| Research evidence | `phases/_research.py`, `criteria/performance/evidence.py` |
+| Criteria and scoring | `criteria/contracts.py`, `criteria/runner.py`, `criteria/{performance,complexity,integrity}/` |
+| Events, reports and local views | `observability/`, `observability/views/` |
+
+Each phase has one module, `phases/<name>.py`, containing its class and specific
+context/result types. Keep subsystem-only helpers inside their owning package.
+Only genuinely cross-subsystem foundations belong at the package root, which is
+why `UsageRecord` and the worker-exit projection are defined in `models.py`:
+`agents` produces them and `observability` renders them, so any other owner makes
+those two packages mutually dependent. Do not reintroduce generic `shared` or
+`quality` buckets or single-file phase packages.
+
+`controller/phase_contexts.py` is the one place where the controller reaches into
+concrete phase modules. Each phase module already owns its context type, so the
+intended fix is a binding hook on the phase itself; until then, treat adding a new
+entry to that factory as adding to a known layering exception rather than as the
+established pattern. `tests/test_import_boundaries.py` records what is and is not
+permitted.
+
+Criteria own both `assess` and `generation_guidance`. Use `SolverJob` for solver
+proposal/edit tasks; the unified LLM entrypoint supplies their criterion guidance.
+Keep review jobs independent, and expose only explicitly public rule fields to
+generation guidance, never evaluation data, private results or credentials.
 
 When adding a config field, update the dataclass, JSON Schema, configuration
 reference, a checked-in example when relevant, and tests. Documentation tests

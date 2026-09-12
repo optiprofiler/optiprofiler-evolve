@@ -14,6 +14,13 @@ changed deliberately with matching tests.
 
 - The outer workflow is an ordered list of phases with explicit named
   `requires` and `provides` artifacts.
+- The default is `prepare -> explore -> validate -> hidden -> report`, not a
+  mandatory phase list. Custom lists may be empty. Preflight checks dependencies
+  in supplied order, unique resolved names and optional phase configuration hooks
+  before creating a run directory or infrastructure; it never sorts the list.
+- Available `optional_requires` inputs are passed without requiring a producer.
+  If a producer is configured, it must precede its optional consumer.
+  Successful and skipped phases must return exactly their declared outputs.
 - The built-in `explore` phase owns the iteration/island/attempt barrier loop.
 - A candidate attempt is an ordered list of steps.
 - After-iteration policies read one immutable snapshot and propose bounded
@@ -22,25 +29,53 @@ changed deliberately with matching tests.
 
 ## 3. State ownership
 
-- The engine is the sole writer of populations, accepted candidate records,
-  checkpoints, and authoritative event ordering.
+- `RunCommits` is the sole writer of `RunState`, including populations, accepted
+  candidate records, research registries and checkpoints. The coordinator orders
+  phases; application assembles infrastructure and the authoritative event sink.
+- Controller-owned variant helpers submit through that commit authority;
+  this is one authority, not a separate database per stage. Core stages return
+  typed results or call named controller commit operations. They never receive
+  the controller or an arbitrary state mutation interface.
 - Steps produce `StepResult`; policies produce `PopulationEdit`; neither may
   mutate controller state directly.
 - A failed component cannot leave a partially accepted candidate.
 - Validation and hidden results cannot enter a worker prompt. Controller-only
   validation may rank and retain candidates; hidden evaluates one
   validation-selected champion once and never affects the evolution loop.
+- Champion selection closes admission, finalist registration and reselection.
+  The controller checks the fixed champion's source hash before
+  authorizing hidden, and consumes that authorization before evaluation. Failure
+  cannot authorize a retry. A required lockbox needs hidden performance evaluation.
+- One `RunState` persists across phases; there are no per-phase state subclasses
+  or full-system snapshots. `prepared` is a frozen phase-owned data artifact.
+  Core result artifacts derive from their typed fields. Run state retains these
+  committed results, with read-only artifact and champion/final views rather than
+  separately writable copies. Optional phase extensions and defaults are defined
+  together in `phases/contracts.py`; assembly validates their dependencies.
+- Application constructs `EvolveResult` after successful workflow completion.
+  Without a champion, winner and score fields are `None`; without hidden, final
+  fields are absent (`None`/empty tuple). Report only produces report evidence.
+  Returned artifacts are a detached, top-level read-only mapping, not a deep
+  snapshot or a resume format. Exceptions and cancellation still propagate.
 
 ## 4. Extension contracts
 
 The supported extension slots are `Phase`, `AttemptStep`,
 `AfterIterationPolicy`, `RetentionPolicy`, `ParentSampler`, `CandidateReviewer`,
-`WorkerAdapter`, and `Evaluator`.
+`WorkerAdapter`, `Evaluator`, and `Criterion`.
 
 - A trusted custom component can be supplied directly without editing framework
   files.
 - A package built-in needs its implementation, one explicit registry entry, and
-  tests. It must not require an `engine.py` branch.
+  tests. Ordinary extensions must not require a coordinator branch. Core phases
+  that change controller authority also need explicit context/result bindings.
+- Each core and optional phase has a concrete class in `phases/<name>.py`,
+  alongside any core-specific context and result types. Helpers belong to their
+  owning subsystem, not a catch-all shared package. A directory must represent
+  a real multi-module subsystem, not merely wrap one class or one file.
+  Core context factories are registered by the controller; optional extensions
+  use `PhaseContext` and the existing five capabilities. There is no string
+  action dispatcher or controller mixin hierarchy behind the phase classes.
 - Registries are plain dictionaries. No auto-discovery or package entry-point
   framework is introduced before an external plugin actually requires it.
 - Process executors and Docker mechanics remain internal in v1. Harbor may be a
@@ -49,6 +84,18 @@ The supported extension slots are `Phase`, `AttemptStep`,
   cooperative cancellation event. It may add native evidence there, but it
   cannot replace controller-owned input/outcome manifests. A transcript-only
   adapter is supported with an explicitly degraded fallback trace.
+- `LLMClient.run(AgentJob)` is the sole backend invocation entrypoint for
+  mutation, research and review. Its controller-bound request fixes workspace,
+  provider, tool and broker authority. The client owns trace lifecycle and
+  declared output collection, but never candidate admission or phase scheduling.
+  Pure evaluation phases do not invoke a model.
+- Solver proposal/edit tasks use `SolverJob`. The LLM entrypoint combines their
+  task with criterion-owned generation guidance, using controller-bound public
+  rule fields and the invocation's available evaluation tools only. Tool
+  instructions must match those capabilities and the feedback format.
+  Review jobs never inherit those instructions. Each
+  `Criterion` owns both its assessment and its generation guidance; stages must
+  not hard-code standard-specific instructions or append special-case notes.
 - Trusted phases receive one frozen `ControllerServices` value capped at five
   operations: run a sanitized role agent, materialize a gated variant, evaluate
   a public variant, select IDs by controller validation, and register a finalist.
@@ -57,15 +104,22 @@ The supported extension slots are `Phase`, `AttemptStep`,
   exposed to workflow modules. Modules never receive a worker adapter or a raw
   subprocess launcher. Every future agent-invoking module therefore inherits
   the same controller-owned trace lifecycle by construction.
-- A research phase must not become a second engine. It may propose file-backed
-  artifacts and call these services; only the engine writes candidate and
+- A research phase must not become a second controller. It may propose file-backed
+  artifacts and call these services; only the controller writes candidate and
   population state.
 - Retention and parent sampling are read-only proposals over one bounded island
   archive. They cannot admit candidates, change lineage, exceed capacity, or
   bypass controller validation.
-- The semantic integrity gate is a non-removable engine operation after public
-  checks and before every validation query. Its reviewer implementation is
-  replaceable; an unsafe approval stub requires explicit double opt-in.
+- Quality criteria have equal authority: performance, complexity and integrity
+  can each be disabled, weighted, or enforced. A shared runner applies their
+  verdicts; only the controller admits candidates. Formal assessment requires
+  an enabled positive-weight criterion. Disabled checks never fabricate scores
+  or approval, and execution safety boundaries remain mandatory.
+  Criteria bind their own measurement dependencies through `Criterion.bind`;
+  controller assessment does not depend on concrete criterion instance fields.
+  `CandidateAssessment` is the controller assessment contract, while `Evaluator`
+  remains the numerical backend contract. Role job preparation receives worker
+  and trace dependencies only, never run state or commit authority.
 
 ## 5. Trust and isolation
 
@@ -83,13 +137,14 @@ The supported extension slots are `Phase`, `AttemptStep`,
 - Gateway-routed Docker workers receive neither the real provider credential
   nor the provider origin. They stay on an invocation-only internal network;
   only the short-lived sidecar may join its separate egress network.
-- The engine's final edit-scope, tree, interface, and candidate-safety gate is
+- The controller's final edit-scope, tree, interface, and candidate-safety gate is
   mandatory. An ablation may remove an evidence-producing audit step, not this
   gate.
 
 ## 6. Reproducibility
 
-Every run records:
+Every run records config, provenance, events and trace coverage. When the
+corresponding stages execute, it also records:
 
 - the canonical redacted resolved config and its hash;
 - package, Python, platform, component identity, component source hashes, worker
@@ -163,4 +218,41 @@ components.
 Do not introduce a god context, nested override mini-language, auto-discovery
 framework, public executor hierarchy, or second authoritative database. A new
 abstraction must remove demonstrated duplication or enable a concrete ablation
-that the current five extension contracts cannot express.
+that the supported extension contracts cannot express.
+
+## 10. Dependency direction
+
+Execution flow is not a strict package import hierarchy. The permitted
+collaborations are explicit; none grants a second state-writing authority.
+
+| Owner | Allowed dependency and boundary |
+|---|---|
+| Application | Resolve components through controller registries; inject criteria, reviewer factories and provenance identities. Matrix orchestration receives its run callable explicitly. |
+| Controller | Bind phase contexts and execution services; consume criterion and observability contracts. Never import application or the public API. |
+| Phases | Use phase contracts and bounded controller capabilities, never application or worker execution backends. |
+| Criteria | Use injected backends and reviewer factories; never import controller registries, phases or application. |
+| Observability | Consume supplied identities, events, snapshots, artifact files and agent-produced value types from the package root; never import `agents`, `controller`, `phases`, `criteria` or `application` modules. |
+
+Owner views may read documented controller artifact paths without importing
+controller implementations. Controller commits may write observability attempt
+records; those records are evidence, not a second candidate registry. Public
+disclosure stays default-deny and independent of private event reconstruction.
+
+Two tests enforce the table above by reading imports with `ast`, ignoring imports
+under `TYPE_CHECKING` because they do not exist at runtime and cannot create a
+cycle:
+
+- `tests/test_import_boundaries.py` covers the Criteria, Phases and Observability
+  rows. Its explicit allowlist contains only `phases -> controller.contracts`, the
+  published capability protocol; everything else it permits, it permits by not
+  forbidding it, so add an entry there when you rely on a new collaboration.
+- `tests/test_phase_layout.py` covers the Application and Controller rows,
+  including that the controller never imports application or the public API.
+
+One placement rule follows from those boundaries: a value type needed by two
+layers belongs at the package root. `UsageRecord` and the worker-exit projection
+live in `models.py` for this reason, because while they were owned by `agents` or
+by `observability` those two packages became mutually dependent.
+
+Layers the table does not mention are not thereby unconstrained; a new
+cross-package import is a change to this table and belongs in the same commit.

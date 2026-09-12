@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.events import EventWriter
-from optiprofiler_evolve.projections import project_public_events
-from optiprofiler_evolve.viewers import (
+from optiprofiler_evolve.observability.events import EventWriter
+from optiprofiler_evolve.observability.projections import project_public_events
+from optiprofiler_evolve.observability.views.public import (
     PUBLIC_BUNDLE_FILES,
     materialize_public_bundle,
     render_final_report,
@@ -31,6 +31,19 @@ def _write_public_events(path: Path, rows: list[tuple[str, str, str, dict, dict]
 
 
 class PublicViewerTests(unittest.TestCase):
+    def test_existing_public_allowlist_also_excludes_raw_eval_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "PUBLIC_REPORT.md").write_text("safe summary")
+            for folder in (root, root / "benchmark", root / "controller"):
+                folder.mkdir(exist_ok=True)
+                (folder / "eval_report.json").write_text("PRIVATE_EVAL_REPORT")
+                (folder / "eval_report.plot_data.json").write_text("PRIVATE_NUMERIC_DATA")
+            materialize_public_bundle(root)
+            paths = list((root / "public").iterdir())
+            self.assertEqual([path.name for path in paths], ["PUBLIC_REPORT.md"])
+            self.assertEqual(paths[0].read_text(), "safe summary")
+
     def test_status_escapes_public_values_and_uses_no_network(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

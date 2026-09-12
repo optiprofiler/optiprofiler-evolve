@@ -40,7 +40,7 @@ revision, and replace the commit pin with a release tag once one is published.
 The source checkout lives under `$RUNNER_TEMP`, outside the algorithm
 repository and outside the solver candidate.
 
-The example config sets `integrity_review.allow_same_model: true` so the demo
+The example config sets `assessment.criteria.integrity.options.allow_same_model: true` so the demo
 runs with a single provider account. That collapses reviewer independence and
 is acceptable only for a cheap demo; real experiments should review with a
 worker outside the mutation pool.
