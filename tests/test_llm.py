@@ -135,7 +135,9 @@ class LLMClientTests(unittest.TestCase):
         )
         result = self.client(behavior).run(job)
         self.assertTrue(result.success)
-        self.assertEqual(result.outputs, {"answer.json": self.workspace / "answer.json"})
+        self.assertEqual(
+            result.outputs, {"answer.json": (self.workspace / "answer.json").resolve()}
+        )
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(len(self.usage), 1)
         self.assertEqual(self.calls[0]["prompt"], job.prompt)

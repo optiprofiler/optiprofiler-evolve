@@ -194,7 +194,10 @@ class EvalReportBoundaryTests(unittest.TestCase):
             load_eval_report(self.path)
         self.assertNotIsInstance(failure.exception, UnsupportedEvalReport)
         # Feedback only needs the valid receipt, not unrelated score metadata.
-        self.assertEqual(private_eval_report_paths(self.path), {self.path, self.companion_path})
+        self.assertEqual(
+            private_eval_report_paths(self.path),
+            {self.path.resolve(), self.companion_path.resolve()},
+        )
 
     def test_available_channel_needs_a_representation(self):
         self.companion["histories"][0]["channels"]["objective"]["representation"] = None
@@ -283,7 +286,10 @@ class EvalReportBoundaryTests(unittest.TestCase):
 
     def test_receipt_discovery_does_not_read_numeric_companion(self):
         self.companion_path.unlink()
-        self.assertEqual(private_eval_report_paths(self.path), {self.path, self.companion_path})
+        self.assertEqual(
+            private_eval_report_paths(self.path),
+            {self.path.resolve(), self.companion_path.resolve()},
+        )
         with self.assertRaisesRegex(EvalReportError, "missing"):
             load_eval_report(self.path)
 

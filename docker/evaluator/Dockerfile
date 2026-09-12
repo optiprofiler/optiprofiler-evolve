@@ -35,7 +35,8 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md LICENSE /tmp/optiprofiler-evolve/
 COPY src /tmp/optiprofiler-evolve/src
-RUN pip install --no-cache-dir --no-deps /tmp/optiprofiler-evolve \
+RUN pip install --no-cache-dir /tmp/optiprofiler-evolve \
+    && pip check \
     && rm -rf /tmp/optiprofiler-evolve
 
 WORKDIR /output
