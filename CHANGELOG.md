@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Share view presentation and iteration grouping without changing rendered output.
+  Reuse validation scores between the owner index charts and attempt list.
+
 - Resolve assessment profiles once per immutable configuration and reuse their
   settings for execution, guidance, and provenance. Record each enabled review
   profile and collect all reviewer worker versions instead of assuming validation.

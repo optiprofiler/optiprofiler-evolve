@@ -5,6 +5,7 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import unquote
 
 from optiprofiler_evolve.observability.projections import project_public_events
@@ -12,6 +13,7 @@ from optiprofiler_evolve.observability.views.owner import (
     _lineage_lanes,
     _ordered_islands,
     _render_lineage_graph,
+    _render_owner_index,
     _render_score_chart,
     render_owner_views,
 )
@@ -291,6 +293,44 @@ def _hrefs(page: Path) -> list[str]:
 
 
 class OwnerViewTests(unittest.TestCase):
+    def test_index_reads_validation_scores_once_per_attempt(self):
+        state = {"attempts": [
+            {"attempt_id": "a", "iteration": 1, "status": "succeeded"},
+            {"attempt_id": "b", "iteration": 1, "status": "failed"},
+        ]}
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "optiprofiler_evolve.observability.views.owner._attempt_validation_score",
+            side_effect=[0.125, 0.875],
+        ) as read_score:
+            document = _render_owner_index(state, {}, Path(directory), None)
+        self.assertEqual(read_score.call_count, 2)
+        self.assertIn("Val 0.1250", document)
+        self.assertIn("Val 0.8750", document)
+
+    def test_iteration_groups_preserve_order_and_expansion(self):
+        from optiprofiler_evolve.observability.views._html import _render_attempt_groups
+
+        attempts = [
+            {"iteration": 2, "status": "succeeded", "attempt_id": "a"},
+            {"iteration": 1, "status": "failed", "attempt_id": "b"},
+            {"iteration": 3, "status": "succeeded", "attempt_id": "c"},
+            {"status": "succeeded", "attempt_id": "d"},
+            {"iteration": 2, "status": "succeeded", "attempt_id": "e"},
+        ]
+        groups = []
+
+        def render_members(members):
+            groups.append([member["attempt_id"] for member in members])
+            return ""
+
+        document = _render_attempt_groups(attempts, render_members)
+        self.assertEqual(groups, [["a", "e"], ["b"], ["c"], ["d"]])
+        self.assertEqual(
+            re.findall(r'<details class="iter-group"( open)?><summary>([^<]+)', document),
+            [("", "Iteration 2"), (" open", "Iteration 1"),
+             (" open", "Iteration 3"), ("", "Other attempts")],
+        )
+
     def test_all_island_lineage_highlights_cross_island_migration(self) -> None:
         points = [
             {

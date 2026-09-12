@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from optiprofiler_evolve.observability.views.public import _atomic_write, _mapping, _sequence
+from optiprofiler_evolve.observability.views._html import _atomic_write, _mapping, _sequence
 
 PREVIEW_MAX_BYTES = 65_536
 PREVIEW_HEAD_LINES = 100

@@ -34,16 +34,7 @@ from optiprofiler_evolve.observability.views._evidence import (
     unified_diff,
     write_owner_manifest,
 )
-from optiprofiler_evolve.observability.views._owner_assets import (
-    _BANNER,
-    _LIVE_REFRESH_HEAD,
-    _LIVE_REFRESH_SCRIPT,
-    _OWNER_STYLE,
-    _STARTED_BADGE,
-    _TRACE_FILES,
-    _WF_SCRIPT,
-)
-from optiprofiler_evolve.observability.views.public import (
+from optiprofiler_evolve.observability.views._html import (
     _STYLE,
     _atomic_write,
     _duration_text,
@@ -52,6 +43,7 @@ from optiprofiler_evolve.observability.views.public import (
     _label,
     _mapping,
     _parse_ts,
+    _render_attempt_groups,
     _render_coverage,
     _render_iterations,
     _render_matrix,
@@ -59,6 +51,15 @@ from optiprofiler_evolve.observability.views.public import (
     _sequence,
     _status_icon,
     _status_line,
+)
+from optiprofiler_evolve.observability.views._owner_assets import (
+    _BANNER,
+    _LIVE_REFRESH_HEAD,
+    _LIVE_REFRESH_SCRIPT,
+    _OWNER_STYLE,
+    _STARTED_BADGE,
+    _TRACE_FILES,
+    _WF_SCRIPT,
 )
 
 
@@ -230,7 +231,12 @@ def _render_owner_index(
     points = _score_points(state, details, run_dir)
     score_timeline = _render_score_timeline(points)
     lineage = _render_lineage(points)
-    attempts = _render_owner_attempt_groups(state.get("attempts"), details, now, run_dir=run_dir)
+    attempts = _render_owner_attempt_groups(
+        state.get("attempts"),
+        details,
+        now,
+        validation_scores={point["attempt_id"]: point["validation"] for point in points},
+    )
     roles = _render_owner_roles(state.get("roles"), now, details=details)
     coverage = _render_coverage(state.get("trace_coverage"))
     document = f"""<!doctype html>
@@ -1321,7 +1327,18 @@ def _render_phase_page(
         matrix = _render_matrix(state.get("matrix"), attempts_by_id, now)
         policy = _render_population_policy(run_dir)
         attempts = _render_owner_attempt_groups(
-            state.get("attempts"), details, now, run_dir=run_dir, prefix="../attempts"
+            state.get("attempts"),
+            details,
+            now,
+            validation_scores={
+                attempt_id: _attempt_validation_score(
+                    _mapping(_mapping(details.get("attempts")).get(attempt_id)),
+                    run_dir,
+                    attempt_id,
+                )
+                for attempt_id in attempts_by_id
+            },
+            prefix="../attempts",
         )
         sections.append(f'<section class="owner-section"><h2>Island matrix</h2>{matrix}</section>')
         sections.append(
@@ -1482,34 +1499,12 @@ def _render_owner_attempt_groups(
     details: Mapping[str, Any],
     now: datetime | None,
     *,
-    run_dir: Path,
+    validation_scores: Mapping[str, float | None],
     prefix: str = "owner/attempts",
 ) -> str:
-    attempts = _sequence(values)
-    if not attempts:
-        return '<p class="empty">No candidate attempts recorded yet.</p>'
-    groups: dict[object, list[Mapping[str, Any]]] = {}
-    order: list[object] = []
-    for value in attempts:
-        attempt = _mapping(value)
-        iteration = attempt.get("iteration")
-        if iteration not in groups:
-            groups[iteration] = []
-            order.append(iteration)
-        groups[iteration].append(attempt)
-    latest = max(
-        (iteration for iteration in groups if isinstance(iteration, int)),
-        default=None,
-    )
     private_attempts = _mapping(details.get("attempts"))
-    sections = []
-    for iteration in order:
-        members = groups[iteration]
-        active = any(
-            _safe_status(member.get("status")) in {"running", "failed"} for member in members
-        )
-        open_attr = " open" if iteration == latest or active else ""
-        title = f"Iteration {iteration}" if iteration is not None else "Other attempts"
+
+    def render_members(members: list[Mapping[str, Any]]) -> str:
         rows = []
         for member in members:
             attempt_id = str(member.get("attempt_id"))
@@ -1518,7 +1513,7 @@ def _render_owner_attempt_groups(
             display = _attempt_display_status(status, private)
             score = _attempt_public_score(member, private)
             score_text = f"{score:.4f}" if isinstance(score, (int, float)) else "-"
-            validation = _attempt_validation_score(private, run_dir, attempt_id)
+            validation = validation_scores[attempt_id]
             validation_text = _score_number(validation)
             island = member.get("island")
             failure_note = ""
@@ -1536,12 +1531,9 @@ def _render_owner_attempt_groups(
                 f'<span class="score">Val {_h(validation_text)}</span>'
                 f'<span class="dur">{_h(_duration_text(member, now))}</span></a>'
             )
-        sections.append(
-            f'<details class="iter-group"{open_attr}><summary>{_h(title)}'
-            f'<span class="count">{len(members)} attempts</span></summary>{"".join(rows)}'
-            "</details>"
-        )
-    return "".join(sections)
+        return "".join(rows)
+
+    return _render_attempt_groups(values, render_members)
 
 
 def _render_owner_roles(

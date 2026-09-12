@@ -401,3 +401,8 @@ modifies the original input.
 
 The normative rules are in the
 [architecture constitution](architecture-constitution.md).
+
+HTML presentation helpers and iteration grouping live in `observability/views/_html.py`.
+Public and owner renderers retain responsibility for selecting their inputs; the
+shared helpers do not read events or controller artifacts. The owner index reads
+validation scores once per attempt and reuses them in charts and the attempt list.
