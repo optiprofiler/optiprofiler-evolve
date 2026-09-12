@@ -121,6 +121,7 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
             reference = root / "reference"
             candidate.mkdir()
             reference.mkdir()
+            (candidate / "solver.py").write_text("def solver(fun, x0): return x0\n")
             data = DataPlan(
                 library="s2mpj",
                 selection={},
@@ -144,7 +145,10 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
                 ),
             )
             completed = types.SimpleNamespace(returncode=1, stdout="expected test failure")
-            with patch("optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", return_value=completed):
+            with (
+                patch("optiprofiler_evolve.criteria.performance.numeric_host.NumericEvaluationSession.run", return_value=completed),
+                patch("optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", return_value=completed),
+            ):
                 result = evaluator.evaluate(candidate, "public", root / "output")
             self.assertFalse(result.success)
             self.assertIn("code 1", result.error or "")
@@ -290,8 +294,10 @@ class DockerRequestStagingTests(unittest.TestCase):
 
     def _run_and_capture(self, evaluator, candidate, output_dir, *, timeout=False):
         seen = {}
+        candidate.mkdir(exist_ok=True)
+        (candidate / "solver.py").write_text("def solver(fun, x0): return x0\n")
 
-        def fake_run(command, **kwargs):
+        def fake_run(command, *args, **kwargs):
             if list(command[:2]) == ["docker", "rm"]:
                 return types.SimpleNamespace(returncode=0, stdout="")
             mount = next(item for item in command if ",dst=/request" in str(item))
@@ -305,8 +311,9 @@ class DockerRequestStagingTests(unittest.TestCase):
                 raise subprocess.TimeoutExpired(cmd=command, timeout=1, output=b"late")
             return types.SimpleNamespace(returncode=7, stdout="evaluator refused")
 
-        with patch(
-            "optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", side_effect=fake_run
+        with (
+            patch("optiprofiler_evolve.criteria.performance.numeric_host.NumericEvaluationSession.run", side_effect=fake_run),
+            patch("optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", side_effect=fake_run),
         ):
             result = evaluator.evaluate(candidate, "smoke", output_dir)
         return seen, result
@@ -363,7 +370,8 @@ class DockerRequestStagingTests(unittest.TestCase):
             # Writable on purpose: the in-container runner unlinks the request
             # (real problem names) before candidate code can run.
             self.assertNotIn("readonly", request_mount)
-            for destination in ("/candidate", "/reference"):
+            self.assertNotIn("dst=/candidate", " ".join(command))
+            for destination in ("/reference",):
                 mount = next(item for item in command if f",dst={destination}" in item)
                 self.assertIn("readonly", mount)
             joined = " ".join(command)
@@ -378,6 +386,7 @@ class DockerRequestStagingTests(unittest.TestCase):
             evaluator = self._make_evaluator(root)
             workspace = root / "workspace"
             workspace.mkdir()
+            (workspace / "solver.py").write_text("def solver(fun, x0): return x0\n")
             control = root / "controller" / "brokers" / "cand"
             broker = EvaluationBroker(
                 workspace=workspace,
@@ -391,7 +400,7 @@ class DockerRequestStagingTests(unittest.TestCase):
 
             seen = {}
 
-            def fake_run(command, **kwargs):
+            def fake_run(command, *args, **kwargs):
                 if list(command[:2]) == ["docker", "rm"]:
                     return types.SimpleNamespace(returncode=0, stdout="")
                 mount = next(item for item in command if ",dst=/request" in str(item))
@@ -399,8 +408,9 @@ class DockerRequestStagingTests(unittest.TestCase):
                 seen["source_parent"] = source.parent
                 return types.SimpleNamespace(returncode=7, stdout="refused")
 
-            with patch(
-                "optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", side_effect=fake_run
+            with (
+                patch("optiprofiler_evolve.criteria.performance.numeric_host.NumericEvaluationSession.run", side_effect=fake_run),
+                patch("optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", side_effect=fake_run),
             ):
                 broker._evaluate_and_publish("smoke", output)
 

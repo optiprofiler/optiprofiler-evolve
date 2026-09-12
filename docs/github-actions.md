@@ -34,7 +34,7 @@ The files above are the package-repository example. For a separate algorithm
 repository, use
 [`examples/external-repository/`](../examples/external-repository/README.md).
 That workflow fetches a pinned package revision into `$RUNNER_TEMP`, builds the
-three images from that clean source tree, and runs the experiment script stored
+four images from that clean source tree, and runs the experiment script stored
 with the solver. Merely copying `examples/github-actions/evolve.yml` into an
 algorithm repository is insufficient because `pip install -e .` and the Docker
 build contexts in that file deliberately refer to this package repository.
@@ -46,10 +46,13 @@ never calls a paid model and defines no provider secrets. The `python` job runs
 the complete unit suite — including the strategy-analysis contract tests that
 script an analyst for the verified-ablation path, the declared
 `not_decomposable` path, and the analyst-failure path — with stub agent
-runners. The `docker` job builds the three runtime images, probes worker
+runners. The `docker` job builds the four runtime images, probes worker
 container isolation and the gateway transport against a fake in-network
 upstream, and scores a seed candidate inside the real evaluator container on a
-single problem with opaque naming (`OPE_RUN_DOCKER_TESTS=1`).
+small problem sets with opaque naming (`OPE_RUN_DOCKER_TESTS=1`). It also checks
+scorer-tampering denial, u/b/l/n numeric calls, budget exceptions, missing runtime
+failure and timeout cleanup. The separate `harbor` job checks the optional
+Harbor worker lifecycle with a synthetic CLI and no model credentials.
 
 Real end-to-end evolution runs — actual coding models through the provider
 gateway — are owner-run only, with credentials supplied outside version
@@ -85,7 +88,7 @@ private storage.
 ## Current template scope
 
 The checked-in template uses the Claude Code example on a GitHub-hosted Linux
-runner and builds all three Docker images. Adapt the provider mapping for Codex
+runner and builds all four Docker images. Adapt the provider mapping for Codex
 or a compatible endpoint as described in [Model providers](providers.md).
 Long or costly studies should use a controlled self-hosted runner and explicit
 job timeout, concurrency, model budget, and artifact-retention settings.

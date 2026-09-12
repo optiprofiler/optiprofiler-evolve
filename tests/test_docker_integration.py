@@ -266,6 +266,114 @@ if __name__ == "__main__":
 class DockerEvaluatorIntegrationTests(unittest.TestCase):
     """Deterministic in-container scoring smoke: no model, no secrets."""
 
+    def _source_evaluation(self, root, source, *, problems=("ROSENBR",), **overrides):
+        from optiprofiler_evolve.config import EvaluationConfig
+        from optiprofiler_evolve.criteria.performance.evaluator import DockerOptiProfilerEvaluator
+        from optiprofiler_evolve.data import DataPlan
+        from optiprofiler_evolve.solver import InterfaceSpec
+
+        for name in ("candidate", "reference"):
+            (root / name).mkdir()
+            (root / name / "solver.py").write_text(source)
+        data = DataPlan(
+            library="s2mpj", selection={}, universe=problems, public=problems,
+            validation=(), hidden=(), smoke=problems, split_seed=0,
+            split_fingerprint="ci-numeric", aliases={p: f"P_{i}" for i, p in enumerate(problems)},
+        )
+        options = dict(backend="docker", docker_image=EVALUATOR_IMAGE,
+                       timeout_seconds=120, cpus=2, memory="2g", pids_limit=256,
+                       benchmark={"ptype": "ubln", "max_eval_factor": 2,
+                                  "n_jobs": 2, "score_only": True})
+        options.update(overrides)
+        evaluator = DockerOptiProfilerEvaluator(
+            reference=root / "reference", interface=InterfaceSpec.parse("solver.py:solver"),
+            data=data, config=EvaluationConfig(**options),
+        )
+        return evaluator
+
+    def test_numeric_boundary_preserves_ubln_budget_and_parallel_calls(self) -> None:
+        source = """import numpy as np
+def solver(fun, x0, *args):
+    if len(args) == 8:
+        assert args[-2](x0).ndim == 1
+        assert args[-1](x0).ndim == 1
+    for i in range(100):
+        try:
+            fun(x0 + i * 0.01)
+        except StopIteration:
+            return x0
+    raise AssertionError('The objective evaluation limit was not enforced.')
+"""
+        with tempfile.TemporaryDirectory(prefix=".docker-ubln-", dir=Path.cwd()) as directory:
+            root = Path(directory)
+            evaluator = self._source_evaluation(
+                root, source, problems=("ROSENBR", "HS5", "HS21", "HS23"),
+            )
+            result = evaluator.evaluate(root / "candidate", "smoke", root / "results")
+            self.assertTrue(result.success, (root / "results/evaluator.log").read_text())
+            self.assertAlmostEqual(result.score, 0.5)
+            calls = json.loads((root / "results/numeric_calls.json").read_text())["calls"]
+            self.assertEqual(len(calls), 4)
+            self.assertTrue(all(c["outcome"] == "returned" for c in calls), calls)
+            # n=2, max_eval_factor=2: 8 calls then StopIteration on call 9.
+            # Only the nonlinear case adds one cub and one ceq request.
+            self.assertEqual(sorted(c["oracle_calls"] for c in calls), [9, 9, 9, 11])
+
+    def test_candidate_cannot_read_scorer_files_or_reach_network(self) -> None:
+        source = """def solver(fun, x0):
+    from pathlib import Path
+    import socket
+    import importlib.util
+    assert importlib.util.find_spec('optiprofiler') is None
+    assert importlib.util.find_spec('optiprofiler_evolve') is None
+    for name in ('/reference', '/output', '/request', '/problem-libraries', '/var/run/docker.sock'):
+        assert not Path(name).exists(), name
+    try:
+        socket.create_connection(('1.1.1.1', 80), timeout=0.2)
+    except OSError:
+        pass
+    else:
+        raise AssertionError('Unexpected external network access.')
+    fun(x0)
+    return x0
+"""
+        with tempfile.TemporaryDirectory(prefix=".docker-private-", dir=Path.cwd()) as directory:
+            root = Path(directory)
+            evaluator = self._source_evaluation(root, source)
+            (root / "reference/solver.py").write_text("def solver(fun, x0): fun(x0); return x0\n")
+            result = evaluator.evaluate(root / "candidate", "smoke", root / "results")
+            self.assertTrue(result.success, (root / "results/evaluator.log").read_text())
+            self.assertAlmostEqual(result.score, 0.5)
+            calls = json.loads((root / "results/numeric_calls.json").read_text())["calls"]
+            self.assertEqual([(c["outcome"], c["oracle_calls"]) for c in calls], [("returned", 1)])
+
+    def test_missing_solver_runtime_fails_closed_instead_of_scoring_fallback(self) -> None:
+        with tempfile.TemporaryDirectory(prefix=".docker-missing-", dir=Path.cwd()) as directory:
+            root = Path(directory)
+            evaluator = self._source_evaluation(
+                root, "def solver(fun, x0): return x0\n",
+                solver_image="ope-nonexistent-numeric-runtime:negative-control",
+            )
+            result = evaluator.evaluate(root / "candidate", "smoke", root / "results")
+            self.assertFalse(result.success)
+
+    def test_solver_timeout_cleans_up_scorer_and_candidate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix=".docker-timeout-", dir=Path.cwd()) as directory:
+            root = Path(directory)
+            evaluator = self._source_evaluation(
+                root, "def solver(fun, x0):\n    import time\n    time.sleep(120)\n    return x0\n",
+                timeout_seconds=10,
+            )
+            (root / "reference/solver.py").write_text("def solver(fun, x0): return x0\n")
+            before = set(_run(["docker", "ps", "-aq", "--filter", "name=ope-solver-"]).stdout.split())
+            started = time.monotonic()
+            result = evaluator.evaluate(root / "candidate", "smoke", root / "results")
+            self.assertFalse(result.success)
+            self.assertIn("124", result.error)
+            self.assertLess(time.monotonic() - started, 40)
+            after = set(_run(["docker", "ps", "-aq", "--filter", "name=ope-solver-"]).stdout.split())
+            self.assertEqual(after - before, set())
+
     def test_candidate_cannot_replace_the_trusted_benchmark(self) -> None:
         from optiprofiler_evolve.config import EvaluationConfig
         from optiprofiler_evolve.criteria.performance.evaluator import DockerOptiProfilerEvaluator
@@ -301,9 +409,12 @@ class DockerEvaluatorIntegrationTests(unittest.TestCase):
                 ),
             )
             result = evaluator.evaluate(root / "candidate", "smoke", root / "results")
-            self.assertTrue(result.success, result.error)
+            self.assertTrue(result.success, f"{result.error}\n{(root / 'results/evaluator.log').read_text()}")
             # Both solvers return x0. Candidate-side imports must not forge a win.
             self.assertAlmostEqual(result.score, 0.5, places=6)
+            calls = json.loads((root / "results/numeric_calls.json").read_text())["calls"]
+            self.assertTrue(calls)
+            self.assertTrue(all(call["outcome"] == "returned" for call in calls), calls)
 
     def test_evaluator_scores_a_seed_candidate_in_container(self) -> None:
         from optiprofiler_evolve.config import EvaluationConfig

@@ -6,6 +6,7 @@ remains `workers.adapter: cli`. To use Harbor, install on Python 3.12 or newer:
 ```bash
 python -m pip install 'optiprofiler-evolve[harbor]'
 docker compose version
+docker build -f docker/solver/Dockerfile -t optiprofiler-evolve-solver:latest .
 ```
 
 Use your existing gateway-enabled experiment configuration and change only:
@@ -81,6 +82,10 @@ Worker isolation is not the same as candidate evaluation isolation. Harbor
 does not, by itself, separate arbitrary solver code from an evaluator's Python
 interpreter. The evaluator boundary must be verified independently; do not
 interpret this backend as certification against benchmark tampering.
+
+The Docker evaluator now uses a separate numeric-only solver image and a
+bounded JSON oracle protocol. See [numeric isolation](numeric-isolation.md).
+Both the scorer and solver image must be rebuilt when upgrading this boundary.
 
 This first adapter adds an optional backend rather than claiming a reduction
 in total code size. The common container specification avoids duplicating

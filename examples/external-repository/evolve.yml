@@ -53,6 +53,10 @@ jobs:
             -t optiprofiler-evolve-evaluator:latest \
             "$OPTIPROFILER_EVOLVE_SOURCE"
           docker build \
+            -f "$OPTIPROFILER_EVOLVE_SOURCE/docker/solver/Dockerfile" \
+            -t optiprofiler-evolve-solver:latest \
+            "$OPTIPROFILER_EVOLVE_SOURCE"
+          docker build \
             -f "$OPTIPROFILER_EVOLVE_SOURCE/docker/gateway/Dockerfile" \
             -t optiprofiler-evolve-gateway:latest \
             "$OPTIPROFILER_EVOLVE_SOURCE"

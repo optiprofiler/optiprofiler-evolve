@@ -30,6 +30,7 @@ jobs:
       - uses: actions/checkout@v7
       - run: docker build -f docker/worker/Dockerfile -t optiprofiler-evolve-worker:ci .
       - run: docker build -f docker/evaluator/Dockerfile -t optiprofiler-evolve-evaluator:ci .
+      - run: docker build -f docker/solver/Dockerfile -t optiprofiler-evolve-solver:latest .
       - run: docker build -f docker/gateway/Dockerfile -t optiprofiler-evolve-gateway:ci .
       - run: docker run --rm --entrypoint python optiprofiler-evolve-evaluator:ci -m pip check
       - run: >-

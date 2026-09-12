@@ -8,6 +8,7 @@ from pathlib import Path
 
 from optiprofiler_evolve.config import EvaluationConfig
 from optiprofiler_evolve.criteria.performance.evaluator import PythonOptiProfilerEvaluator
+from optiprofiler_evolve.criteria.performance.numeric_proxy import ScorerRelay
 from optiprofiler_evolve.data import DataPlan
 from optiprofiler_evolve.solver import InterfaceSpec
 
@@ -22,15 +23,17 @@ def main() -> int:
         data_raw[key] = tuple(data_raw[key])
     data = DataPlan(**data_raw)
     evaluation = EvaluationConfig(**request["evaluation"])
-    evaluator = PythonOptiProfilerEvaluator(
-        reference=Path(request["reference"]),
-        interface=InterfaceSpec.parse(request["interface"]),
-        data=data,
-        config=evaluation,
-    )
-    result = evaluator.evaluate(
-        Path(request["candidate"]), request["mode"], Path(request["output_dir"])
-    )
+    with ScorerRelay(evaluation.timeout_seconds) as proxy:
+        evaluator = PythonOptiProfilerEvaluator(
+            reference=Path(request["reference"]),
+            interface=InterfaceSpec.parse(request["interface"]),
+            data=data,
+            config=evaluation,
+            candidate_proxy=proxy,
+        )
+        result = evaluator.evaluate(
+            Path(request["candidate"]), request["mode"], Path(request["output_dir"])
+        )
     return 0 if result.success else 1
 
 

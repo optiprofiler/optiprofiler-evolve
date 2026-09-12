@@ -688,6 +688,11 @@
           ],
           "default": null
         },
+        "solver_image": {
+          "type": "string",
+          "minLength": 1,
+          "default": "optiprofiler-evolve-solver:latest"
+        },
         "timeout_seconds": {
           "type": "integer",
           "minimum": 1,

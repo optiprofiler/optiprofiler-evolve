@@ -24,13 +24,16 @@
   directory and mounted into the evaluator as its parent directory, deliberately
   writable rather than read-only: the in-container runner unlinks the request file
   (which carries real problem names) before candidate code can run, and a
-  read-only bind would break that scrubbing. Candidate and reference are mounted
-  read-only. Nothing here enters the worker-readable artifact tree.
+  read-only bind would break that scrubbing. The reference is mounted read-only;
+  the candidate is not mounted into the scorer at all. Nothing here enters the
+  worker-readable artifact tree.
 - Canonical evaluation runs after the worker exits and rejects symbolic links,
   special files, excessive tree size, invalid interfaces, and edits outside the
   declared scope.
-- The evaluator is a separate no-network Docker container. Candidate and
-  immutable reference mounts are read-only.
+- The evaluator and each numeric candidate invocation are separate no-network
+  Docker containers. Only the scorer can import OptiProfiler, the immutable
+  reference, and problem providers. A bounded numeric protocol retains callback
+  and scoring authority there; candidates cannot inspect Python callback state.
 - PyCUTEst receives a fresh in-memory cache for each evaluation. That tmpfs is
   executable because CUTEst problems are compiled extension modules; it is not
   mounted from or persisted to the host. The remaining temporary filesystem is
@@ -93,20 +96,18 @@ allowlist fed exclusively by the sanitized public event projection. Owner
 evidence packaging (`scripts/pack_owner_evidence.py`) is explicit-only and
 refuses symlinks and paths outside the run directory.
 
-## Current limitation
+## Limits and verification
 
-The Python candidate function executes in the same interpreter as
-`optiprofiler.benchmark` inside the evaluator container. Read-only mounts prevent
-persistent modification, but intentionally hostile Python can still inspect or
-monkey-patch its evaluation process, including the temporary public-name proxy.
-The artifact sanitizer blocks direct-string disclosure but cannot prevent an
-adversarial solver from encoding that information. The alpha release therefore
-assumes research workers optimize the solver rather than attack the scorer.
+See [numeric isolation](numeric-isolation.md) for the runtime images, protocol,
+resource boundaries, and real-Docker negative controls. `unsafe_local` explicitly
+executes trusted candidate code in the evaluator interpreter and provides no
+such protection. It is not a fallback for missing Docker images.
 
-Before untrusted public execution or paper-grade hidden evaluation, add a
-candidate execution protocol with a narrower callback boundary and adversarial
-runtime regression tests. The current reviewer is an independent semantic gate,
-not a substitute for process-level isolation from a hostile solver.
+Image contents are owner-controlled. A custom numeric image must not contain
+benchmark/provider source or credentials. Container isolation is not a proof
+against kernel vulnerabilities, benchmark overfitting, or malicious trusted
+controller configuration. The reviewer remains an independent semantic gate,
+not a formal security proof.
 
 The default gateway path is provider-only and route pinned. Brokered shell
 egress and package installation are intentionally unavailable. The optional

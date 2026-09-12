@@ -39,11 +39,13 @@ class PythonOptiProfilerEvaluator:
         interface: InterfaceSpec,
         data: DataPlan,
         config: EvaluationConfig,
+        candidate_proxy: Any = None,
     ) -> None:
         self.reference = reference.resolve()
         self.interface = interface
         self.data = data
         self.config = config
+        self.candidate_proxy = candidate_proxy
         self._lock = threading.RLock()
 
     def evaluate(self, candidate: Path, mode: str, output_dir: Path) -> EvaluationResult:
@@ -53,13 +55,17 @@ class PythonOptiProfilerEvaluator:
         result_path = output_dir / "result.json"
         try:
             with self._lock:
-                validate_interface(candidate, self.interface, "python")
+                if self.candidate_proxy is None:
+                    validate_interface(candidate, self.interface, "python")
                 candidate_modules: set[str] = set()
                 reference_modules: set[str] = set()
                 try:
-                    candidate_solver, candidate_modules = _load_python_solver(
-                        candidate.resolve(), self.interface, "candidate"
-                    )
+                    if self.candidate_proxy is None:
+                        candidate_solver, candidate_modules = _load_python_solver(
+                            candidate.resolve(), self.interface, "candidate"
+                        )
+                    else:
+                        candidate_solver = self.candidate_proxy
                     reference_solver, reference_modules = _load_python_solver(
                         self.reference, self.interface, "reference"
                     )
@@ -215,7 +221,10 @@ class DockerOptiProfilerEvaluator:
         self.config = config
 
     def evaluate(self, candidate: Path, mode: str, output_dir: Path) -> EvaluationResult:
+        from .numeric_host import NumericEvaluationSession
+
         candidate = candidate.resolve()
+        validate_interface(candidate, self.interface, "python")
         output_dir = output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
         data_manifest = _scoped_data_manifest(self.data, mode)
@@ -242,15 +251,17 @@ class DockerOptiProfilerEvaluator:
         ) as request_dir:
             request_path = Path(request_dir) / "evaluation_request.json"
             request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+            runtime_path = Path(request_dir) / "numeric_runtime.py"
+            runtime_path.write_bytes(Path(__file__).with_name("numeric_runtime.py").read_bytes())
             command = self.command(candidate, output_dir, container_name, request_path)
             try:
-                completed = subprocess.run(
-                    command,
-                    text=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    timeout=self.config.timeout_seconds,
-                    check=False,
+                session = NumericEvaluationSession(
+                    candidate, self.interface, self.config, runtime_path
+                )
+                completed = session.run(command, container_name)
+                (output_dir / "numeric_calls.json").write_text(
+                    json.dumps({"schema": "numeric_calls/1", "calls": session.records}, indent=2)
+                    + "\n", encoding="utf-8",
                 )
                 log = completed.stdout
                 returncode = completed.returncode
@@ -310,6 +321,7 @@ class DockerOptiProfilerEvaluator:
             "docker",
             "run",
             "--rm",
+            "-i",
             "--init",
             "--name",
             container_name,
@@ -346,8 +358,6 @@ class DockerOptiProfilerEvaluator:
             "MKL_NUM_THREADS=1",
             "--env",
             "NUMEXPR_NUM_THREADS=1",
-            "--mount",
-            f"type=bind,src={candidate},dst=/candidate,readonly",
             "--mount",
             f"type=bind,src={self.reference},dst=/reference,readonly",
             "--mount",

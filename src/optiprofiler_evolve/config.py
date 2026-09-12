@@ -200,6 +200,7 @@ class EvaluationExecutionConfig:
 
     backend: str = "docker"
     docker_image: str | None = None
+    solver_image: str = "optiprofiler-evolve-solver:latest"
     timeout_seconds: int = 3600
     cpus: float = 2.0
     memory: str = "4g"
@@ -216,6 +217,8 @@ class EvaluationExecutionConfig:
             raise ValueError("evaluation.backend must be 'docker' or 'unsafe_local'.")
         if self.timeout_seconds < 1:
             raise ValueError("evaluation.timeout_seconds must be positive.")
+        if not self.solver_image:
+            raise ValueError("evaluation.solver_image must name a numeric-only runtime image.")
         if self.cpus <= 0 or self.pids_limit < 16 or not self.memory:
             raise ValueError(
                 "evaluation cpus/memory must be set and pids_limit must be at least 16."
