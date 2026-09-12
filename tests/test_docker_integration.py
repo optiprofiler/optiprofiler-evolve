@@ -266,6 +266,45 @@ if __name__ == "__main__":
 class DockerEvaluatorIntegrationTests(unittest.TestCase):
     """Deterministic in-container scoring smoke: no model, no secrets."""
 
+    def test_candidate_cannot_replace_the_trusted_benchmark(self) -> None:
+        from optiprofiler_evolve.config import EvaluationConfig
+        from optiprofiler_evolve.criteria.performance.evaluator import DockerOptiProfilerEvaluator
+        from optiprofiler_evolve.data import DataPlan
+        from optiprofiler_evolve.solver import InterfaceSpec
+
+        with tempfile.TemporaryDirectory(prefix=".docker-tamper-", dir=Path.cwd()) as directory:
+            root = Path(directory)
+            for name in ("candidate", "reference"):
+                (root / name).mkdir()
+            (root / "reference/solver.py").write_text("def solver(fun, x0): return x0\n")
+            (root / "candidate/solver.py").write_text(
+                "try:\n"
+                "    import optiprofiler\n"
+                "except ImportError:\n"
+                "    pass\n"
+                "else:\n"
+                "    optiprofiler.benchmark = lambda *a, **kw: ([1., 0.], None, None)\n"
+                "def solver(fun, x0): return x0\n"
+            )
+            data = DataPlan(
+                library="s2mpj", selection={}, universe=("ROSENBR",),
+                public=("ROSENBR",), validation=(), hidden=(), smoke=("ROSENBR",),
+                split_seed=0, split_fingerprint="ci-tamper-negative",
+                aliases={"ROSENBR": "P_OPAQUE_CI"},
+            )
+            evaluator = DockerOptiProfilerEvaluator(
+                reference=root / "reference", interface=InterfaceSpec.parse("solver.py:solver"),
+                data=data, config=EvaluationConfig(
+                    backend="docker", docker_image=EVALUATOR_IMAGE, timeout_seconds=120,
+                    cpus=1, memory="2g", pids_limit=256,
+                    benchmark={"max_eval_factor": 5, "n_jobs": 1, "score_only": True},
+                ),
+            )
+            result = evaluator.evaluate(root / "candidate", "smoke", root / "results")
+            self.assertTrue(result.success, result.error)
+            # Both solvers return x0. Candidate-side imports must not forge a win.
+            self.assertAlmostEqual(result.score, 0.5, places=6)
+
     def test_evaluator_scores_a_seed_candidate_in_container(self) -> None:
         from optiprofiler_evolve.config import EvaluationConfig
         from optiprofiler_evolve.criteria.performance.evaluator import DockerOptiProfilerEvaluator
