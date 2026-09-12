@@ -114,14 +114,15 @@ controller interruption, recovery marks unfinished invocations explicitly and
 adds only missing index rows. A torn final JSONL row is removed before
 reconciliation; complete earlier rows are not rewritten. The per-invocation
 manifests remain authoritative, so the index can be reconstructed by scanning
-them. Internal recovery tooling calls `trace_ledger.reconcile_trace_run` using
-the persisted run provenance; this does not add another public package API.
+them. `trace_ledger.reconcile_trace_run` rebuilds the index from the persisted
+run provenance for a caller that supplies the run directory; it is exercised by
+the test suite and adds no public package API.
 
-`controller/trace_coverage.json` separates two concepts:
+`controller/trace_coverage.json` separates three concepts:
 
 - capture quality: `complete`, `degraded`, or `interrupted`;
 - worker outcome: `completed`, `failed`, `timed_out`, `cancelled`, or
-  `interrupted`.
+  `interrupted`;
 - provider gateway outcome: aggregate `total`, `completed`, `failed`, and
   `interrupted` counts.
 
@@ -141,7 +142,12 @@ orphan cleanup is explicit and age-gated. Preview the selection first, then add
 ```bash
 python -m optiprofiler_evolve.docker_gc --older-than 86400
 python -m optiprofiler_evolve.docker_gc --older-than 86400 --apply
+python -m optiprofiler_evolve.docker_gc --run RUN_ID --include-active
 ```
+
+`--run` restricts selection to one run and `--include-active` also selects
+running containers or attached networks. Selection is always a dry run until
+`--apply` is supplied.
 
 Stable join fields include the workflow module, role/job or attempt identity,
 candidate and parent identity when applicable, iteration, and island. Trusted
@@ -176,15 +182,12 @@ explicit owner deployment policies and must not silently truncate or
 lossy-compress a live research run. A future exporter must produce a complete
 private research bundle separately from a default-deny sanitized public bundle.
 Normalized reviewer JSON is stored separately under
-`controller/integrity_reviews/<candidate_id>/`; it complements, rather than
-replaces, the raw reviewer stream.
+`controller/integrity_reviews/<candidate_id>-<profile>-<fingerprint16>/`, so a
+candidate can have one decision directory per profile and source fingerprint. It
+complements, rather than replaces, the raw reviewer stream.
 The double-opt-in `unsafe_approve` test/ablation component performs no agent
 invocation, so it records only the normalized decision and is excluded from
 agent-trace coverage counts.
-
-Docker cleanup accepts `--run RUN_ID` to restrict selection to one run and
-`--include-active` to also select running containers or attached networks.
-Selection remains a dry run unless `--apply` is supplied.
 
 Usage records keep unknown exact totals as `null`. Their `lower_bounds` mapping
 retains known token/cost subtotals when a stream or audit record is incomplete;

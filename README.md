@@ -29,9 +29,10 @@ can each be disabled; see [Algorithm assessment](docs/assessment.md).
 ## Alpha status
 
 The Python path is an end-to-end MVP: repository candidates, deterministic data
-splits, OptiProfiler scoring, Codex/Claude workers, Docker isolation, four-island
+splits, OptiProfiler scoring, Codex/Claude workers, Docker isolation, multi-island
 population evolution, checkpoints, migration, validation selection, and a final
-hidden holdout execution. An optional full research workflow adds a direction
+hidden holdout execution. The quick-start preset uses one island; the research
+example uses four. An optional full research workflow adds a direction
 scout, per-island strategy attribution with executable leave-one-out ablations,
 bounded cross-island recombination, and a post-selection strong-challenger
 report. These are configured phases, not additional public APIs.
@@ -82,7 +83,7 @@ experiment image from clean source checkouts. Bundled legacy libraries remain
 compatible with OptiProfiler 1.3.x.
 
 Provider base URLs and credential names belong in the worker entry's
-`provider_gateway` block. The engine does not maintain a vendor registry or put
+`provider_gateway` block. The controller does not maintain a vendor registry or put
 real provider credentials inside worker containers; it does pin the Anthropic
 Messages or OpenAI Responses transport used by the selected CLI.
 Read [Model providers and agent workers](docs/providers.md) before using a

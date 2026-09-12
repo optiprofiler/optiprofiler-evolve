@@ -65,12 +65,9 @@ states that this is a single measurement, not statistical certainty.
 
 The analyst can inspect existing profile and history plots through the public
 evidence index. Reliable automatic selection of the most discriminative
-problems still requires a dedicated public evidence projection. The private
-EvalReport reader now exists in observability, but is not wired into research
-agents. The evidence index consumes only the existing projected benchmark bundle,
-not a speculative `agent_report.json` format.
-Evolve does not infer problem-level effects from filenames or redefine Core's
-report schema. See [EvalReport evidence](architecture.md#evalreport-evidence).
+problems still requires a dedicated public evidence projection; the private
+EvalReport reader exists but no production code consumes it yet.
+See [EvalReport evidence](architecture.md#evalreport-evidence).
 Each ablation entry keeps the base and removed-variant artifact directories, so
 the owner can compare their profile and history plots instead of relying only
 on the scalar effect.
@@ -161,7 +158,7 @@ research/variants/
 ```
 
 All machine-readable contracts carry schema strings. Agent workspaces contain
-only copied, sanitized inputs. The engine remains the sole writer of candidate
+only copied, sanitized inputs. The controller remains the sole writer of candidate
 registration, validation selection, authoritative events, and final promotion.
 
 Phase-level resume is not implemented yet. Iteration checkpoints do not claim

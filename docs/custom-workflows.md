@@ -65,11 +65,12 @@ deep immutable snapshot, serialization format, or sanitized public export.
 Removing a producer requires removing or replacing its dependents. For example,
 report still requires hidden's `final` and `final_solver` outputs. To generate a
 pre-holdout summary, supply a separate phase with the appropriate inputs instead
-of fabricating final scores. Without an `ExplorePhase` (or subclass), attempt
-steps are not constructed; leaving defaults or setting `attempt_steps: []` are
-both valid. Unused step names are not resolved. Only `ExploreContext` grants
-attempt execution, so there is no general `uses_attempts` flag. Explore validates
-mandatory mutate/public-evaluate steps once during assembly, not on each attempt.
+of fabricating final scores. Unused step names are not resolved. Only
+`ExploreContext` grants attempt execution, so there is no general `uses_attempts`
+flag. Explore validates the mandatory mutate and public-evaluate steps once
+during assembly, not on each attempt; that check is what makes `attempt_steps`
+required whenever an `ExplorePhase` or subclass is configured. Without one,
+attempt steps are not constructed and `attempt_steps: []` is valid.
 
 ## Authority does not come from artifact names
 
@@ -79,7 +80,7 @@ authority requires matching controller changes and tests, not just adding a
 phase. Owner plugins are trusted code, not an in-process security sandbox.
 Core contexts follow registered implementation classes and their subclasses,
 not names. An unrelated custom phase named `prepare` receives `PhaseContext`.
-Prepared island metadata must match the configured population count at commit.
+Prepared island metadata must match the configured island count at commit.
 
 After a champion is selected, controller entries reject new candidates,
 population edits, finalist registration and reselection. Hidden checks the fixed
@@ -101,3 +102,7 @@ entry guards avoid expensive work after selection closes; commit guards protect
 state writes, including proposals made without those service entrypoints.
 Publication hashes the exported solver when present, otherwise the selected
 candidate, because optional post-selection phases can still modify files.
+
+`PopulationEdit.budget` is reserved but not implemented in this alpha. A custom
+after-iteration policy that returns a nonempty budget edit fails explicitly
+rather than being recorded as an effective scheduling ablation.

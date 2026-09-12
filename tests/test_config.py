@@ -333,6 +333,29 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"Removed config fields .*\['strict'\]"):
             load_config(raw)
 
+    def test_misplaced_mode_in_options_is_caught_while_disabled(self):
+        # `mode` is a criterion-level field. The enabled-only guard rejected it, so a
+        # disabled criterion accepted it and then hard-failed once enabled. The key
+        # check now runs regardless of enablement.
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                raw = minimal_config()
+                raw["assessment"]["criteria"]["complexity"] = {
+                    "enabled": enabled, "weight": 1.0, "mode": "warn",
+                    "options": {"mode": "warn"},
+                }
+                with self.assertRaisesRegex(ValueError, "belongs on the criterion"):
+                    load_config(raw)
+
+    def test_valid_complexity_options_load_while_disabled(self):
+        raw = minimal_config()
+        raw["assessment"]["criteria"]["complexity"] = {
+            "enabled": False, "weight": 1.0, "mode": "warn",
+            "options": {"max_ratio": 1.2},
+        }
+        config = load_config(raw)
+        self.assertEqual(config.assessment.criteria["complexity"].options["max_ratio"], 1.2)
+
     def test_omitting_a_default_enabled_criterion_warns_by_name(self):
         # `criteria` replaces the defaults instead of patching them, so an omitted
         # criterion is removed rather than disabled. That stays supported (it is

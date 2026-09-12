@@ -141,7 +141,7 @@ The `workflow` block above is the built-in default and normally may be omitted.
 Calling `evolve(..., config=None)` further uses a one-iteration, one-island
 quick start. Optional `static_audit` and `feedback` steps, whole-candidate
 migration, web search, compilers, and the research phases must be requested
-explicitly. The engine's final source/interface/import gate remains mandatory;
+explicitly. The controller's final source/interface/import gate remains mandatory;
 quality criteria have independent enable switches. The workflow is an ordered
 protocol rather than an arbitrary DAG.
 

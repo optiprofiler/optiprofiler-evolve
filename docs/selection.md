@@ -7,9 +7,9 @@ hard capacity. Two independent components govern it:
   migration;
 - **parent sampler** chooses one parent from that retained order.
 
-The engine validates component output. A retention policy cannot return an
+The controller validates component output. A retention policy cannot return an
 unknown candidate, a duplicate, or more than the configured capacity. A sampler
-cannot return a candidate outside its island archive. Only the engine applies
+cannot return a candidate outside its island archive. Only the controller applies
 the result and writes the checkpoint.
 
 ## Default behavior
@@ -26,11 +26,14 @@ evolution:
       greedy_ratio: 0.7
 ```
 
-`validation_lexicographic` orders candidates by validation score, public score,
-iteration, and candidate ID. `top_biased_validation_weighted` chooses the first
-candidate with probability `0.7`; otherwise it samples by nonnegative validation
-weight. Seeded equivalence tests compare both components with the previous
-in-engine implementation.
+`validation_lexicographic` orders candidates by formal assessment score, public
+score, iteration, and candidate ID — that whole tuple is
+`CandidateRecord.ranking_key`. `top_biased_validation_weighted` chooses the first
+candidate with probability `0.7`; otherwise it samples by nonnegative assessment
+weight. With only performance weighted the assessment score equals the
+performance validation score, so this reproduces the seeded baseline ordering;
+seeded equivalence tests compare both components against the previous
+implementation.
 
 ## Metric bundles
 

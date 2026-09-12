@@ -35,7 +35,7 @@ changed deliberately with matching tests.
 - Controller-owned variant helpers submit through that commit authority;
   this is one authority, not a separate database per stage. Core stages return
   typed results or call named controller commit operations. They never receive
-  the engine or an arbitrary state mutation interface.
+  the controller or an arbitrary state mutation interface.
 - Steps produce `StepResult`; policies produce `PopulationEdit`; neither may
   mutate controller state directly.
 - A failed component cannot leave a partially accepted candidate.
@@ -75,7 +75,7 @@ The supported extension slots are `Phase`, `AttemptStep`,
   a real multi-module subsystem, not merely wrap one class or one file.
   Core context factories are registered by the controller; optional extensions
   use `PhaseContext` and the existing five capabilities. There is no string
-  action dispatcher or engine mixin hierarchy behind the phase classes.
+  action dispatcher or controller mixin hierarchy behind the phase classes.
 - Registries are plain dictionaries. No auto-discovery or package entry-point
   framework is introduced before an external plugin actually requires it.
 - Process executors and Docker mechanics remain internal in v1. Harbor may be a
@@ -104,8 +104,8 @@ The supported extension slots are `Phase`, `AttemptStep`,
   exposed to workflow modules. Modules never receive a worker adapter or a raw
   subprocess launcher. Every future agent-invoking module therefore inherits
   the same controller-owned trace lifecycle by construction.
-- A research phase must not become a second engine. It may propose file-backed
-  artifacts and call these services; only the engine writes candidate and
+- A research phase must not become a second controller. It may propose file-backed
+  artifacts and call these services; only the controller writes candidate and
   population state.
 - Retention and parent sampling are read-only proposals over one bounded island
   archive. They cannot admit candidates, change lineage, exceed capacity, or
@@ -137,7 +137,7 @@ The supported extension slots are `Phase`, `AttemptStep`,
 - Gateway-routed Docker workers receive neither the real provider credential
   nor the provider origin. They stay on an invocation-only internal network;
   only the short-lived sidecar may join its separate egress network.
-- The engine's final edit-scope, tree, interface, and candidate-safety gate is
+- The controller's final edit-scope, tree, interface, and candidate-safety gate is
   mandatory. An ablation may remove an evidence-producing audit step, not this
   gate.
 
@@ -231,24 +231,28 @@ collaborations are explicit; none grants a second state-writing authority.
 | Controller | Bind phase contexts and execution services; consume criterion and observability contracts. Never import application or the public API. |
 | Phases | Use phase contracts and bounded controller capabilities, never application or worker execution backends. |
 | Criteria | Use injected backends and reviewer factories; never import controller registries, phases or application. |
-| Observability | Consume supplied identities, events, snapshots and artifact files; never import controller, phases, criteria or application. Agent trace contracts are permitted. |
+| Observability | Consume supplied identities, events, snapshots, artifact files and agent-produced value types from the package root; never import `agents`, `controller`, `phases`, `criteria` or `application` modules. |
 
 Owner views may read documented controller artifact paths without importing
 controller implementations. Controller commits may write observability attempt
 records; those records are evidence, not a second candidate registry. Public
 disclosure stays default-deny and independent of private event reconstruction.
 
-`tests/test_import_boundaries.py` enforces the table above by reading imports
-with `ast`. It ignores imports under `TYPE_CHECKING`, which do not exist at
-runtime and therefore cannot create a cycle. Two collaborations are deliberately
-allowed and are listed in that test rather than left implicit:
+Two tests enforce the table above by reading imports with `ast`, ignoring imports
+under `TYPE_CHECKING` because they do not exist at runtime and cannot create a
+cycle:
 
-- `phases` may import `controller.contracts`, the published capability protocol,
-  and `observability` contracts. It may not import a controller implementation.
-- Value types needed by two layers belong at the package root. `UsageRecord` and
-  the worker-exit projection live in `models.py` for this reason: while they were
-  owned by `agents` or by `observability`, those two packages became mutually
-  dependent.
+- `tests/test_import_boundaries.py` covers the Criteria, Phases and Observability
+  rows. Its explicit allowlist contains only `phases -> controller.contracts`, the
+  published capability protocol; everything else it permits, it permits by not
+  forbidding it, so add an entry there when you rely on a new collaboration.
+- `tests/test_phase_layout.py` covers the Application and Controller rows,
+  including that the controller never imports application or the public API.
+
+One placement rule follows from those boundaries: a value type needed by two
+layers belongs at the package root. `UsageRecord` and the worker-exit projection
+live in `models.py` for this reason, because while they were owned by `agents` or
+by `observability` those two packages became mutually dependent.
 
 Layers the table does not mention are not thereby unconstrained; a new
 cross-package import is a change to this table and belongs in the same commit.

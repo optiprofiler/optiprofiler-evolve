@@ -643,6 +643,17 @@ _RETIRED_CRITERION_OPTIONS: Mapping[str, frozenset[str]] = {
 }
 
 
+# Option keys that exist as fields on the option schema but must not be written
+# there, mapped to the reason. `mode` is a criterion-level field: the enabled-only
+# guard below already rejects it, which meant a disabled criterion silently
+# accepted it and then hard-failed the moment it was turned on.
+_MISPLACED_CRITERION_OPTIONS: Mapping[str, Mapping[str, str]] = {
+    "complexity": {
+        "mode": "Complexity mode belongs on the criterion rather than in options.",
+    },
+}
+
+
 def _validate_criterion_option_keys(name: str, options: Mapping[str, Any]) -> None:
     """Key-check one criterion's options regardless of whether it is enabled."""
 
@@ -650,6 +661,11 @@ def _validate_criterion_option_keys(name: str, options: Mapping[str, Any]) -> No
     if schema is None:
         return
     path = f"assessment.criteria.{name}.options"
+    misplaced = sorted(
+        _MISPLACED_CRITERION_OPTIONS.get(name, {}).keys() & set(options)
+    )
+    if misplaced:
+        raise ValueError(f"{_MISPLACED_CRITERION_OPTIONS[name][misplaced[0]]} Found in {path}.")
     retired = sorted(_RETIRED_CRITERION_OPTIONS.get(name, frozenset()).intersection(options))
     if retired:
         raise ValueError(

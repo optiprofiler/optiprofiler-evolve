@@ -71,9 +71,13 @@ export OPTIPROFILER_EVOLVE_API_KEY='<provider-key>'
 python examples/run_claude_compatible.py
 ```
 
-The model identifier and endpoint are provider-specific. The engine passes
+The model identifier and endpoint are provider-specific. The controller passes
 them unchanged to Claude Code. Credential values are expanded in memory and
 redacted from `resolved_config.json`.
+
+The example scripts print the run directory, the final solver directory, the
+public score and the controller-only final score. `evolve(...)` creates a
+timestamped run directory under `runs/` unless `run_dir` is supplied explicitly.
 
 For Codex with a non-OpenAI endpoint, do not assume that setting
 `OPENAI_BASE_URL` is enough. Codex custom providers require a Responses-compatible
@@ -95,9 +99,10 @@ read a file through its tools inside the private workspace:
 python scripts/check_worker_setup.py examples/experiment.yaml --live
 ```
 
-The script prints the run directory, final solver directory, public score, and
-controller-only final score. A timestamped run directory is created under
-`runs/` unless `run_dir` is supplied explicitly.
+It prints the resolved worker, sandbox, agent command, provider route when the
+gateway is used, the static result, and the live probe result with the
+throwaway directory it used under `build/worker-preflight/`. It runs no
+evolution, so it reports no scores.
 
 Open `<run_dir>/status.html` — the PRIVATE owner console — to inspect the
 workflow canvas (continuous connectors with Fit/zoom/pan for long research

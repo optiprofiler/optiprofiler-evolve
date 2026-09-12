@@ -53,7 +53,7 @@ agent, or problem libraries while working here. They are independent packages.
 | Workflow contracts | `phases/contracts.py`, `controller/contracts.py`, `controller/registry.py` |
 | Run composition and infrastructure lifecycle | `application/run.py` |
 | Population and selection | `controller/state.py`, `controller/commits.py`, `controller/coordinator.py`, `controller/selection.py` |
-| Phase input binding | `controller/phase_contexts.py`, `controller/runtime.py` |
+| Phase input binding | `controller/phase_contexts.py` (see the layering note below), `controller/runtime.py` |
 | Attempts and policies | `phases/attempts/runner.py`, `phases/attempts/steps.py`, `phases/attempts/policies.py` |
 | Unified LLM entry and isolation | `agents/llm.py`, `agents/workers.py`, `agents/harness.py`, `agents/sandbox.py` |
 | OptiProfiler calls and public broker | `criteria/performance/evaluator.py`, `agents/broker.py` |
@@ -63,9 +63,19 @@ agent, or problem libraries while working here. They are independent packages.
 | Events, reports and local views | `observability/`, `observability/views/` |
 
 Each phase has one module, `phases/<name>.py`, containing its class and specific
-context/result types. Keep subsystem-only helpers inside their owning package;
-only genuinely cross-subsystem foundations belong at the package root. Do not
-reintroduce generic `shared` or `quality` buckets or single-file phase packages.
+context/result types. Keep subsystem-only helpers inside their owning package.
+Only genuinely cross-subsystem foundations belong at the package root, which is
+why `UsageRecord` and the worker-exit projection are defined in `models.py`:
+`agents` produces them and `observability` renders them, so any other owner makes
+those two packages mutually dependent. Do not reintroduce generic `shared` or
+`quality` buckets or single-file phase packages.
+
+`controller/phase_contexts.py` is the one place where the controller reaches into
+concrete phase modules. Each phase module already owns its context type, so the
+intended fix is a binding hook on the phase itself; until then, treat adding a new
+entry to that factory as adding to a known layering exception rather than as the
+established pattern. `tests/test_import_boundaries.py` records what is and is not
+permitted.
 
 Criteria own both `assess` and `generation_guidance`. Use `SolverJob` for solver
 proposal/edit tasks; the unified LLM entrypoint supplies their criterion guidance.

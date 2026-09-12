@@ -11,9 +11,12 @@ workspace and capabilities; the client executes the configured worker adapter
 and retains its lifecycle evidence. This abstraction does not replace the CLI
 with a raw completion request or add model calls to deterministic stages.
 
-In the Docker backend, every agent invocation uses a short-lived provider
-gateway. This applies to explorer workers, integrity reviewers, and research
-roles. The gateway is model transport, not a general HTTP proxy.
+In the Docker backend, agent invocations use a short-lived provider gateway by
+default. This applies to explorer workers, integrity reviewers, and research
+roles. The gateway is model transport, not a general HTTP proxy. Docker workers
+can instead take the direct path described under "Credential and network
+boundary" below, which requires both explicit unsafe opt-ins, and non-`cli`
+adapters cannot use the gateway at all.
 
 ## Credential and network boundary
 
@@ -169,9 +172,9 @@ disable model transport through the gateway.
   A failed audit write marks the gateway unhealthy, stops the sidecar, and
   makes its process exit nonzero. An upstream stream that ends early is recorded
   as `stream_interrupted`; the gateway does not append a second HTTP response.
-- Worker stdout/stderr bytes remain authoritative in the private agent trace.
-- Gateway ready, request-audit, terminal-outcome, container-log, and Docker
-  lifecycle records are retained beside that invocation. Cleanup runs only
+- Worker stdout/stderr bytes, and the gateway ready, request-audit,
+  terminal-outcome, container-log and Docker lifecycle records, are retained
+  beside the invocation as described in [Traces](traces.md). Cleanup runs only
   after worker and gateway terminal evidence is flushed.
 - If shutdown finds an upstream request still in flight, the sidecar records an
   `interrupted` terminal outcome and the in-flight count instead of claiming a

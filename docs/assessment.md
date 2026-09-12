@@ -92,9 +92,8 @@ criterion cannot be re-enabled by a profile.
 
 ## Scores and constraints
 
-Scores are finite real numbers, with higher meaning better. Neither individual
-scores nor the total are clipped to `[0, 1]`; negative values and scores above 1
-are supported. Each criterion owns its scale. Weights control its influence:
+Scores are finite real numbers, with higher meaning better. Each criterion owns its
+scale and nothing normalises them against each other. Weights control influence:
 
 ```text
 total = sum(weight * score) / sum(weight)
@@ -104,10 +103,15 @@ Weights must be finite and nonnegative; they need not sum to one. For example,
 scores 2, 3, 1 and weights 7, 2, 1 produce 2.1, not 1. A zero-weight criterion
 still runs but contributes only diagnostics or an enforced constraint.
 
-Performance preserves the existing OptiProfiler fitness reduction. Complexity
-uses `1 / (1 + r)`, where `r` is the larger initial-relative branch/line ratio;
-the threshold `max_ratio` is independent of this score. Integrity maps approve
-to 1 and quarantine to 0. These are built-in formulas, not framework limits.
+The **total is not clipped**. The built-in criteria do happen to be bounded:
+performance reduces to `min(1, max(0, (candidate - reference + 1) / 2))`, and
+`profile_scores_mean` clips to `[0, 1]` as well, so both fitness sources stay in
+range; complexity is `1 / (1 + r)` in `(0, 1]`, where `r` is the larger
+initial-relative branch/line ratio and `max_ratio` is an independent threshold;
+integrity maps approve to 1 and quarantine to 0. A third-party criterion or a
+criterion added through the extension contract may exceed 1, and the total will
+reflect that without being rescaled. The absence of a cap is a property of the
+aggregator, not a claim that performance scores can exceed 1.
 The seed equals its parent and has no mutation transcript, so its integrity
 check is a controller-local baseline approval and never invokes the reviewer
 model; only actual submissions consume reviewer budget.
@@ -124,10 +128,12 @@ Population retention, configured parent sampling and champion selection use the
 formal weighted score. The weighted sampler derives nonnegative sampling
 weights with `max(total, 1e-6)`; it does not rewrite stored scores. Ranking uses
 the unmodified total, then available public performance, then stable lineage/ID
-tie breaks. With complexity disabled and default integrity settings, the score
-and seeded parent sampling retain the original performance-only behavior. No criterion toggle
-implicitly switches the selection algorithm. Explicit Pareto research policies
-continue to require their configured raw metric bundles.
+tie breaks. With complexity disabled the score is the performance score alone, so
+selection arithmetic matches the previous performance-only behaviour; integrity
+still applies as an enforced, zero-weight gate on validation admission unless it
+is disabled. No criterion toggle implicitly switches the selection algorithm.
+Explicit Pareto research policies continue to require their configured raw metric
+bundles.
 
 ## Checkpoints and privacy
 
@@ -160,9 +166,12 @@ integrity needs no reviewer model and emits no fabricated approve verdict.
 Move `evaluation` resource/backend/feedback/quota fields to `execution`.
 Move benchmark, smoke overrides, reference and fitness source to
 `assessment.criteria.performance.options`. Move `integrity_review` to
-`assessment.criteria.integrity.options`. Move complexity `mode` to the criterion
-entry and `max_ratio` to its options, with `enabled: true`. Old top-level keys
-are rejected with a migration hint.
+`assessment.criteria.integrity.options`. Old top-level keys are rejected with a
+migration hint.
+
+`complexity` is new rather than moved: it did not exist as configuration before
+this release. Enable it on the criterion entry and put `max_ratio` in its options,
+as `complexity: {enabled: true, options: {max_ratio: 1.2}}`.
 
 Trusted extensions subclass `Criterion` and implement `assess` plus the class
 method `generation_guidance`. Register explicitly in the `criterion` registry.

@@ -86,9 +86,10 @@ Source changes invalidate previous results. Research variants use the same
 assessment profiles. An enforced ratio below one rejects the initial solver
 during preparation; use a soft score to search for strict simplifications.
 
-Detailed reports remain under `controller/complexity/`; worker feedback contains
-only numeric baseline totals and candidate diagnostics. Public events expose
-summary numbers and statuses only. These are source complexity heuristics, not
+The baseline analysis and per-criterion diagnostics are written under `controller/complexity/` and
+`controller/evaluations/<candidate>/<profile>/complexity/`; worker feedback contains
+only numeric baseline totals and candidate locations, never backend errors or hashes.
+These are source complexity heuristics, not
 algorithmic runtime complexity or proof against dynamically generated code.
 
 ## Evaluation
@@ -98,7 +99,7 @@ algorithmic runtime complexity or proof against dynamically generated code.
 | `assessment.criteria.performance.options.benchmark` | mapping | `{}` | Options forwarded to `optiprofiler.benchmark`; data and solver identity fields are controller-owned. |
 | `assessment.criteria.performance.options.smoke_overrides` | mapping | `{}` | Benchmark options overlaid only for `smoke_test`. |
 | `execution.backend` | `docker` or `unsafe_local` | `docker` | Execution boundary for Python candidate code. `unsafe_local` executes untrusted solver code in the controller process and is for trusted development only. |
-| `execution.docker_image` | string or `null` | `null` | Evaluator image; **required** when the backend is `docker`. The JSON schema requires it whenever `backend` is `docker`, while the loader only enforces it on profiles that actually construct an evaluator, so for a run with the performance criterion disabled the schema is stricter than the runtime. |
+| `execution.docker_image` | string or `null` | `null` | Evaluator image; **required** when the backend is `docker` and a profile actually constructs an evaluator. The loader enforces it per profile, and the JSON schema enforces it only inside a declared `execution` block, so the two disagree in both directions: omitting `execution` entirely passes the schema but fails the loader when performance is enabled, while declaring `execution` with performance disabled fails the schema but passes the loader. |
 | `execution.timeout_seconds` | positive integer | `3600` | Wall-time limit for one Docker evaluator process; `unsafe_local` has no process timeout. |
 | `execution.cpus` | positive number | `2.0` | CPU limit passed to the evaluator container; ignored by `unsafe_local`. |
 | `execution.memory` | Docker memory string | `4g` | Evaluator-container memory limit; ignored by `unsafe_local`. |
@@ -119,11 +120,12 @@ The shared built-in reference solver's budget comes from the base
 `assessment.criteria.performance.options.benchmark.max_eval_factor` (500 when
 omitted). Profile benchmark overrides and `smoke_overrides` affect their own
 evaluations, never the shared reference source. Enabled performance profiles
-must agree on the reference name. The private `controller/reference_manifest.json`
-records its name, construction budget, and tree hash.
+must agree on the reference name. The `controller/reference_manifest.json` manifest
+records its name, construction budget, and tree hash. It is private to workers; the
+owner console links the reference solver directory next to it, not the manifest.
 
-`profile_scores_mean` writes `fitness_breakdown.json` beside each execution.
-The file records the normalized tensor, its axis meanings, and the exact mean
+Each successful benchmark writes `fitness_breakdown.json` beside that execution, for
+either fitness source. The file records the normalized tensor, its axis meanings, and the exact mean
 used for retention. It changes only the controller-owned fitness reduction;
 workers still receive the configured public feedback and never see validation
 or hidden problem identities.
@@ -147,9 +149,11 @@ packages are imported inside the evaluator only; choosing PDFO or PRIMA does
 not make either package a mandatory dependency of the controller.
 The checked-in evaluator image includes SciPy, PDFO, and independent PRIMA. It
 pins NumPy 1.26 because the current PDFO wheel is not compatible with NumPy 2.
-Custom evaluator images must provide the package named by the selected
-competitor; a missing runtime fails on its first evaluator call instead of
-silently falling back to another solver.
+A custom evaluator image must provide the package named by the selected
+competitor's `required_module`. That field is declarative: no preflight checks
+the image against it, so a missing runtime surfaces as the generated wrapper's
+failing import on its first evaluator call rather than as a startup error. It
+does not fall back to another solver.
 
 | Family | Unconstrained `u` | Bounds `b` | Linear `l` | Nonlinear `n` |
 |---|---|---|---|---|
@@ -186,7 +190,7 @@ names cannot drift apart.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `workers.pool` | list of worker mappings | **required** | Weighted Codex/Claude worker choices. At least one is required. |
-| `workers.max_parallel` | positive integer | `4` | Maximum concurrent coding workers and final evaluator calls. |
+| `workers.max_parallel` | positive integer | `4` | Maximum concurrently running coding-worker attempts. It does not bound evaluator or benchmark calls; profile `benchmark.n_jobs` does. |
 | `workers.timeout_seconds` | positive integer | `1800` | Wall-time limit for one coding-agent process. |
 | `workers.token_budget` | positive integer or `null` | `null` | Advisory token budget inserted into the worker task. |
 | `workers.max_budget_usd` | positive number or `null` | `null` | Claude Code per-worker cost limit. Other providers enforce their own limits. |
@@ -309,8 +313,11 @@ agent.
 | `sandbox.max_candidate_bytes` | positive integer | `200000000` | Maximum total bytes accepted from one worker workspace. |
 | `sandbox.allow_direct_network` | boolean | `false` | Second unsafe opt-in for a Docker worker to bypass the provider gateway and use direct egress. |
 
-Gateway mode requires Docker Engine 28 or newer for deterministic gateway
-priority across the sidecar's internal and egress networks.
+Gateway mode requires a Docker CLI that accepts `--gw-priority`, which is Docker Engine 28
+or newer. The runtime sets one explicit priority, `--gw-priority 1` on the egress network
+connect; the sidecar joins its internal network at container creation with no priority flag
+and relies on Docker's default-route semantics there. No version preflight runs, so an older
+CLI fails when the flag is rejected rather than at startup.
 
 The worker receives only a private solver copy, public manifests, and bounded
 evaluation tools. It does not receive the immutable reference, hidden manifest,
@@ -329,7 +336,7 @@ the package.
 | `workflow.phases[].options` | mapping | `{}` | Constructor options for one phase. |
 | `workflow.attempt_steps[].name` | registered name | `mutate`, `smoke`, `public_evaluate` | Ordered candidate-attempt steps. Explore validates mandatory `mutate` and `public_evaluate` steps before startup. Without an ExplorePhase, names are not resolved and steps are not constructed; defaults or an empty list are both valid. |
 | `workflow.attempt_steps[].options` | mapping | `{}` | Constructor options for one attempt step. |
-| `workflow.after_iteration[].name` | registered name | none | Optional policies evaluated after the iteration barrier. They propose edits; only the engine applies them. |
+| `workflow.after_iteration[].name` | registered name | none | Optional policies evaluated after the iteration barrier. They propose edits; only the controller applies them. |
 | `workflow.after_iteration[].options` | mapping | `{}` | Constructor options for one after-iteration policy. |
 
 Use immutable config helpers such as `without_step(...)`, `with_step(...)`,
@@ -337,18 +344,16 @@ Use immutable config helpers such as `without_step(...)`, `with_step(...)`,
 `with_evaluator(...)` to define ablations without editing a shared config in
 place. For example, one matrix can derive scout `off`, `shared`, and
 `per_island` variants with `with_phase_options`. Removing the `static_audit` step changes reported pipeline evidence, but
-does not remove the engine's mandatory final safety and edit-scope gate.
+does not remove the controller's mandatory final safety and edit-scope gate.
 
 `without_phase` may remove a built-in stage too. This does not remove its
 dependents: deleting prepare while retaining explore fails preflight. Empty and
-custom-only lists are supported without report or attempt steps. Champion
+custom-only lists are supported, and `attempt_steps` may be empty as well, but
+only while no `ExplorePhase` or subclass is configured — once one is, assembly
+requires the `mutate` and `public_evaluate` steps. Champion
 selection still closes admission; a required lockbox cannot be omitted or have
 hidden performance disabled in a champion-returning run. See
 [custom workflows](custom-workflows.md) for return semantics and extension code.
-
-`PopulationEdit.budget` is reserved but not implemented in the alpha. A custom
-policy returning a nonempty budget edit fails explicitly; it is not silently
-recorded as an effective scheduling ablation.
 
 The recommended full research sequence is:
 
@@ -366,32 +371,29 @@ directory is created:
 | `direction_scout` | `mode` | `shared` | `off`, `shared`, or `per_island`. |
 | `direction_scout` | `guided_islands` | first half | Island indexes receiving scout cards. |
 | `direction_scout` | `max_directions` | `4` | Maximum direction cards. |
-| `direction_scout` | `worker_index` | `0` | Entry in `workers.pool`. |
-| `direction_scout` | `timeout_seconds` | worker default | Role wall time. |
-| `direction_scout` | `token_budget` | worker default | Advisory role token budget. |
-| `direction_scout` | `max_budget_usd` | worker default | Claude role cost cap. |
-| `direction_scout` | `tools` | network/web on | Role-specific `ToolConfig` overrides. Native search may use the provider tool loop; the role shell remains internal. |
-| `direction_scout` | `prompt_version` | `direction-scout/1` | Recorded prompt contract. |
+| `direction_scout` | `tools` | network/web on | Role-specific `ToolConfig` overrides. |
 | `strategy_analysis` | `max_strategies` | `6` | Cards normalized per island. |
 | `strategy_analysis` | `max_ablations` | `6` | Executable toggles tested per island. |
 | `strategy_analysis` | `min_effect` | `0.01` | Public-fitness support threshold. |
 | `strategy_analysis` | `n_repeats` | `1` | Repeated ablated evaluations. |
 | `strategy_analysis` | `evaluation_mode` | `smoke` | `smoke` for bounded attribution or `public` for canonical public attribution. |
-| `strategy_analysis` | `worker_index` | `0` | Entry in `workers.pool`. |
-| `strategy_analysis` | `timeout_seconds` | worker default | Role wall time. |
-| `strategy_analysis` | `token_budget` | worker default | Advisory role token budget. |
-| `strategy_analysis` | `max_budget_usd` | worker default | Claude role cost cap. |
-| `strategy_analysis` | `tools` | network on, web off | Role-specific `ToolConfig` overrides. Model transport uses the gateway; the role shell has no general egress. |
-| `strategy_analysis` | `prompt_version` | `strategy-analysis/1` | Recorded prompt contract. |
+| `strategy_analysis` | `tools` | network on, web off | Role-specific `ToolConfig` overrides. |
 | `strategy_transfer` | `max_strategies_per_island` | `3` | Controller-supported semantic strategies offered to each other island. |
 | `strategy_transfer` | `attempts_per_island` | `1` | Integration attempts made from each island's own selected base. |
-| `strategy_transfer` | `worker_index` | `0` | Integrator worker entry. |
-| `strategy_transfer` | `timeout_seconds` | worker default | Integrator wall time. |
-| `strategy_transfer` | `token_budget` | worker default | Advisory integrator token budget. |
-| `strategy_transfer` | `max_budget_usd` | worker default | Claude integrator cost cap. |
 | `strategy_transfer` | `tools` | network on, web off | Role-specific `ToolConfig` overrides. |
-| `strategy_transfer` | `prompt_version` | `strategy-transfer/2` | Recorded prompt contract. |
 | `challenger` | `reference` | `scipy_powell` | `initial` or any compatible registered competitor. This phase is post-selection only. |
+
+Every research role additionally accepts `worker_index` (default `0`, indexing
+`workers.pool`), and `timeout_seconds`, `token_budget` and `max_budget_usd`,
+each of which defaults to the corresponding `workers.*` value;
+`max_budget_usd` applies to Claude only. Each role also carries its own
+`prompt_version`: `direction_scout` and `strategy_analysis` write it into their
+phase artifact, `strategy_transfer` records it in the private trace only.
+
+The `tools` row is the one genuinely per-role setting: `direction_scout` enables
+network and native web search and keeps its shell on the internal network, while
+`strategy_analysis` and `strategy_transfer` reach the model through the gateway
+with web search off and no general shell egress.
 
 The older `recombine` phase remains available as an advanced compatibility
 component for portable-patch experiments, but it is not part of the recommended
@@ -430,7 +432,8 @@ behavior, patch portability, and validation-query semantics.
 
 ## Provider configuration
 
-Each Docker worker declares one pinned `provider_gateway`. Compatibility still
+Each Docker worker either pins one `provider_gateway` or takes the documented direct path
+that requires both unsafe opt-ins. Compatibility still
 depends on the selected CLI's wire protocol and tool loop; a model name and base
 URL alone are not sufficient. For Claude Code:
 

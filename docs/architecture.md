@@ -30,16 +30,20 @@ evolve(...)
 The optional research harness keeps these core actions and inserts:
 
 ```text
-prepare -> direction_scout -> explore -> strategy_analysis -> recombine
+prepare -> direction_scout -> explore -> strategy_analysis -> strategy_transfer
         -> validate -> hidden -> challenger -> report
 ```
 
+`recombine` is the older phase for the same slot and remains available for
+experiments that already used it; the shipped research example uses
+`strategy_transfer`. Neither may alter the champion, which `challenger` only
+reports on.
+
 `direction_scout` and `strategy_analysis` run read-only research roles in
 sanitized workspaces without evaluation tools. They produce versioned files.
-The engine-owned `ControllerServices` materializes and gates executable variants,
+The controller-owned `ControllerServices` materializes and gates executable variants,
 runs public evaluation, performs opaque validation selection, and registers only
-selected finalists. `recombine` uses bounded portable-patch combinations;
-`challenger` is post-selection reporting and cannot alter the champion.
+selected finalists.
 
 The public vocabulary is: **run > phase > iteration > island > attempt >
 step**. An iteration is a synchronized round over all islands. An island may
@@ -52,10 +56,10 @@ policies, and backend adapters:
 
 | Contract | Purpose | May change population? |
 |---|---|---|
-| `Phase` | One ordered run-level stage with named `requires` and `provides` artifacts | Only through an engine-owned core operation |
+| `Phase` | One ordered run-level stage with named `requires` and `provides` artifacts | Only through a controller-owned core operation |
 | `AttemptStep` | Mutate, inspect, or evaluate one private candidate attempt | No |
 | `AfterIterationPolicy` | Read an immutable population snapshot and propose kill/migrate/budget/stop edits | No; the controller applies proposals |
-| `RetentionPolicy` | Choose the ordered bounded archive retained by one island | No; the engine validates and applies the choice |
+| `RetentionPolicy` | Choose the ordered bounded archive retained by one island | No; the controller validates and applies the choice |
 | `ParentSampler` | Choose one parent from an island archive | No |
 | `CandidateReviewer` | Approve or quarantine a public-gated tree before validation | No |
 | `Criterion` | Produce a score and constraint verdict under one assessment profile | No |
@@ -103,10 +107,10 @@ counts only.
 `public_events.jsonl`, `public_run_state.json`, `status.html`,
 `PUBLIC_REPORT.md`, and the exact `public/` bundle are derived views. The local
 page renders the canonical run > phase > iteration > island > attempt > step
-vocabulary. The GitHub Actions template launches one engine job and displays
+vocabulary. The GitHub Actions template launches one job and displays
 the same public projection; it does not compile the workflow into GitHub jobs.
 
-The `budget` field is reserved for a future scheduler. The alpha engine raises
+The `budget` field is reserved for a future scheduler. This alpha release raises
 on a nonempty budget proposal so an apparently successful experiment cannot
 silently ignore a budget policy.
 
@@ -114,11 +118,11 @@ Quality checks share `AssessmentRunner`, which applies configured weights and
 warn/enforce constraints without admitting candidates itself. Public tools,
 seed preparation, ordinary submissions and research variants use the same
 criteria. The fixed seed equals its parent and has no mutation transcript, so
-its integrity review is a controller-local baseline approval that never invokes
-the reviewer agent; only actual submissions spend reviewer budget. Integrity
+its integrity review is a baseline approval that never invokes the reviewer
+agent; see [Algorithm assessment](assessment.md). Integrity
 review can be disabled like any other criterion; an outage is failed evidence,
 never a fabricated quarantine. Review retries and private
-evidence are owned by the integrity implementation rather than the engine.
+evidence are owned by the integrity implementation rather than the controller.
 
 ## State ownership
 
@@ -137,12 +141,12 @@ proposals.
 Every core and optional stage has its own class in `phases/<name>.py`.
 Core-specific context and result types live in the same module; optional phases use PhaseContext and PhaseResult.
 The core classes contain the actual stage algorithms rather than dispatching
-back to an engine method. Prepare, Validate and Hidden return typed
+back to a controller method. Prepare, Validate and Hidden return typed
 staged results; the controller commits them after checking the declared
 artifacts. Explore owns the iteration barrier and receives immutable population
 snapshots plus named admission, policy and checkpoint callbacks. Core inputs
 are frozen stage-specific contexts; optional phases retain the smaller shared
-`PhaseContext`. Neither receives the engine itself or a generic state setter.
+`PhaseContext`. Neither receives the controller itself or a generic state setter.
 Report returns only its report artifact; application builds the public return
 value even when report is omitted.
 
@@ -156,8 +160,8 @@ Candidate records retain their origin island as immutable lineage. In an
 `populations` tuple; migration deliberately does not rewrite origin metadata.
 
 Retention and parent sampling are separate registered components. Their exact
-identity and options are recorded in provenance. The default components are
-golden-tested against the former in-engine implementation; research variants do
+identity and options are recorded in provenance. The default components preserve
+the seeded baseline behaviour, so research variants do
 not silently change the baseline experiment.
 
 Mandatory edit-scope and candidate-safety checks remain in controller attempt execution even when
@@ -175,20 +179,23 @@ the optional `static_audit` evidence step is removed for an ablation.
 | `controller/state.py`, `commits.py` | Explicit run state and the sole candidate/population/artifact commit operations |
 | `controller/runtime.py` | Frozen controller inputs and execution ports; no application dependency |
 | `phases/attempts/` | Private attempt execution, public-only capabilities, prompts, steps and iteration policy proposals |
-| `controller/variants.py`, `research_evaluation.py`, `validation.py`, `finalists.py`, `role_jobs.py` | Separate variant, evaluation, selection, registration and role capabilities |
+| `controller/variants.py`, `research_evaluation.py`, `validation.py`, `finalists.py`, `role_jobs.py`, `patches.py` | Separate variant, evaluation, selection, registration, role and patch capabilities |
+| `controller/assessment.py` | Bind criteria to controller-owned execution backends and produce one weighted assessment result |
 | `observability/live_views.py` | Live projection scheduling and rendering; no population authority |
 | `controller/registry.py`, `builtins.py`, `selection.py` | Explicit registration and archive selection |
 | `phases/<name>.py` | One class per core or optional stage, including its specific inputs/results and local helpers |
-| `phases/contracts.py`, `_support.py`, `_research.py` | Stage contracts, shared phase helpers and research artifact formats |
+| `phases/contracts.py` | Stage contracts, the ordered phase protocol and the shared context/result base types |
+| `phases/_research.py` | Research artifact formats, normalization of untrusted strategy cards, and the helpers shared by the optional research phases (`_prepared`, `_require_public_performance`, `_tool_config`, `_tool_payload`) |
 | `agents/` | Unified LLM invocation, CLI backend, isolation, provider transport, public tool broker and feedback |
 | `criteria/` | Criterion contracts, runner, aggregator, and performance/complexity/integrity implementations |
 | `criteria/performance/` | Performance criterion, canonical evaluator, subprocess entrypoint, references and benchmark evidence |
 | `observability/` | Events, provenance, private traces, usage, report evidence validation and report generation |
 | `observability/views/` | Public/private derived views and their evidence readers, refreshed throughout a run |
 
-The former `quality` package is named `criteria`. The mixed `evaluation` package
-has been dissolved into performance execution and agent tools. There is no
-catch-all `shared` package: agent contracts live in `agents/contracts.py`, phase
+The criteria layer replaces what an earlier release called the mixed `evaluation`
+module: benchmark execution moved to `criteria/performance/` and agent-facing
+tools to `agents/broker.py`. There is no catch-all `shared` package: agent
+contracts live in `agents/contracts.py`, phase
 contracts in `phases/contracts.py`, controller capabilities in
 `controller/contracts.py`, and evaluator contracts beside the performance
 implementation. A module's owner is determined by its responsibility, not by
@@ -376,7 +383,7 @@ sidecar address. The worker stays on an invocation-only internal network; only
 the sidecar joins a separate egress network. Its route, credential, audit, and
 terminal evidence remain controller-owned.
 
-The engine records `attempt_id` across worker transcripts, step events, candidate
+The controller records `attempt_id` across worker transcripts, step events, candidate
 lineage, and benchmark artifacts. Reproducible component seeds are derived from
 the complete coordinate `(run seed, phase, iteration, island, attempt,
 component)` so removing one optional component does not silently shift unrelated
@@ -395,7 +402,7 @@ solver implementation. The interface uses `relative/path.py:function`; Python
 solver-internal imports should be relative so candidate and reference modules
 can coexist during one benchmark call.
 
-Workers may add, delete, or reorganize files matched by `editable`. The engine
+Workers may add, delete, or reorganize files matched by `editable`. The controller
 snapshots the resulting complete tree, never a model-generated diff, and never
 modifies the original input.
 
