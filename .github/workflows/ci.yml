@@ -53,3 +53,20 @@ jobs:
           OPE_GATEWAY_IMAGE=optiprofiler-evolve-gateway:ci
           OPE_EVALUATOR_IMAGE=optiprofiler-evolve-evaluator:ci
           python -m unittest tests.test_docker_integration -v
+
+  harbor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e '.[harbor]'
+      - run: docker compose version
+      - run: docker pull python:3.12-slim-bookworm
+      - run: docker build -f docker/gateway/Dockerfile -t optiprofiler-evolve-gateway:harbor-ci .
+      - run: >-
+          OPE_RUN_HARBOR_TESTS=1
+          OPE_GATEWAY_IMAGE=optiprofiler-evolve-gateway:harbor-ci
+          python -m unittest discover -s tests -p test_harbor_worker.py -v

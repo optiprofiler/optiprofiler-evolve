@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from optiprofiler_evolve.agents.harbor import HarborWorkerAdapter
 from optiprofiler_evolve.agents.workers import CliWorkerAdapter
 from optiprofiler_evolve.controller.registry import register, registered
 from optiprofiler_evolve.controller.selection import (
@@ -70,6 +71,7 @@ def register_builtin_components() -> None:
     _register("phase", "recombine", RecombinePhase)
     _register("phase", "challenger", ChallengerPhase)
     _register("worker", "cli", CliWorkerAdapter)
+    _register("worker", "harbor", HarborWorkerAdapter)
     _register("evaluator", "optiprofiler", create_evaluator)
 
 

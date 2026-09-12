@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from optiprofiler_evolve.agents.broker import BrokerConnection
+from optiprofiler_evolve.agents.container_spec import worker_container_spec
 from optiprofiler_evolve.agents.provider_transport import (
     ProviderTransportPlan,
     prepare_provider_transport,
@@ -416,9 +417,7 @@ class DockerInvocationRuntime:
             self.gateway_container,
             "--init",
             "--network",
-            self.worker_network,
-            "--network-alias",
-            _GATEWAY_ALIAS,
+            self.egress_network,
             *_label_args(self._labels("gateway")),
             "--cap-drop",
             "ALL",
@@ -492,32 +491,33 @@ class DockerInvocationRuntime:
             "docker",
             "network",
             "connect",
-            "--gw-priority",
-            "1",
-            self.egress_network,
+            "--alias",
+            _GATEWAY_ALIAS,
+            self.worker_network,
             self.gateway_container,
         ]
+        # Only the egress bridge supplies a default route. Attach the internal
+        # worker network second so this also works before Docker 28, without
+        # giving workers an egress attachment or relying on route priorities.
         try:
             _docker_run(connect, check=True)
         except Exception as exc:
             self._record_lifecycle(
                 "connect",
-                "egress-network",
-                self.egress_network,
+                "worker-network",
+                self.worker_network,
                 "failed",
                 error_type=type(exc).__name__,
                 returncode=_exception_returncode(exc),
             )
             raise RuntimeError(
-                "Docker could not attach the provider gateway to its egress network. "
-                "Gateway mode requires Docker Engine 28 or newer with "
-                "--gw-priority support "
+                "Docker could not attach the provider gateway to the internal worker network "
                 f"(exit_code={_exception_returncode(exc)})."
             ) from exc
         self._record_lifecycle(
             "connect",
-            "egress-network",
-            self.egress_network,
+            "worker-network",
+            self.worker_network,
             "succeeded",
         )
 
@@ -689,57 +689,11 @@ def build_worker_container_command(
 ) -> list[str]:
     """Build the worker Docker command without embedding environment values."""
 
-    command = [
-        "docker",
-        "run",
-        "--interactive",
-        "--name",
-        container_name,
-        "--init",
-        "--network",
-        network,
-        *_label_args(labels),
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--read-only",
-        "--pids-limit",
-        str(sandbox.pids_limit),
-        "--cpus",
-        str(sandbox.cpus),
-        "--memory",
-        sandbox.memory,
-        "--user",
-        f"{os.getuid()}:{os.getgid()}",
-        "--tmpfs",
-        "/tmp:rw,nosuid,nodev,size=2g",
-        "--workdir",
-        "/workspace",
-        "--mount",
-        f"type=bind,src={workspace.resolve()},dst=/workspace",
-        "--mount",
-        f"type=bind,src={tools_dir.resolve()},dst=/opt/optiprofiler-evolve/tools,readonly",
-        "--mount",
-        f"type=bind,src={broker.host_directory},dst={broker.directory}",
-        "--mount",
-        f"type=bind,src={broker.host_artifacts_directory},dst={broker.artifacts_directory},readonly",
-        "--env",
-        "HOME=/tmp/home",
-        "--env",
-        "PATH=/opt/optiprofiler-evolve/tools:/tmp/home/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        "--env",
-        "OPTIPROFILER_EVOLVE_BROKER_DIR",
-        "--env",
-        "OPTIPROFILER_EVOLVE_BROKER_TOKEN",
-        "--env",
-        "OPTIPROFILER_EVOLVE_WORKSPACE",
-    ]
-    for key in selected_values:
-        command.extend(["--env", key])
-    command.append(sandbox.worker_image)
-    command.extend(harness)
-    return command
+    return worker_container_spec(
+        sandbox=sandbox, workspace=workspace, tools_dir=tools_dir, broker=broker,
+        network=network, container_name=container_name,
+        selected_values=selected_values, labels=labels,
+    ).docker_argv(harness)
 
 
 def read_gateway_outcome(trace_dir: Path) -> GatewayRuntimeOutcome | None:

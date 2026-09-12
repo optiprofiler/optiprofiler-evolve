@@ -195,7 +195,7 @@ names cannot drift apart.
 | `workers.token_budget` | positive integer or `null` | `null` | Advisory token budget inserted into the worker task. |
 | `workers.max_budget_usd` | positive number or `null` | `null` | Claude Code per-worker cost limit. Other providers enforce their own limits. |
 | `workers.prompt_note` | non-empty string (≤2000 chars) or `null` | `null` | Extra run-owner work constraint rendered into the worker task card as `Experiment note (must follow)`. It shapes how workers spend the budget; it never replaces isolation, evaluation policy, or safety limits. |
-| `workers.adapter` | registered name | `cli` | Worker lifecycle adapter. The built-in adapter runs Codex or Claude Code. `provider_gateway` currently requires `cli`; custom adapters do not implement that credential boundary. |
+| `workers.adapter` | registered name | `cli` | Worker lifecycle adapter: `cli` uses direct Docker, `harbor` uses Harbor DockerEnvironment. Both share native Codex/Claude commands, traces and the gateway. Harbor requires Python 3.12+, the optional extra, Docker Compose v2 and gateway routing for every worker. Custom adapters do not implement that credential boundary. |
 | `workers.allow_direct_provider` | boolean | `false` | First unsafe opt-in for bypassing the provider gateway. Docker direct mode also requires `sandbox.allow_direct_network=true`. |
 | `workers.pool[].harness` | `claude` or `codex` | **required** | Coding-agent CLI adapter. |
 | `workers.pool[].model` | string | **required** | Model identifier passed unchanged to the selected CLI. |
@@ -313,11 +313,11 @@ agent.
 | `sandbox.max_candidate_bytes` | positive integer | `200000000` | Maximum total bytes accepted from one worker workspace. |
 | `sandbox.allow_direct_network` | boolean | `false` | Second unsafe opt-in for a Docker worker to bypass the provider gateway and use direct egress. |
 
-Gateway mode requires a Docker CLI that accepts `--gw-priority`, which is Docker Engine 28
-or newer. The runtime sets one explicit priority, `--gw-priority 1` on the egress network
-connect; the sidecar joins its internal network at container creation with no priority flag
-and relies on Docker's default-route semantics there. No version preflight runs, so an older
-CLI fails when the flag is rejected rather than at startup.
+The gateway starts on its private egress bridge, then joins the internal worker
+network. Only the egress bridge supplies a default route; workers never join it.
+This avoids the Docker 28-only `--gw-priority` flag. Neither backend mounts the
+Docker socket or grants network-administration capabilities to a worker.
+See [Harbor backend](harbor-backend.md) for prerequisites and lifecycle checks.
 
 The worker receives only a private solver copy, public manifests, and bounded
 evaluation tools. It does not receive the immutable reference, hidden manifest,

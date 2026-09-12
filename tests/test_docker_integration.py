@@ -65,9 +65,7 @@ class DockerGatewayIntegrationTests(unittest.TestCase):
                         "--name",
                         gateway,
                         "--network",
-                        internal,
-                        "--network-alias",
-                        "provider-gateway",
+                        egress,
                         "--user",
                         f"{os.getuid()}:{os.getgid()}",
                         "--mount",
@@ -101,9 +99,9 @@ class DockerGatewayIntegrationTests(unittest.TestCase):
                         "docker",
                         "network",
                         "connect",
-                        "--gw-priority",
-                        "1",
-                        egress,
+                        "--alias",
+                        "provider-gateway",
+                        internal,
                         gateway,
                     ]
                 )

@@ -64,7 +64,12 @@ def run_agent(
     worker_finished = False
     try:
         if sandbox.backend == "docker":
-            runtime = DockerInvocationRuntime(
+            runtime_class = DockerInvocationRuntime
+            if workers.adapter == "harbor":
+                from optiprofiler_evolve.agents.harbor import HarborInvocationRuntime
+
+                runtime_class = HarborInvocationRuntime
+            runtime = runtime_class(
                 worker=worker,
                 workers=workers,
                 sandbox=sandbox,

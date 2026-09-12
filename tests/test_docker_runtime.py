@@ -313,11 +313,18 @@ class DockerInvocationRuntimeTests(unittest.TestCase):
             self.assertIsInstance(sidecar_env, dict)
             assert isinstance(sidecar_env, dict)
             self.assertEqual(sidecar_env["OPENAI_API_KEY"], secret)
-            self.assertIn("--gw-priority", next(
+            self.assertEqual(
+                gateway_call[gateway_call.index("--network") + 1], runtime.egress_network,
+            )
+            connect = next(
                 command
                 for command, _ in calls
                 if command[:3] == ["docker", "network", "connect"]
-            ))
+            )
+            self.assertEqual(connect, [
+                "docker", "network", "connect", "--alias", "provider-gateway",
+                runtime.worker_network, runtime.gateway_container,
+            ])
             assert outcome is not None
             self.assertTrue(outcome.healthy)
             self.assertEqual(outcome.request_count, 2)

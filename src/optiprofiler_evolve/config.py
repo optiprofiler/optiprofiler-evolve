@@ -471,7 +471,7 @@ class WorkersConfig:
             worker.validate()
         self.tools.validate()
         if (
-            self.adapter == "cli"
+            self.adapter in {"cli", "harbor"}
             and not self.tools.shell
             and any(worker.harness == "codex" for worker in self.pool)
         ):
@@ -851,9 +851,13 @@ class EvolveConfig:
         self.sandbox.validate()
         self.workflow.validate()
         gateway_workers = [worker for worker in workers if worker.provider_gateway is not None]
-        if gateway_workers and self.workers.adapter != "cli":
+        if self.workers.adapter == "harbor" and (
+            self.sandbox.backend != "docker" or len(gateway_workers) != len(workers)
+        ):
+            raise ValueError("Harbor requires the Docker sandbox and a gateway for every worker.")
+        if gateway_workers and self.workers.adapter not in {"cli", "harbor"}:
             raise ValueError(
-                "provider_gateway currently requires workers.adapter='cli'; custom "
+                "provider_gateway requires workers.adapter='cli' or 'harbor'; custom "
                 "worker adapters cannot claim the built-in gateway boundary."
             )
         if self.sandbox.backend == "unsafe_local":
