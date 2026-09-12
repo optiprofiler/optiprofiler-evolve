@@ -24,6 +24,8 @@ or [the Codex example](../examples/experiment-codex-compatible.yaml).
 Harbor 0.23.0 is pinned and checked at adapter creation. Missing prerequisites
 fail explicitly; there is no fallback to unsandboxed local execution. Existing
 CLI-only installations still support Python 3.11.
+Run the Harbor controller as a non-root user: its UID is mapped into the worker
+so it can write its own run directory without receiving root authority.
 
 ## Ownership
 

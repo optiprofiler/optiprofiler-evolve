@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import asdict
 from importlib.metadata import PackageNotFoundError, version
@@ -18,6 +19,8 @@ class HarborWorkerAdapter(CliWorkerAdapter):
     name = "harbor"
 
     def __init__(self) -> None:
+        if os.geteuid() == 0:
+            raise RuntimeError("Harbor requires a non-root controller to map worker bind permissions.")
         if sys.version_info < (3, 12):
             raise RuntimeError("The Harbor backend requires Python >=3.12; the CLI backend does not.")
         try:

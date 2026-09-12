@@ -51,7 +51,7 @@ def run_agent(
         paths = prepare_trace(
             root=trace_dir,
             prompt=prompt,
-            command=["<worker-adapter>", "cli"],
+            command=["<worker-adapter>", workers.adapter],
             worker=worker,
             workers=workers,
             sandbox=sandbox,

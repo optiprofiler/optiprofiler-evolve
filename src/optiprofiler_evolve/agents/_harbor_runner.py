@@ -46,7 +46,7 @@ def _verify_boundary(spec: WorkerContainerSpec, actual: dict) -> None:
         "no new privileges": any(s.split(":")[0] == "no-new-privileges"
                                  for s in host["SecurityOpt"] or ()),
         "not privileged": host["Privileged"] is False,
-        "user": config["User"] == spec.user,
+        "user": config["User"] == spec.user and spec.user.split(":")[0] not in {"0", "root", ""},
         "workdir": config["WorkingDir"] == "/workspace",
         "pids": host["PidsLimit"] == spec.pids_limit,
         "memory": host["Memory"] == _memory_bytes(spec.memory),

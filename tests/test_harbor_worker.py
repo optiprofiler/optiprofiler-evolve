@@ -10,6 +10,7 @@ import unittest
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from test_config import minimal_config
 
@@ -38,6 +39,13 @@ def harbor_config() -> dict:
 
 
 class HarborConfigurationTests(unittest.TestCase):
+    def test_harbor_refuses_to_map_a_root_controller_into_the_worker(self) -> None:
+        from optiprofiler_evolve.agents.harbor import HarborWorkerAdapter
+
+        with patch("os.geteuid", return_value=0):
+            with self.assertRaisesRegex(RuntimeError, "non-root controller"):
+                HarborWorkerAdapter()
+
     def test_harbor_uses_the_existing_gateway_contract(self) -> None:
         config = load_config(harbor_config())
         self.assertEqual(config.workers.adapter, "harbor")
