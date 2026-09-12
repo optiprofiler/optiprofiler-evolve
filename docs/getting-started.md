@@ -26,10 +26,11 @@ Build the isolated coding-worker and evaluator images:
 ```bash
 docker build -f docker/worker/Dockerfile -t optiprofiler-evolve-worker:latest .
 docker build -f docker/evaluator/Dockerfile -t optiprofiler-evolve-evaluator:latest .
+docker build -f docker/solver/Dockerfile -t optiprofiler-evolve-solver:latest .
 docker build -f docker/gateway/Dockerfile -t optiprofiler-evolve-gateway:latest .
 ```
 
-Confirm that all three images are usable before spending model tokens:
+Confirm that all four images are usable before spending model tokens:
 
 ```bash
 docker run --rm --entrypoint sh optiprofiler-evolve-worker:latest -lc \

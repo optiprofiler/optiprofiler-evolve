@@ -55,6 +55,7 @@ images:
 python -m pip install -e '.[dev]'
 docker build -f docker/worker/Dockerfile -t optiprofiler-evolve-worker:latest .
 docker build -f docker/evaluator/Dockerfile -t optiprofiler-evolve-evaluator:latest .
+docker build -f docker/solver/Dockerfile -t optiprofiler-evolve-solver:latest .
 docker build -f docker/gateway/Dockerfile -t optiprofiler-evolve-gateway:latest .
 ```
 
