@@ -374,6 +374,24 @@ def solver(fun, x0, *args):
             after = set(_run(["docker", "ps", "-aq", "--filter", "name=ope-solver-"]).stdout.split())
             self.assertEqual(after - before, set())
 
+    def test_malformed_output_or_killed_solver_never_produces_a_success_score(self) -> None:
+        sources = (
+            "def solver(fun, x0):\n    import os\n    os._exit(42)\n",
+            "def solver(fun, x0):\n    import os\n    os.write(3, b'not-json\\n')\n    return x0\n",
+        )
+        for source in sources:
+            with self.subTest(source=source), tempfile.TemporaryDirectory(
+                prefix=".docker-protocol-", dir=Path.cwd()
+            ) as directory:
+                root = Path(directory)
+                evaluator = self._source_evaluation(root, source)
+                (root / "reference/solver.py").write_text("def solver(fun, x0): return x0\n")
+                result = evaluator.evaluate(root / "candidate", "smoke", root / "results")
+                self.assertFalse(result.success)
+                calls = json.loads((root / "results/numeric_calls.json").read_text())["calls"]
+                self.assertTrue(calls)
+                self.assertTrue(all(c["outcome"] == "disconnected" for c in calls))
+
     def test_candidate_cannot_replace_the_trusted_benchmark(self) -> None:
         from optiprofiler_evolve.config import EvaluationConfig
         from optiprofiler_evolve.criteria.performance.evaluator import DockerOptiProfilerEvaluator
