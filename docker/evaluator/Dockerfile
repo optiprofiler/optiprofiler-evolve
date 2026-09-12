@@ -10,6 +10,12 @@ ARG NUMPY_VERSION=1.26.4
 ARG PDFO_VERSION=2.2.0
 ARG PRIMA_GIT_REF=1d76fb88aeffb427cd17ed1e9d0d3b34f414913f
 
+# PDFO may need a source build on architectures without a published wheel.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        cmake g++ gcc gfortran git ninja-build \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir \
     "numpy==${NUMPY_VERSION}" \
     "optiprofiler==${OPTIPROFILER_VERSION}" "PyYAML==${PYYAML_VERSION}" \
@@ -17,11 +23,7 @@ RUN pip install --no-cache-dir \
 
 # Pin the tested independent PRIMA commit so a run can be reproduced after
 # upstream changes.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        cmake g++ gcc gfortran git ninja-build \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir /tmp/prima \
+RUN mkdir /tmp/prima \
     && cd /tmp/prima \
     && git init \
     && git remote add origin https://github.com/libprima/prima.git \
