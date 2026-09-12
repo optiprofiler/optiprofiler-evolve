@@ -76,7 +76,12 @@ assessment:
 
 Use a dedicated reviewer worker for scientific runs; `allow_same_model` is an
 explicit experiment choice. If `criteria` is supplied, it is the complete
-criterion map, not a patch to defaults. Omitted criteria do not run. Without an
+criterion map, not a patch to defaults, and the loader warns by name for every
+criterion it omits that the defaults enable. Omitting a criterion removes it
+rather than disabling it, so **omitting `integrity` drops the integrity gate
+entirely**; write `integrity: {enabled: false}` to stop running it on purpose.
+Supplying only some criteria is still supported when the goal is to isolate one
+standard, which is why this is a warning and not an error. Without an
 assessment block, performance has weight 1 and integrity is an enforced,
 zero-weight constraint; complexity is disabled. An integrity mapping without a
 weight also defaults to 0. Set a positive integrity weight explicitly when its

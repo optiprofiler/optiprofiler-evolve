@@ -67,8 +67,10 @@ evolution:
       epsilon: 0.0
 ```
 
-With one objective, `metric_pareto` delegates directly to
-`validation_lexicographic`; it does not create a one-dimensional pseudo-front.
+With one objective and `epsilon` 0, `metric_pareto` does **not** delegate to
+`validation_lexicographic`: it retains by the objective's own metric value, so it
+can retain a different candidate whenever the assessed score and that metric
+disagree. It creates no one-dimensional pseudo-front.
 The package provides the interface before OptiProfiler's future agent-oriented
 output exposes real profile/per-instance dimensions. Choosing unavailable
 objectives quarantines the affected candidate instead of substituting zero or

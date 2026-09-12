@@ -11,6 +11,7 @@ import time
 import unittest
 from pathlib import Path
 
+from optiprofiler_evolve.agents.docker_runtime import recover_gateway_trace
 from optiprofiler_evolve.config import (
     ProviderGatewayConfig,
     SandboxConfig,
@@ -334,6 +335,7 @@ class TraceLedgerTests(unittest.TestCase):
                 run_id="run-123",
                 config_hash="c" * 64,
                 adapter_name="cli",
+                recover_gateway_trace=recover_gateway_trace,
             )
             paths = ledger.prepare(
                 root=run_dir / "traces" / "it001-i00-a00",
@@ -410,6 +412,7 @@ class TraceLedgerTests(unittest.TestCase):
                 run_id="run-gateway",
                 config_hash="b" * 64,
                 adapter_name="cli",
+                recover_gateway_trace=recover_gateway_trace,
             )
             paths = ledger.prepare(
                 root=run_dir / "traces" / "gateway-job",
@@ -473,6 +476,7 @@ class TraceLedgerTests(unittest.TestCase):
                 run_id="run-recovery",
                 config_hash="d" * 64,
                 adapter_name="cli",
+                recover_gateway_trace=recover_gateway_trace,
             )
             (run_dir / "provenance.json").write_text(
                 json.dumps(

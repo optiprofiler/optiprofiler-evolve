@@ -31,7 +31,13 @@ class ValidationSelector:
             raise ValueError("Validation selection limit must be positive.")
         environment.commits.begin_validation_selection()
         unique = tuple(dict.fromkeys(str(value) for value in candidate_ids))
-        ranked: list[tuple[float, float, str]] = []
+        # Admission candidates rank on `CandidateRecord.ranking_key`. Research
+        # variants have no iteration, and comparing one against an admitted
+        # candidate on a filled-in iteration would silently change which wins an
+        # otherwise exact tie, so variants keep their original
+        # (score, public, id) precedence and the two precedence levels are
+        # applied explicitly below.
+        ranked: list[tuple[tuple[float, float], int, str]] = []
         new_queries = 0
         for candidate_id in unique:
             record = environment.state.candidates.get(candidate_id)
@@ -40,8 +46,8 @@ class ValidationSelector:
                     continue
                 if tree_hash(record.path) != record.tree_hash:
                     raise ValueError(f"Candidate changed after admission: {candidate_id}")
-                ranked.append((record.ranking_score, record.public_score if record.public_score is not None
-                               else float("-inf"), candidate_id))
+                score, public, iteration, identity = record.ranking_key
+                ranked.append(((score, public), iteration, identity))
                 continue
             handle = environment.state.variant_handles.get(candidate_id)
             if handle is None:
@@ -78,13 +84,16 @@ class ValidationSelector:
                 new_queries += 1
             if not result.success or result.assessment_score is None:
                 continue
-            ranked.append((result.assessment_score, public.score if public.score is not None
-                           else float("-inf"), candidate_id))
+            ranked.append((
+                (result.assessment_score,
+                 public.score if public.score is not None else float("-inf")),
+                0,
+                candidate_id,
+            ))
         selected = tuple(
             candidate_id
-            for _score, _public_score, candidate_id in sorted(
-                ranked,
-                key=lambda item: (-item[0], -item[1], item[2]),
+            for _scores, _iteration, candidate_id in sorted(
+                ranked, key=lambda item: (-item[0][0], -item[0][1], item[2])
             )[:limit]
         )
         query = {

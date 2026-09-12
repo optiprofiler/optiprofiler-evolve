@@ -46,7 +46,14 @@ class LiveViews:
     def stop(self) -> None:
         self._stop.set()
         if self.thread is not None and self.thread.ident is not None:
-            self.thread.join()
+            # Bounded: a wedged renderer or an unresponsive filesystem must not
+            # hold up run completion. The thread is a daemon, so abandoning it is
+            # safe and the run still returns its result.
+            self.thread.join(timeout=10)
+            if self.thread.is_alive():
+                logger.warning(
+                    "Background view refresh did not stop within 10s; abandoning it."
+                )
         self.thread = None
 
     def _loop(self) -> None:

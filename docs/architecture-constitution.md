@@ -237,4 +237,18 @@ Owner views may read documented controller artifact paths without importing
 controller implementations. Controller commits may write observability attempt
 records; those records are evidence, not a second candidate registry. Public
 disclosure stays default-deny and independent of private event reconstruction.
-Dependency tests guard these import boundaries.
+
+`tests/test_import_boundaries.py` enforces the table above by reading imports
+with `ast`. It ignores imports under `TYPE_CHECKING`, which do not exist at
+runtime and therefore cannot create a cycle. Two collaborations are deliberately
+allowed and are listed in that test rather than left implicit:
+
+- `phases` may import `controller.contracts`, the published capability protocol,
+  and `observability` contracts. It may not import a controller implementation.
+- Value types needed by two layers belong at the package root. `UsageRecord` and
+  the worker-exit projection live in `models.py` for this reason: while they were
+  owned by `agents` or by `observability`, those two packages became mutually
+  dependent.
+
+Layers the table does not mention are not thereby unconstrained; a new
+cross-package import is a change to this table and belongs in the same commit.

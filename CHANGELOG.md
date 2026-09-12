@@ -25,11 +25,13 @@
   `local` are rejected; use `iterations` and `unsafe_local`.
 - Replace feedback modes `summary`/`agent` with `score_only`/`full_artifacts`.
   The default remains score-only feedback.
-- Quick-start defaults now use 1 iteration, 1 island, population 2, no migration,
+- Quick-start defaults use 1 iteration, 1 island, population 2, no migration,
   and `mutate -> smoke -> public_evaluate`. Tool defaults are minimal, with no
   search or compilers. The default preset uses evaluation factor 20 (smoke 5),
-  one benchmark process and score-only output; previous default search budgets
-  were substantially larger.
+  one benchmark process and score-only output. These values are unchanged from
+  the previous release; the "substantially larger budgets" they replace predate
+  that release, so do not read this entry as a change against the immediately
+  preceding version.
 - Remove `integrity_review.strict`: exhausted reviewer retries reject that
   candidate and exploration continues. This is not a fail-fast outage policy.
   Integrity is a zero-weight validation constraint by default, including the

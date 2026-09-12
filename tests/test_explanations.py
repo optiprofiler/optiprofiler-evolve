@@ -6,7 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optiprofiler_evolve.agents.explanations import capture_solver_explanation, explanation_memory
+from optiprofiler_evolve.agents.explanations import capture_solver_explanation
+from optiprofiler_evolve.observability.attempts import explanation_memory
 
 
 class SolverExplanationTests(unittest.TestCase):

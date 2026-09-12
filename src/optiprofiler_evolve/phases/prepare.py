@@ -39,7 +39,12 @@ class ExperimentFingerprints:
     config_fingerprint: str
     code_fingerprint: str
     experiment_fingerprint: str
-    schema_version: str = "experiment_fingerprints/1"
+    # Bumped because `config_fingerprint` hashes the resolved configuration, whose
+    # key space changed from `evaluation`/`integrity_review` to
+    # `assessment`/`execution`. The hashing code itself is unchanged, so without
+    # this version a cross-release fingerprint mismatch carries no signal that
+    # would let a comparison harness attribute it.
+    schema_version: str = "experiment_fingerprints/2"
 
     def as_dict(self) -> dict[str, str]:
         return asdict(self)

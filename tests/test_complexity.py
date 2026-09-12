@@ -21,7 +21,6 @@ from optiprofiler_evolve.agents.contracts import AgentJob, WorkerOutcome
 from optiprofiler_evolve.agents.feedback import project_feedback
 from optiprofiler_evolve.application.run import EvolutionRun
 from optiprofiler_evolve.config import ComplexityConfig, SandboxConfig, load_config
-from optiprofiler_evolve.controller.assessment import PublicAssessment
 from optiprofiler_evolve.controller.contracts import VariantRequest
 from optiprofiler_evolve.criteria.complexity.analyzer import (
     ComplexityChecker,
@@ -35,6 +34,7 @@ from optiprofiler_evolve.observability.events import EventWriter, rebuild_run_st
 from optiprofiler_evolve.observability.projections import project_public_events
 from optiprofiler_evolve.observability.trace_ledger import TraceLedger
 from optiprofiler_evolve.observability.views.public import render_public_report, render_status
+from optiprofiler_evolve.phases.attempts.contracts import PublicOnlyAssessment as PublicAssessment
 from optiprofiler_evolve.phases.attempts.contracts import StepResult
 from optiprofiler_evolve.phases.prepare import PreparePhase
 from optiprofiler_evolve.solver import InterfaceSpec, tree_hash

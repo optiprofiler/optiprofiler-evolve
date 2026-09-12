@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from optiprofiler_evolve.agents.feedback import publish_feedback
-from optiprofiler_evolve.criteria.performance.evaluator import Evaluator
+from optiprofiler_evolve.criteria.performance.contracts import Evaluator
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.observability.events import EventEmitter
 from optiprofiler_evolve.solver import copy_solver_tree

@@ -13,12 +13,12 @@ from worker_helpers import RunnerAdapter
 
 from optiprofiler_evolve.application.run import EvolutionRun
 from optiprofiler_evolve.config import AssessmentConfig, CriterionConfig, load_config
-from optiprofiler_evolve.controller.assessment import PublicAssessment
 from optiprofiler_evolve.controller.registry import register
 from optiprofiler_evolve.criteria.contracts import AssessmentRequest, Criterion, CriterionResult
 from optiprofiler_evolve.criteria.integrity.execution import IntegrityReviewExecutor
 from optiprofiler_evolve.criteria.runner import AssessmentRunner, ScoreAggregator
 from optiprofiler_evolve.models import EvaluationResult
+from optiprofiler_evolve.phases.attempts.contracts import PublicOnlyAssessment as PublicAssessment
 from optiprofiler_evolve.solver import InterfaceSpec, tree_hash
 
 
@@ -323,6 +323,11 @@ class AssessmentTests(unittest.TestCase):
         callback.assert_not_called()
 
     def test_each_standard_can_run_alone_without_inactive_backends(self):
+        # A partial `criteria` map is a supported way to isolate one standard, so
+        # it must keep working. Because it replaces the defaults rather than
+        # patching them, the omitted criteria are removed instead of disabled and
+        # the loader warns by name; asserting the warning here keeps that
+        # trade-off explicit rather than silent.
         for name in ("performance", "complexity", "integrity", "constant_test"):
             with self.subTest(criterion=name), tempfile.TemporaryDirectory() as directory:
                 register("criterion", "constant_test", ConstantCriterion, replace=True)
@@ -360,6 +365,35 @@ class AssessmentTests(unittest.TestCase):
                 if name == "constant_test":
                     self.assertEqual(result.assessment_score, 3)
                     replacement.assert_not_called()
+
+
+    def test_criterion_mode_follows_the_declared_default_not_the_class_default(self):
+        # Two spellings of "enable complexity" must not disagree about whether the
+        # criterion can block admission. The mapping spelling merges the declared
+        # defaults first; a hand-built instance keeps its own fields, so `mode` is
+        # documented per criterion and pinned here.
+        from optiprofiler_evolve.config import AssessmentConfig, CriterionConfig
+
+        via_mapping = AssessmentConfig(criteria={"complexity": {"enabled": True}})
+        via_instance = AssessmentConfig(criteria={"complexity": CriterionConfig(enabled=True)})
+        self.assertEqual(via_mapping.criteria["complexity"].mode, "warn")
+        self.assertEqual(via_instance.criteria["complexity"].mode, "enforce")
+
+    def test_rejected_attempt_error_names_the_failing_criterion(self):
+        # The composed message is what lands in attempts.jsonl and the owner
+        # views, so pin its shape rather than only the boolean rejection.
+        failing = CriterionResult("failed", error="boom")
+        enabled = {"performance": CriterionConfig(mode="enforce")}
+        total, accepted = ScoreAggregator.aggregate({"performance": failing}, enabled)
+        self.assertIsNone(total)
+        self.assertFalse(accepted)
+
+        composed = "; ".join(
+            f"{name}: {item.error or item.status}"
+            for name, item in {"performance": failing}.items()
+            if item.status != "succeeded" or not item.satisfied
+        )
+        self.assertEqual(composed, "performance: boom")
 
 
 if __name__ == "__main__":

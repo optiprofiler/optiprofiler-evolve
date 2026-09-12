@@ -58,8 +58,8 @@ independently of whether the workflow includes report:
 | `validation_score` | Controller-only fitness used to select the champion. |
 | `final_score` | Fitness on the hidden holdout for the validation-selected champion. |
 | `finalists` | One hidden-assessed champion, or an empty tuple when hidden has not run. |
-| `assessment_score` | Weighted formal criterion score for the selected champion, or `None`. |
-| `final_assessment_score` | Weighted hidden criterion score, or `None` if unavailable. |
+| `assessment_score` | Weighted formal criterion score for the selected champion, or `None`. **Not the same scale as the fitness fields above**: it is the weighted mean of enabled criterion scores with no `[0, 1]` cap, so it must not be interpreted as a fitness or compared across runs with different baselines. |
+| `final_assessment_score` | Weighted hidden criterion score, or `None` if unavailable. Same scale caveat as `assessment_score`. |
 | `artifacts` | Detached top-level read-only mapping of committed phase outputs. Values may contain paths and typed records; this is not a deep snapshot or a public/sanitized export. |
 
 Without a selected champion, all winner and score fields are `None`; a prepared

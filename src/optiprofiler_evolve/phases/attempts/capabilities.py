@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from optiprofiler_evolve.controller.assessment import PublicAssessment
+from optiprofiler_evolve.phases.attempts.contracts import PublicOnlyAssessment
 
 if TYPE_CHECKING:
     from optiprofiler_evolve.controller.runtime import RunEnvironment
@@ -15,9 +15,10 @@ from pathlib import Path
 
 from optiprofiler_evolve.agents.broker import EvaluationBroker
 from optiprofiler_evolve.agents.contracts import SolverJob, WorkerOutcome, WorkerRequest
-from optiprofiler_evolve.agents.explanations import capture_solver_explanation, explanation_status
+from optiprofiler_evolve.agents.explanations import capture_solver_explanation
 from optiprofiler_evolve.config import WorkerConfig
 from optiprofiler_evolve.models import CandidateRecord, EvaluationResult
+from optiprofiler_evolve.observability.attempts import explanation_status
 from optiprofiler_evolve.phases.attempts.contracts import AttemptCapabilities
 from optiprofiler_evolve.phases.attempts.prompt import build_worker_prompt
 from optiprofiler_evolve.solver import (
@@ -65,8 +66,9 @@ class ControllerAttemptCapabilities(AttemptCapabilities):
         broker = EvaluationBroker(
             workspace=self._workspace,
             control_dir=environment.run_dir / "controller" / "brokers" / self._attempt_id,
-            evaluator=PublicAssessment(environment.state.assessor.evaluate,
-                                       candidate_id=self._attempt_id, parent=self._parent.path),
+            evaluator=PublicOnlyAssessment(environment.state.assessor.evaluate,
+                                           candidate_id=self._attempt_id,
+                                           parent=self._parent.path),
             max_smoke_calls=environment.config.execution.max_smoke_calls_per_worker,
             max_public_calls=environment.config.execution.max_public_calls_per_worker,
             candidate_validator=self._audit_edit_scope,

@@ -119,19 +119,3 @@ class CandidateAssessor:
             ) or "Assessment has no complete weighted score."
         return replace(raw, output_dir=output_dir, success=report.accepted,
                        error=error, assessment_score=report.total, assessment=report.as_dict())
-
-
-class PublicAssessment:
-    """Broker adapter that cannot request controller-only assessment profiles."""
-
-    name = "public_assessment"
-    deterministic = False
-
-    def __init__(self, assess: Callable[..., EvaluationResult], **metadata: object) -> None:
-        self._assess = assess
-        self._metadata = metadata
-
-    def evaluate(self, candidate: Path, mode: str, output_dir: Path) -> EvaluationResult:
-        if mode not in {"smoke", "public", "public_score"}:
-            raise ValueError("Worker assessment is public-only.")
-        return self._assess(candidate, mode, output_dir, **self._metadata)

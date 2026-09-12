@@ -1,9 +1,13 @@
 """Agent-job identity validation, role input copies and invocation diagnostics.
 
 These helpers serve the agent-invocation path: job/worker identity checks, role
-input preparation, worker-exit diagnostics and trace scope labels. They are owned
-here (the agent layer) rather than scattered over the caller modules that invoke
-agents on behalf of controller, phases and observability.
+input preparation and trace scope labels. They are owned here (the agent layer)
+rather than scattered over the caller modules that invoke agents on behalf of
+controller, phases and observability.
+
+Presentation projections over an invocation's result, such as the worker-exit
+warning, live at the package root in ``models`` because observability needs them
+too, and owning them here made the two layers mutually dependent.
 """
 
 from __future__ import annotations
@@ -13,28 +17,10 @@ import shutil
 from collections.abc import Mapping
 from pathlib import Path
 
-from optiprofiler_evolve.agents.contracts import WorkerOutcome
-
 
 def guidance_id(direction: Mapping[str, object] | None) -> str | None:
     return str(direction["card_id"]) if direction and direction.get("card_id") else None
 
-
-def worker_exit_warning(outcome: WorkerOutcome | None) -> str | None:
-    """Describe an abnormal worker exit without judging its workspace."""
-
-    if outcome is None:
-        return None
-    if outcome.returncode == 0 and not outcome.timed_out and not outcome.cancelled:
-        return None
-    parts = [f"worker_exit_warning: returncode={outcome.returncode}"]
-    if outcome.timed_out:
-        parts.append("timed_out")
-    if outcome.cancelled:
-        parts.append("cancelled")
-    if outcome.termination_reason:
-        parts.append(f"termination={outcome.termination_reason}")
-    return ", ".join(parts)
 
 
 def safe_identifier(value: str, label: str) -> str:

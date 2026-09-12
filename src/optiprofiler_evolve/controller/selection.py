@@ -51,15 +51,7 @@ class ValidationLexicographicRetention:
         if capacity < 1:
             raise ValueError("Archive capacity must be positive.")
         unique = {record.candidate_id: record for record in candidates}
-        ordered = sorted(
-            unique.values(),
-            key=lambda record: (
-                -record.ranking_score,
-                -(record.public_score if record.public_score is not None else float("-inf")),
-                -record.iteration,
-                record.candidate_id,
-            ),
-        )
+        ordered = sorted(unique.values(), key=lambda record: record.ranking_key, reverse=True)
         return tuple(ordered[:capacity])
 
 

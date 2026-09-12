@@ -7,6 +7,7 @@ import math
 import os
 import re
 import types
+import warnings
 from collections.abc import Iterator, Mapping, Sequence
 from copy import deepcopy
 from functools import cached_property
@@ -626,6 +627,41 @@ def _default_criteria() -> Mapping[str, CriterionConfig]:
     }
 
 
+# Criteria whose options are validated against a strict dataclass. A disabled
+# criterion is usually not reached by the enabled-only option validation, so
+# without this an omitted or misspelled key would be stored verbatim and only
+# surface later, when the criterion is re-enabled.
+_CRITERION_OPTION_SCHEMAS: Mapping[str, type] = {
+    "complexity": ComplexityConfig,
+    "integrity": IntegrityReviewConfig,
+}
+
+# Option keys retired by this branch, reported by name so a migration is told
+# that the setting no longer has any effect instead of silently keeping it.
+_RETIRED_CRITERION_OPTIONS: Mapping[str, frozenset[str]] = {
+    "integrity": frozenset({"strict"}),
+}
+
+
+def _validate_criterion_option_keys(name: str, options: Mapping[str, Any]) -> None:
+    """Key-check one criterion's options regardless of whether it is enabled."""
+
+    schema = _CRITERION_OPTION_SCHEMAS.get(name)
+    if schema is None:
+        return
+    path = f"assessment.criteria.{name}.options"
+    retired = sorted(_RETIRED_CRITERION_OPTIONS.get(name, frozenset()).intersection(options))
+    if retired:
+        raise ValueError(
+            f"Removed config fields at {path}: {retired}. This key was dropped by this "
+            "branch and no longer has any effect; delete it."
+        )
+    known = {field.name for field in dataclasses.fields(schema)}
+    unknown = sorted(set(options).difference(known))
+    if unknown:
+        raise ValueError(f"Unknown keys at {path}: {unknown}")
+
+
 @dataclasses.dataclass(frozen=True)
 class AssessmentConfig:
     criteria: Mapping[str, CriterionConfig] = dataclasses.field(default_factory=_default_criteria)
@@ -643,6 +679,11 @@ class AssessmentConfig:
         }
         object.__setattr__(self, "criteria", freeze_value(criteria))
         object.__setattr__(self, "profiles", freeze_value(self.profiles))
+        # Key-check every criterion, including disabled ones: enabled-only
+        # validation would let a disabled criterion accumulate removed or
+        # misspelled options that only surface once it is re-enabled.
+        for name, spec in criteria.items():
+            _validate_criterion_option_keys(name, spec.options)
         for profile, overrides in self.profiles.items():
             if profile not in {"smoke", "public", "validation", "hidden"}:
                 raise ValueError(f"Unknown assessment profile: {profile!r}")
@@ -978,6 +1019,27 @@ def load_config(config: EvolveConfig | Mapping[str, Any] | str | Path) -> Evolve
         if not isinstance(raw, Mapping):
             raise TypeError("The experiment config must contain a mapping at its root.")
         assessment = _from_mapping(AssessmentConfig, raw.get("assessment", {}), "assessment")
+        # A supplied `criteria` map replaces the defaults rather than patching them.
+        # That is deliberate - it is how a single standard is exercised in
+        # isolation - but it means an omitted criterion is removed rather than
+        # disabled, so a gate can disappear with no error. Warn instead of
+        # rejecting, because isolating a criterion is a supported use.
+        supplied = raw.get("assessment", {}).get("criteria")
+        if supplied is not None:
+            omitted = sorted(
+                name for name, spec in _default_criteria().items()
+                if spec.enabled and name not in supplied
+            )
+            if omitted:
+                warnings.warn(
+                    f"assessment.criteria omits {omitted}, which the defaults enable. "
+                    "This mapping is the complete criterion map, not a patch, so the "
+                    "omitted criteria do not run and their gates do not apply. List every "
+                    "criterion explicitly (enabled: false to disable one on purpose) to "
+                    "silence this warning.",
+                    UserWarning,
+                    stacklevel=3,
+                )
         criteria = {
             name: dataclasses.replace(spec, options=_expand_environment(spec.options))
             if assessment.enabled(name) else spec
@@ -1019,8 +1081,16 @@ def _from_mapping(cls: type[_T], raw: Mapping[str, Any], path: str) -> _T:
         retired = set(raw).intersection({"evaluation", "complexity", "integrity_review"})
         if retired:
             raise ValueError(
-                f"Removed config fields {sorted(retired)}: move backend settings to execution "
-                "and quality options to assessment.criteria.<name>.options."
+                f"Removed config fields {sorted(retired)}. Rename 'evaluation' to 'execution' "
+                "and move quality options into 'assessment.criteria'. That mapping is the "
+                "COMPLETE criterion map, not a patch, so every criterion you want to run must "
+                "be listed; one that is left out does not run at all and its gate is dropped:\n\n"
+                "execution: {}            # former 'evaluation', minus the moved quality options\n"
+                "assessment:\n"
+                "  criteria:\n"
+                "    performance: {}      # former evaluation.benchmark / smoke_overrides\n"
+                "    integrity: {}        # former 'integrity_review'; omit only to drop the gate\n"
+                "    complexity: {enabled: false, mode: warn}"
             )
     fields = {field.name: field for field in dataclasses.fields(cls)}
     private = sorted(key for key in raw if str(key).startswith("_"))

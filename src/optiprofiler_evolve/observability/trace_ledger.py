@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 import os
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from optiprofiler_evolve.agents.docker_runtime import recover_gateway_trace
 from optiprofiler_evolve.config import SandboxConfig, WorkerConfig, WorkersConfig
 from optiprofiler_evolve.files import read_json_object as _read_json_object
 from optiprofiler_evolve.observability.traces import (
@@ -32,11 +31,16 @@ class TraceLedger:
         run_id: str,
         config_hash: str,
         adapter_name: str,
+        recover_gateway_trace: Callable[[Path], object] | None = None,
     ) -> None:
         self.run_dir = run_dir.resolve()
         self.run_id = run_id
         self.config_hash = config_hash
         self.adapter_name = adapter_name
+        # Injected port. Reading gateway sidecar evidence is owned by the agent
+        # layer, so observability must not import it: that import previously made
+        # agents and observability mutually dependent.
+        self._recover_gateway_trace = recover_gateway_trace
         self.index_path = self.run_dir / "controller" / "trace_index.jsonl"
         self.coverage_path = self.run_dir / "controller" / "trace_coverage.json"
         self.public_coverage_path = self.run_dir / "public_trace_coverage.json"
@@ -73,21 +77,25 @@ class TraceLedger:
             workspace=workspace,
         )
 
+    def _recover_gateway(self, root: Path) -> None:
+        """Consult the injected gateway-evidence reader, if the run supplied one."""
+
+        if self._recover_gateway_trace is not None:
+            self._recover_gateway_trace(root)
+
     def record(self, paths: TracePaths, *, workspace: Path) -> dict[str, object]:
         """Record terminal workspace evidence and append one idempotent index row."""
-
         record_workspace_evidence(paths, workspace)
-        recover_gateway_trace(paths.root)
+        self._recover_gateway(paths.root)
         entry = _trace_index_entry(self.run_dir, paths)
         self._append_entry(entry)
         return entry
 
     def recover_and_summarize(self) -> dict[str, object]:
         """Recover interrupted traces, reconcile the index, and write coverage."""
-
         recover_incomplete_traces(self.run_dir)
         for root in trace_roots(self.run_dir):
-            recover_gateway_trace(root)
+            self._recover_gateway(root)
             paths = trace_paths(root)
             if paths.outcome.is_file():
                 self._append_entry(_trace_index_entry(self.run_dir, paths))

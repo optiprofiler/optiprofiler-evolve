@@ -21,11 +21,11 @@ from optiprofiler_evolve.agents.contracts import (
 from optiprofiler_evolve.agents.jobs import copy_role_input as _copy_role_input
 from optiprofiler_evolve.agents.jobs import redact_role_input as _redact_role_input
 from optiprofiler_evolve.agents.jobs import safe_identifier as _safe_identifier
-from optiprofiler_evolve.agents.jobs import worker_exit_warning as _worker_exit_warning
 from optiprofiler_evolve.agents.llm import LLMClient
 from optiprofiler_evolve.config import SandboxConfig, ToolConfig, WorkersConfig
 from optiprofiler_evolve.errors import RunCancelled as _RunCancelled
 from optiprofiler_evolve.files import safe_relative_path
+from optiprofiler_evolve.observability.attempts import worker_exit_warning as _worker_exit_warning
 from optiprofiler_evolve.solver import validate_tree_safety
 
 

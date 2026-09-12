@@ -594,7 +594,7 @@ class EngineTests(unittest.TestCase):
                 (result.run_dir / "controller" / "experiment_fingerprints.json").read_text()
             )
             provenance = json.loads((result.run_dir / "provenance.json").read_text())
-            self.assertEqual(fingerprints["schema_version"], "experiment_fingerprints/1")
+            self.assertEqual(fingerprints["schema_version"], "experiment_fingerprints/2")
             self.assertEqual(
                 fingerprints["config_fingerprint"],
                 provenance["config_hash"],

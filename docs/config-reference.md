@@ -98,7 +98,7 @@ algorithmic runtime complexity or proof against dynamically generated code.
 | `assessment.criteria.performance.options.benchmark` | mapping | `{}` | Options forwarded to `optiprofiler.benchmark`; data and solver identity fields are controller-owned. |
 | `assessment.criteria.performance.options.smoke_overrides` | mapping | `{}` | Benchmark options overlaid only for `smoke_test`. |
 | `execution.backend` | `docker` or `unsafe_local` | `docker` | Execution boundary for Python candidate code. `unsafe_local` executes untrusted solver code in the controller process and is for trusted development only. |
-| `execution.docker_image` | string or `null` | `null` | Evaluator image; **required** when backend is `docker`. |
+| `execution.docker_image` | string or `null` | `null` | Evaluator image; **required** when the backend is `docker`. The JSON schema requires it whenever `backend` is `docker`, while the loader only enforces it on profiles that actually construct an evaluator, so for a run with the performance criterion disabled the schema is stricter than the runtime. |
 | `execution.timeout_seconds` | positive integer | `3600` | Wall-time limit for one Docker evaluator process; `unsafe_local` has no process timeout. |
 | `execution.cpus` | positive number | `2.0` | CPU limit passed to the evaluator container; ignored by `unsafe_local`. |
 | `execution.memory` | Docker memory string | `4g` | Evaluator-container memory limit; ignored by `unsafe_local`. |

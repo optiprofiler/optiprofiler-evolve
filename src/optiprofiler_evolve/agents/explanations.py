@@ -1,9 +1,14 @@
 """Bounded, human-readable explanations emitted beside solver mutations.
 
-Explanation files are untrusted worker metadata. They are normalized into the
-run ledger and removed from the executable solver tree before any audit or
-evaluation. A missing explanation is visible in the report but does not change
-the numerical admission decision.
+Explanation files are untrusted worker metadata. They are captured and validated
+here and removed from the executable solver tree before any audit or evaluation.
+A missing explanation is visible in the report but does not change the numerical
+admission decision.
+
+Projecting a captured explanation into ledger fields, such as its normalized
+status or its bounded memory summary, lives in ``observability.attempts``: those
+are presentation derivations over the captured file, and keeping them here made
+the agent and observability layers mutually dependent.
 """
 
 from __future__ import annotations
@@ -74,43 +79,6 @@ def capture_solver_explanation(
     return destination
 
 
-def explanation_status(path: Path) -> str:
-    """Return the normalized status without trusting arbitrary worker fields."""
-
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return "invalid"
-    if not isinstance(value, Mapping):
-        return "invalid"
-    status = str(value.get("status", "invalid"))
-    return status if status in {"complete", "missing", "invalid"} else "invalid"
-
-
-def explanation_memory(path: Path) -> dict[str, object] | None:
-    """Return a bounded solver-description projection for later workers."""
-
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(value, Mapping) or value.get("status") != "complete":
-        return None
-    mechanisms = value.get("mechanisms", [])
-    pseudocode = value.get("pseudocode", [])
-    return {
-        "summary": str(value.get("summary", ""))[:1000],
-        "mechanisms": [
-            str(item.get("name", ""))[:200]
-            for item in mechanisms[:12]
-            if isinstance(item, Mapping) and item.get("name")
-        ]
-        if isinstance(mechanisms, list)
-        else [],
-        "pseudocode": [str(item)[:500] for item in pseudocode[:12]]
-        if isinstance(pseudocode, list)
-        else [],
-    }
 
 
 def _normalize(

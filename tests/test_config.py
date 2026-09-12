@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+import warnings
 from unittest.mock import patch
 
 from optiprofiler_evolve.config import load_config
@@ -305,6 +306,62 @@ class ConfigTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "requires workers.adapter='cli'"):
             load_config(raw)
+
+
+    def test_disabled_criterion_options_are_still_key_checked(self):
+        # A disabled criterion is not reached by enabled-only option validation,
+        # so without this an omitted key stays stored until it is re-enabled.
+        raw = minimal_config()
+        raw["assessment"]["criteria"]["integrity"] = {
+            "enabled": False,
+            "options": {"allow_same_model": True, "bogus": 1},
+        }
+        with self.assertRaisesRegex(ValueError, "Unknown keys at assessment.criteria.integrity.options"):
+            load_config(raw)
+
+        raw["assessment"]["criteria"]["complexity"] = {"enabled": False, "options": {"nope": 1}}
+        raw["assessment"]["criteria"]["integrity"] = {"enabled": False, "options": {}}
+        with self.assertRaisesRegex(ValueError, "Unknown keys at assessment.criteria.complexity.options"):
+            load_config(raw)
+
+    def test_retired_option_key_is_named_rather_than_buried(self):
+        raw = minimal_config()
+        raw["assessment"]["criteria"]["integrity"] = {
+            "enabled": False,
+            "options": {"allow_same_model": True, "strict": True},
+        }
+        with self.assertRaisesRegex(ValueError, r"Removed config fields .*\['strict'\]"):
+            load_config(raw)
+
+    def test_omitting_a_default_enabled_criterion_warns_by_name(self):
+        # `criteria` replaces the defaults instead of patching them, so an omitted
+        # criterion is removed rather than disabled. That stays supported (it is
+        # how one standard is isolated) but must not be silent.
+        raw = minimal_config()
+        raw["assessment"] = {"criteria": {"performance": {"weight": 7}}}
+        with self.assertWarnsRegex(UserWarning, r"omits \['integrity'\]"):
+            load_config(raw)
+
+    def test_complete_criteria_map_does_not_warn(self):
+        raw = minimal_config()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            load_config(raw)
+        self.assertEqual(
+            [item for item in caught if "assessment.criteria omits" in str(item.message)], []
+        )
+
+    def test_disabled_criterion_keeps_placeholder_environment_reference(self):
+        # Disabling a criterion is a supported way to park a role whose provider
+        # is not configured yet, so its ${VAR} must not be resolved eagerly.
+        raw = minimal_config()
+        raw["assessment"]["criteria"]["integrity"] = {
+            "enabled": False,
+            "options": {"worker": {"harness": "codex", "model": "${OPE_UNSET_REVIEW_MODEL}"}},
+        }
+        with patch.dict(os.environ, {}, clear=True):
+            config = load_config(raw)
+        self.assertFalse(config.assessment.enabled("integrity"))
 
 
 if __name__ == "__main__":

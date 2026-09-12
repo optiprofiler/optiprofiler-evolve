@@ -174,14 +174,32 @@ class SelectionTests(unittest.TestCase):
             actual = sampler.select(population, random.Random(seed))
             self.assertEqual(actual.candidate_id, expected.candidate_id)
 
-    def test_single_objective_pareto_delegates_to_scalar_retention(self) -> None:
+    def test_single_objective_pareto_ranks_by_the_objective_metric(self) -> None:
+        # `metric_pareto` with one objective and epsilon 0 does NOT delegate to
+        # `validation_lexicographic`; it orders by the objective's metric value.
+        # The fixture makes those two orders disagree on purpose, because when
+        # `assessment_score` equals the bundle value (as the old fixture had it)
+        # both orders coincide and the assertion would hold by construction.
+        records = [
+            candidate("a", 0.5, 0.8, metrics=MetricBundle.scalar(0.9, invariants_hash="fixed")),
+            candidate("b", 0.9, 0.4, metrics=MetricBundle.scalar(0.8, invariants_hash="fixed")),
+        ]
+        scalar = ValidationLexicographicRetention().retain(records, 1)
+        pareto = MetricParetoRetention(objectives=("fitness",)).retain(records, 1)
+        self.assertEqual([item.candidate_id for item in scalar], ["b"])
+        self.assertEqual([item.candidate_id for item in pareto], ["a"])
+
+    def test_single_objective_pareto_agrees_with_scalar_when_orders_coincide(self) -> None:
+        # The narrow case the previous test name claimed: when the assessed score
+        # and the objective value rank the same way, both policies agree.
         records = [
             candidate("a", 0.5, 0.8, metrics=MetricBundle.scalar(0.5, invariants_hash="fixed")),
             candidate("b", 0.7, 0.4, metrics=MetricBundle.scalar(0.7, invariants_hash="fixed")),
         ]
         scalar = ValidationLexicographicRetention().retain(records, 1)
         pareto = MetricParetoRetention(objectives=("fitness",)).retain(records, 1)
-        self.assertEqual(pareto, scalar)
+        self.assertEqual([item.candidate_id for item in pareto],
+                         [item.candidate_id for item in scalar])
 
     def test_multiobjective_pareto_keeps_nondominated_front(self) -> None:
         records = [

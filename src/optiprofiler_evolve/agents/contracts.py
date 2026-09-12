@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING, Protocol
 
-from optiprofiler_evolve.observability.usage import UsageRecord
+from optiprofiler_evolve.models import UsageRecord
 
 if TYPE_CHECKING:
     from optiprofiler_evolve.config import SandboxConfig, ToolConfig, WorkerConfig, WorkersConfig

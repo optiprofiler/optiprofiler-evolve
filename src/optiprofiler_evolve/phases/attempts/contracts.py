@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -18,6 +18,35 @@ def validate_attempt_steps(names: Iterable[str]) -> None:
     missing = {"mutate", "public_evaluate"}.difference(names)
     if missing:
         raise ValueError(f"workflow.attempt_steps must include {sorted(missing)!r}.")
+
+
+_PUBLIC_MODES = frozenset({"smoke", "public", "public_score"})
+
+
+@dataclass(frozen=True)
+class PublicOnlyAssessment:
+    """Bind one assessment callable to the worker-visible profiles.
+
+    Lives here rather than in the controller because it is a phase-side adapter:
+    it holds no controller state, imports no controller implementation, and only
+    narrows the modes an attempt may request. Phases must not reach into
+    controller implementations, which is what keeps the layer graph acyclic.
+    """
+
+    assess: Callable[..., EvaluationResult]
+    candidate_id: str | None = None
+    parent: Path | None = None
+
+    def evaluate(self, candidate: Path, mode: str, output_dir: Path) -> EvaluationResult:
+        if mode not in _PUBLIC_MODES:
+            raise ValueError("Worker assessment is public-only.")
+        return self.assess(
+            candidate,
+            mode,
+            output_dir,
+            candidate_id=self.candidate_id,
+            parent=self.parent,
+        )
 
 
 class AttemptCapabilities(Protocol):

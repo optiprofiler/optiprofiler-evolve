@@ -14,7 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from optiprofiler_evolve.agents.contracts import WorkerAdapter, WorkerOutcome, WorkerRequest
-from optiprofiler_evolve.agents.docker_runtime import cleanup_managed_resources
+from optiprofiler_evolve.agents.docker_runtime import (
+    cleanup_managed_resources,
+    recover_gateway_trace,
+)
 from optiprofiler_evolve.agents.llm import LLMClient
 from optiprofiler_evolve.application.provenance import component_provenance
 from optiprofiler_evolve.config import EvolveConfig, WorkerConfig
@@ -302,6 +305,8 @@ class EvolutionRun:
                     run_id=self.run_id,
                     config_hash=str(provenance["config_hash"]),
                     adapter_name=self.worker_adapter.name,
+                    # Bound here so observability never imports the agent layer.
+                    recover_gateway_trace=recover_gateway_trace,
                 )
                 _write_json(self.run_dir / "resolved_config.json", self.config.redacted_dict())
                 _write_json(self.run_dir / "provenance.json", provenance)
