@@ -6,8 +6,8 @@ solver containers. The socket never enters a candidate container.
 
 from __future__ import annotations
 
-import os
 import io
+import os
 import select
 import socket
 import socketserver
