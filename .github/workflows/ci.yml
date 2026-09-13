@@ -46,8 +46,8 @@ jobs:
           from optiprofiler_evolve.criteria.performance.competitors import competitor_names;
           assert {"pdfo_newuoa", "prima_newuoa"} <= set(competitor_names("u"))'
       - run: >-
-          docker run --rm -v "$PWD/tests:/tests:ro" --entrypoint python
-          optiprofiler-evolve-evaluator:ci -m unittest discover -s /tests -p test_competitors.py -v
+          docker run --rm -v "$PWD:/test-source:ro" --entrypoint python
+          optiprofiler-evolve-evaluator:ci -m unittest discover -s /test-source/tests -p test_competitors.py -v
       - run: docker run --rm optiprofiler-evolve-gateway:ci --help
       - run: python -m pip install -e .
       - run: >-
