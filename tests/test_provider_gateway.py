@@ -16,6 +16,7 @@ import unittest
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 import optiprofiler_evolve.agents.provider_gateway as provider_gateway_module
 from optiprofiler_evolve.agents.provider_gateway import GatewayRoute, ProviderGatewayServer
@@ -721,6 +722,45 @@ class ProviderGatewayTests(unittest.TestCase):
                 self.assertEqual(gateway.audit.count, 0)
             finally:
                 gateway.close()
+
+    def test_close_waits_for_completed_response_audit_to_be_durable(self) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+        closed = threading.Event()
+        fsync = os.fsync
+
+        def slow_fsync(descriptor):
+            entered.set()
+            if not release.wait(timeout=4):
+                raise OSError("test audit sink was not released")
+            return fsync(descriptor)
+
+        with _FakeUpstream() as upstream, tempfile.TemporaryDirectory() as directory:
+            audit = Path(directory) / "gateway.jsonl"
+            gateway = ProviderGatewayServer(_route(upstream.base_url), audit_path=audit)
+            gateway.start()
+            closer = None
+            with patch.object(provider_gateway_module.os, "fsync", side_effect=slow_fsync):
+                try:
+                    self.assertEqual(_request(gateway, "POST", "/v1/messages?debug=1", b"{}")[0], 400)
+                    self.assertTrue(entered.wait(timeout=2))
+
+                    def close():
+                        gateway.close()
+                        closed.set()
+
+                    closer = threading.Thread(target=close)
+                    closer.start()
+                    self.assertFalse(closed.wait(timeout=1), "close returned before audit flush")
+                finally:
+                    release.set()
+                    if closer is not None:
+                        closer.join(timeout=3)
+                    gateway.close()
+            self.assertTrue(closed.is_set())
+            self.assertEqual(gateway.active_request_count, 0)
+            self.assertEqual(gateway.audit.count, 1)
+            self.assertEqual(json.loads(audit.read_text())["outcome"], "rejected")
 
     def test_audit_directory_failure_is_also_terminal(self) -> None:
         with _FakeUpstream() as upstream, tempfile.TemporaryDirectory() as directory:

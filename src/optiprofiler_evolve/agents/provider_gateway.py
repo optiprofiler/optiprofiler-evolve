@@ -300,6 +300,9 @@ class ProviderGatewayServer:
             self._thread.join(timeout=5)
             self._thread = None
         self._server.server_close()
+        # Response delivery precedes its audit flush. Keep close bounded for
+        # interrupted streams, but let completed requests finish their receipts.
+        self._server.wait_for_idle(timeout=2.0)
 
     def __enter__(self) -> ProviderGatewayServer:
         return self.start()
@@ -322,7 +325,7 @@ class _GatewayHTTPServer(ThreadingHTTPServer):
         self.route = route
         self.audit = audit
         self._audit_shutdown_started = threading.Event()
-        self._active_lock = threading.Lock()
+        self._active_lock = threading.Condition()
         self._active_requests = 0
         super().__init__(address, handler)
 
@@ -340,6 +343,11 @@ class _GatewayHTTPServer(ThreadingHTTPServer):
             if self._active_requests < 1:
                 raise RuntimeError("provider gateway active-request counter underflow")
             self._active_requests -= 1
+            self._active_lock.notify_all()
+
+    def wait_for_idle(self, *, timeout: float) -> bool:
+        with self._active_lock:
+            return self._active_lock.wait_for(lambda: self._active_requests == 0, timeout)
 
     def fail_after_audit_error(self) -> None:
         """Stop accepting provider traffic after durable audit capture fails."""
