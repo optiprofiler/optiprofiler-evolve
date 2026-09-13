@@ -36,6 +36,9 @@ class PerformanceCriterion(Criterion):
             "Performance: improve the solver's ability to solve the public problem set within "
             "the objective-evaluation budget. Use benchmark evidence to justify algorithmic "
             "changes. "
+            "OptiProfiler solvers minimize the raw objective returned by fun(x); "
+            "this objective value is not the benchmark fitness. Prefer lower objective "
+            "values while respecting the problem's constraints. "
             f"The configured fitness source is {source}; higher reported fitness is better. "
             "Keep comparisons within the same experiment and evaluation profile."
         )

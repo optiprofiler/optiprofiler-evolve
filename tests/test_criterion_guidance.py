@@ -79,6 +79,17 @@ class CriterionGuidanceTests(unittest.TestCase):
         self.assertNotIn("pdftoppm", prompt)
         self.assertNotIn("returned by the enabled public checks", prompt)
 
+    def test_performance_distinguishes_objective_minimization_from_fitness(self):
+        config = AssessmentConfig(criteria={"performance": CriterionConfig()})
+        for tools in ((), ("smoke_test",), ("evaluate",)):
+            with self.subTest(tools=tools):
+                prompt = build_generation_guidance(
+                    config, "score_only", self.criteria, evaluation_tools=tools,
+                )
+                self.assertIn("minimize the raw objective returned by fun(x)", prompt)
+                self.assertIn("not the benchmark fitness", prompt)
+                self.assertIn("higher reported fitness is better", prompt)
+
     def test_complexity_diagnostics_name_only_available_tools_and_profiles(self):
         config = AssessmentConfig(criteria={"complexity": CriterionConfig()}, profiles={
             "smoke": {"complexity": {"enabled": False}},

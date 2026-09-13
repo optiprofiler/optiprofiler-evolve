@@ -20,13 +20,16 @@ rules explicitly so a different installed version does not change the baseline.
 ```bash
 ruff check src tests scripts examples
 python scripts/check_markdown_links.py
-python -m unittest discover -s tests -p 'test_*.py' -v
+MPLBACKEND=Agg python -m pytest tests -q
 python -m build
 python scripts/check_wheel.py "$(find dist -name '*.whl' -print -quit)"
 ```
 
-These tests use fake workers and evaluators for controller behavior. A real
-example invokes a model provider and OptiProfiler and should be run separately.
+Controller tests use fake workers and evaluators; numeric tests also exercise
+OptiProfiler locally. Pytest includes the architecture boundary tests and defaults
+to the non-GUI `Agg` backend, so macOS does not need an application event loop.
+For unittest-only checks, set `MPLBACKEND=Agg` explicitly. Real model examples and
+opt-in Docker/Harbor integration tests should be run separately.
 
 ## Where to make a change
 
