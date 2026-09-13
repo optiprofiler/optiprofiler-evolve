@@ -192,3 +192,11 @@ agent-trace coverage counts.
 Usage records keep unknown exact totals as `null`. Their `lower_bounds` mapping
 retains known token/cost subtotals when a stream or audit record is incomplete;
 these values must not be presented as the final bill.
+
+For direct Codex/Claude CLI invocations, native terminal usage records supply
+token totals when present. A CLI turn is not counted as one API call. Subscription
+cost and request counts remain `null` unless the provider actually reports them;
+no token-price estimate is invented. Interrupted streams keep observed usage as
+lower bounds. Native totals arrive at turn completion, so `token_budget` is not
+a hard live token cap in subscription mode; use the enforced worker timeout to
+bound a smoke run.

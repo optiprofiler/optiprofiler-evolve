@@ -131,6 +131,30 @@ moves this untrusted metadata outside the executable solver tree before audit
 and execution. Missing or malformed explanations are visible but do not turn
 into a numerical rejection.
 
+For a deliverable that must include an explanation, configure the existing report
+phase (no additional public API):
+
+```yaml
+workflow:
+  phases:
+    - {name: prepare}
+    - {name: explore}
+    - {name: validate}
+    - {name: hidden}
+    - name: report
+      options: {require_explanation: true, repair_attempts: 2, worker_index: 0, timeout_seconds: 300}
+```
+
+`require_explanation` defaults to false for backward-compatible, reporting-only
+runs. When true, a missing/invalid explanation triggers a bounded explainer job
+on a copy of the frozen champion. It cannot change the selected code, scores,
+or lockbox. Code changes in the explainer copy invalidate its output. Repairs
+are limited to 0..3 attempts (default 1). If none succeeds, the report phase is
+failed and the solver is still preserved. `final_delivery.json` records the
+source hash and the actual explanation status, so a placeholder is never
+mistaken for a complete deliverable. The explanation is machine-validated agent
+authorship, not a mathematical correctness proof or a human review endorsement.
+
 The final run contains:
 
 ```text

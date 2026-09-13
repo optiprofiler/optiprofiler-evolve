@@ -494,6 +494,8 @@ class ResearchHarnessTests(unittest.TestCase):
                 prompt_text = "\n".join(path.read_text() for path in trace.rglob("*.txt"))
                 self.assertIn("Performance:", prompt_text)
                 self.assertIn("Semantic integrity:", prompt_text)
+                self.assertIn("alongside candidate/, not inside candidate/", prompt_text)
+                self.assertIn("parse it as JSON", prompt_text)
                 self.assertNotIn("render_pdf", prompt_text)
                 self.assertNotIn("artifact_index.json", prompt_text)
                 self.assertNotIn("returned by the enabled public checks", prompt_text)

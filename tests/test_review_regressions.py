@@ -20,6 +20,31 @@ from optiprofiler_evolve.solver import InterfaceSpec
 
 
 class ReviewRegressionTests(unittest.TestCase):
+    def test_schema_and_loader_agree_on_effective_performance_image_requirement(self):
+        schema = json.loads((Path(__file__).parents[1] / "config.schema.json").read_text())
+        validator = jsonschema.Draft202012Validator(schema)
+        for base in (True, False):
+            for override in (None, True, False):
+                for execution in (None, {}, {"backend": "docker"}, {"backend": "unsafe_local"},
+                                  {"docker_image": "scorer:local"}):
+                    with self.subTest(base=base, override=override, execution=execution):
+                        raw = minimal_config()
+                        raw["assessment"]["criteria"]["complexity"]["enabled"] = True
+                        raw["assessment"]["criteria"]["performance"]["enabled"] = base
+                        if override is not None:
+                            raw["assessment"]["profiles"] = {name: {"performance": {"enabled": override}}
+                                for name in ("smoke", "public", "validation", "hidden")}
+                        if execution is None:
+                            raw.pop("execution")
+                        else:
+                            raw["execution"] = execution
+                        try:
+                            load_config(raw)
+                            accepted = True
+                        except ValueError:
+                            accepted = False
+                        self.assertEqual(validator.is_valid(raw), accepted)
+
     def test_profile_cache_is_derived_and_never_survives_a_config_change(self):
         raw = minimal_config()
         raw['assessment']['criteria']['performance']['options']['benchmark'] = {'max_eval_factor': 100}

@@ -48,7 +48,7 @@ current threat model; see [Security](docs/security.md).
 
 ## Quick start
 
-Install the package with Docker Engine 28 or newer, then build the three local
+Install the package with Docker Engine (tested with 27.5.1 and 29.5.2), then build the four local
 images:
 
 ```bash
@@ -84,9 +84,12 @@ experiment image from clean source checkouts. Bundled legacy libraries remain
 compatible with OptiProfiler 1.3.x.
 
 Provider base URLs and credential names belong in the worker entry's
-`provider_gateway` block. The controller does not maintain a vendor registry or put
+`provider_gateway` block. In gateway mode, the controller does not maintain a vendor registry or put
 real provider credentials inside worker containers; it does pin the Anthropic
 Messages or OpenAI Responses transport used by the selected CLI.
+An explicit [Codex subscription mode](docs/harbor-backend.md#codex-subscription-login)
+is also available for owner-trusted tests with direct access; its login is
+worker-readable and it is not the default gateway isolation contract.
 Read [Model providers and agent workers](docs/providers.md) before using a
 third-party endpoint: Claude-compatible and Codex Responses-compatible APIs use
 different configuration, and a base URL alone does not prove agent-tool support.

@@ -316,10 +316,13 @@ with another island's solver and do not seek validation or hidden data. You have
 evaluation broker in this role; the controller performs public, integrity, and validation
 checks after you finish.
 
-Leave the complete edited solver in candidate/. Also write transfer_manifest.json using:
+Leave the complete edited solver in candidate/. Write transfer_manifest.json at the
+workspace root, alongside candidate/, not inside candidate/. Use this JSON object:
 {{"schema":"strategy_transfer_manifest/1","attempted_strategy_ids":["..."],
 "applied_strategy_ids":["..."],"rejected_strategy_ids":["..."],
 "summary":"..."}}
+Before finishing, verify that this root-level file exists and parse it as JSON.
+Check the edited Python files for syntax errors without running any evaluation.
 
 {explanation_instructions("candidate")}
 Explain which transferred mechanisms remain and their code lines.

@@ -10,6 +10,7 @@ import math
 import os
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -35,6 +36,7 @@ class NumericEvaluationSession:
         self.protocol_failed = threading.Event()
         self.records: list[dict] = []
         self.logs = bytearray()
+        self.cleanup_records: list[dict] = []
 
     def _append(self, content: bytes) -> None:
         with self.lock:
@@ -104,18 +106,19 @@ class NumericEvaluationSession:
                     process.kill()
                     process.wait()
                 stderr.join(timeout=10)
+                for pipe in (process.stdin, process.stdout, process.stderr):
+                    pipe.close()
                 with self.lock:
                     self.records.append(record)
                     self.calls.pop(channel, None)
                     self.names.discard(name)
 
-    @staticmethod
-    def _remove(name: str) -> None:
-        try:
-            subprocess.run(["docker", "rm", "-f", name], stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=20, check=False)
-        except subprocess.TimeoutExpired:
-            pass
+    def _remove(self, name: str) -> None:
+        receipt = remove_numeric_container(name)
+        with self.lock:
+            self.cleanup_records.append(receipt)
+        if receipt["status"] != "removed":
+            self._append(f"\n[controller] {receipt}\n".encode())
 
     def _stop(self) -> None:
         self.stopping.set()
@@ -187,9 +190,39 @@ class NumericEvaluationSession:
             for thread in self.threads:
                 thread.join(timeout=30)
             stderr.join(timeout=10)
+            for pipe in (self.scorer.stdin, self.scorer.stdout, self.scorer.stderr):
+                pipe.close()
         code = (124 if timed_out.is_set() else 125
                 if protocol_error or self.protocol_failed.is_set() or not self.records
+                or any(item["status"] != "removed" for item in self.cleanup_records)
                 else self.scorer.returncode)
         if timed_out.is_set():
             self._append(b"\n[controller] evaluator timed out\n")
         return subprocess.CompletedProcess(command, code, self.logs.decode(errors="replace"))
+
+
+def remove_numeric_container(name: str) -> dict:
+    """Bound daemon work; inability to confirm removal is not a confirmed leak."""
+    errors = []
+    try:
+        result = subprocess.run(["docker", "rm", "-f", name], capture_output=True,
+                                text=True, timeout=20, check=False)
+        if result.returncode == 0 or "no such container" in result.stderr.lower():
+            return {"container": name, "status": "removed", "errors": errors}
+        errors.append(result.stderr.strip()[:300])
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        errors.append(type(exc).__name__)
+    # Docker --rm and another cleanup owner can already be removing it. A
+    # transient removal conflict is not failure, but absence must be verified.
+    for _ in range(10):
+        try:
+            result = subprocess.run(["docker", "inspect", name], capture_output=True,
+                                    text=True, timeout=2, check=False)
+            if result.returncode != 0 and any(
+                    message in result.stderr.lower() for message in ("no such object", "no such container")):
+                return {"container": name, "status": "removed", "errors": errors}
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            errors.append(type(exc).__name__)
+            break
+        time.sleep(0.1)
+    return {"container": name, "status": "cleanup_unconfirmed", "errors": errors}

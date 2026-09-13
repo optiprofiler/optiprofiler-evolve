@@ -833,6 +833,11 @@ class EvolveConfig:
         for profile in self.resolved_profiles.values():
             if profile.performance is not None:
                 profile.performance.validate()
+                if (profile.performance.backend == "docker"
+                        and profile.performance.solver_image in {
+                            profile.performance.docker_image, self.sandbox.worker_image}):
+                    raise ValueError("execution.solver_image must be a separate numeric-only image, "
+                                     "not the scorer or agent worker image.")
             if profile.integrity is not None:
                 review = profile.integrity
                 review.validate(self.workers)
@@ -854,10 +859,14 @@ class EvolveConfig:
         self.sandbox.validate()
         self.workflow.validate()
         gateway_workers = [worker for worker in workers if worker.provider_gateway is not None]
+        subscription_workers = [worker for worker in workers if worker.harness == "codex"
+                                and "CODEX_AUTH_JSON_PATH" in {*worker.env, *worker.pass_env}
+                                and worker.provider_gateway is None]
         if self.workers.adapter == "harbor" and (
-            self.sandbox.backend != "docker" or len(gateway_workers) != len(workers)
+            self.sandbox.backend != "docker"
+            or len(gateway_workers) + len(subscription_workers) != len(workers)
         ):
-            raise ValueError("Harbor requires the Docker sandbox and a gateway for every worker.")
+            raise ValueError("Harbor requires Docker and either a gateway or explicit Codex subscription path.")
         if gateway_workers and self.workers.adapter not in {"cli", "harbor"}:
             raise ValueError(
                 "provider_gateway requires workers.adapter='cli' or 'harbor'; custom "

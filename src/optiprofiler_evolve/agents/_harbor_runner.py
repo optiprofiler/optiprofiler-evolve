@@ -21,7 +21,7 @@ def _memory_bytes(value: str) -> int:
     return int(float(match[1]) * 1024 ** {"": 0, "b": 0, "k": 1, "m": 2, "g": 3}[match[2]])
 
 
-def _verify_boundary(spec: WorkerContainerSpec, actual: dict) -> None:
+def _verify_boundary(spec: WorkerContainerSpec, actual: dict, *, allow_direct: bool = False) -> None:
     """Check the realized container, not Harbor's network policy label."""
     host = actual["HostConfig"]
     config = actual["Config"]
@@ -63,8 +63,8 @@ def _verify_boundary(spec: WorkerContainerSpec, actual: dict) -> None:
     network = json.loads(subprocess.check_output(
         ["docker", "network", "inspect", spec.network], timeout=10,
     ))[0]
-    if network["Internal"] is not True:
-        raise RuntimeError("Harbor worker network is not internal.")
+    if network["Internal"] is not (not allow_direct):
+        raise RuntimeError("Harbor worker network does not match the declared egress policy.")
 
 
 def _compose_literal(value):
@@ -117,7 +117,7 @@ async def _run(request_path: Path) -> int:
             ["docker", "inspect", spec.name], timeout=10,
         ))[0]
         (root / "container_inspect.json").write_text(json.dumps(actual, indent=2))
-        _verify_boundary(spec, actual)
+        _verify_boundary(spec, actual, allow_direct=request.get("allow_direct", False))
         child = await asyncio.create_subprocess_exec(
             "docker", "exec", "--interactive", "--user", spec.user,
             "--workdir", "/workspace", spec.name, *request["harness"],

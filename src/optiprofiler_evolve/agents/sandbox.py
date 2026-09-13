@@ -24,7 +24,7 @@ from optiprofiler_evolve.observability.traces import (
     run_captured_process,
     trace_paths,
 )
-from optiprofiler_evolve.observability.usage import UsageRecord
+from optiprofiler_evolve.observability.usage import read_native_usage
 
 
 def run_agent(
@@ -172,7 +172,9 @@ def run_agent(
                 gateway.request_count if gateway is not None else None
             ),
             provider_gateway_manifest=(gateway.manifest if gateway is not None else None),
-            usage=(gateway.usage if gateway is not None else UsageRecord.unavailable()),
+            usage=(gateway.usage if gateway is not None else read_native_usage(
+                paths.stdout, worker.harness, complete=completed.returncode == 0
+                and not completed.timed_out and not completed.cancelled and not completed.capture_error)),
         )
     except Exception as exc:
         if runtime is not None and worker_started and not worker_finished:

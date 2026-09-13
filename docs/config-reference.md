@@ -196,7 +196,7 @@ names cannot drift apart.
 | `workers.token_budget` | positive integer or `null` | `null` | Advisory token budget inserted into the worker task. |
 | `workers.max_budget_usd` | positive number or `null` | `null` | Claude Code per-worker cost limit. Other providers enforce their own limits. |
 | `workers.prompt_note` | non-empty string (≤2000 chars) or `null` | `null` | Extra run-owner work constraint rendered into the worker task card as `Experiment note (must follow)`. It shapes how workers spend the budget; it never replaces isolation, evaluation policy, or safety limits. |
-| `workers.adapter` | registered name | `cli` | Worker lifecycle adapter: `cli` uses direct Docker, `harbor` uses Harbor DockerEnvironment. Both share native Codex/Claude commands, traces and the gateway. Harbor requires Python 3.12+, the optional extra, Docker Compose v2 and gateway routing for every worker. Custom adapters do not implement that credential boundary. |
+| `workers.adapter` | registered name | `cli` | Worker lifecycle adapter: `cli` uses direct Docker, `harbor` uses Harbor DockerEnvironment. Both share native commands and traces. Harbor requires Python 3.12+, the extra and Docker Compose v2. Use gateway routing or explicitly opt into the [Codex subscription path](harbor-backend.md#codex-subscription-login). Custom adapters do not implement the gateway boundary. |
 | `workers.allow_direct_provider` | boolean | `false` | First unsafe opt-in for bypassing the provider gateway. Docker direct mode also requires `sandbox.allow_direct_network=true`. |
 | `workers.pool[].harness` | `claude` or `codex` | **required** | Coding-agent CLI adapter. |
 | `workers.pool[].model` | string | **required** | Model identifier passed unchanged to the selected CLI. |

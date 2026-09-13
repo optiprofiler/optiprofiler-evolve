@@ -38,6 +38,7 @@ class LLMClientTests(unittest.TestCase):
                 delivered = self.calls[-1]['prompt']
                 self.assertEqual(delivered.count('CRITERION_GUIDANCE'), 1)
                 self.assertEqual(delivered.count('schema `solver_explanation/1`'), 1)
+                self.assertIn('"schema": "solver_explanation/1"', delivered)
                 for field in ('summary', 'pseudocode', 'mechanisms', 'name', 'description',
                               'code_bindings', 'file', 'lines', 'expected_strengths',
                               'known_limitations', 'evidence_consulted'):

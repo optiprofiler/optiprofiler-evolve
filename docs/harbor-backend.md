@@ -28,6 +28,48 @@ CLI-only installations still support Python 3.11.
 Run the Harbor controller as a non-root user: its UID is mapped into the worker
 so it can write its own run directory without receiving root authority.
 
+## Codex subscription login
+
+The complete [subscription example](../examples/experiment-codex-subscription.yaml)
+runs a two-island, one-iteration smoke with a required solver explanation:
+`python examples/run_codex_subscription.py`. Build the worker, scorer, and numeric
+solver images using [Getting started](getting-started.md) first. Its small budget
+tests the integration, not solver quality; use `experiment-research.yaml` when
+you also want the optional scout, ablation, and strategy-transfer stages.
+
+Log in once on the Docker host with `codex login`. Evolve can consume the same
+`CODEX_AUTH_JSON_PATH` convention as Harbor's Codex installed agent:
+
+```yaml
+workers:
+  adapter: harbor
+  allow_direct_provider: true
+  pool:
+    - harness: codex
+      model: gpt-5.3-codex-spark
+      env:
+        CODEX_AUTH_JSON_PATH: ${HOME}/.codex/auth.json
+sandbox:
+  backend: docker
+  allow_direct_network: true
+```
+
+This is an explicit owner-trusted subscription mode, not the default gateway
+boundary. The login file is mounted read-only and copied into the invocation's
+temporary Codex home, which disappears with the container. The worker can read
+that login and has direct service access. Do not use this mode for untrusted
+third-party tasks. Do not commit credentials, use `CODEX_FORCE_AUTH_JSON=1`, or
+mix this path with API-key/provider routing. Missing login files fail at launch.
+Each role still gets a separate container and no evaluator implementation.
+The adapter needs outbound access for Codex even when a role has no web-search
+tools. Disabling web search is not a network firewall in this direct mode.
+For a second allowed model, change `model` explicitly to `gpt-5.5`; Evolve does
+not automatically change providers/models on quota errors.
+
+In standalone Harbor, the corresponding option is
+`--ae CODEX_AUTH_JSON_PATH=$HOME/.codex/auth.json`. Evolve runs its own native CLI
+adapter over Harbor environments; it does not call `harbor run` internally.
+
 ## Ownership
 
 ```text
@@ -42,7 +84,7 @@ Harbor owns the worker container's Compose lifecycle. Evolve retains its
 provider gateway, evaluation broker, timeouts, role permissions and cleanup
 authority. It uses the same container specification for direct Docker and
 Harbor. The realized Harbor container is inspected before the CLI starts:
-exact mounts and internal network, non-root user, read-only root, dropped
+exact mounts and declared network policy, non-root user, read-only root, dropped
 capabilities, private process/IPC namespaces and resource limits.
 
 An independent reviewer is still a separate invocation with its own inputs and
@@ -56,6 +98,8 @@ Native stdout and stderr are retained byte-for-byte by the existing capture
 layer. Harbor setup and cleanup diagnostics live separately under
 `trace/harbor/`, alongside the container inspection receipt. These files are
 private controller evidence and are not mounted into the worker.
+Repeated preparation uses a new `harbor-retry-*` directory rather than overwriting
+the first invocation's launch or inspection evidence.
 
 On timeout or cancellation, Evolve stops the container as well as the launcher
 process. Cleanup is checked in `docker_cleanup.json`. A nonzero CLI exit does

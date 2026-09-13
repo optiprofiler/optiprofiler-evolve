@@ -120,6 +120,7 @@ class RoleJobs:
             "direction-scout": "direction_scout",
             "strategy-analyst": "strategy_analysis",
             "strategy-integrator": "strategy_transfer",
+            "solver-explainer": "report",
         }.get(role, role)
         scope: dict[str, object] = {"phase": role_phase, "role": role, "job_id": job_id}
         trace_links = dict(job.trace_links)

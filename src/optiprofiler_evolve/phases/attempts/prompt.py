@@ -85,6 +85,10 @@ Evaluation tools
   {max_smoke_calls} calls in this job).
 - Run `evaluate` for the canonical full public fitness (at most
   {max_public_calls} calls in this job).
+- In Docker, if your shell cannot find those names, run
+  `/opt/optiprofiler-evolve/tools/smoke_test` or
+  `/opt/optiprofiler-evolve/tools/evaluate` directly. These are executables,
+  not Python modules; a login shell may reset PATH.
 - Each call permanently consumes one job-local quota slot, including a failed
   evaluation. If a tool reports `evaluation quota exhausted` or
   `retryable: false`, waiting cannot restore it: do not sleep or retry. Keep the

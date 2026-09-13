@@ -37,6 +37,12 @@ def _prompt_kwargs() -> dict:
 
 
 class PromptTests(unittest.TestCase):
+    def test_docker_evaluation_tools_have_path_independent_commands(self) -> None:
+        prompt = build_worker_prompt(**_prompt_kwargs())
+        self.assertIn("/opt/optiprofiler-evolve/tools/smoke_test", prompt)
+        self.assertIn("/opt/optiprofiler-evolve/tools/evaluate", prompt)
+        self.assertIn("not Python modules", prompt)
+
     def test_stage_prompt_does_not_own_criterion_instructions(self) -> None:
         prompt = build_worker_prompt(**_prompt_kwargs())
         for text in ("Complexity budget", "render_pdf", "history plots", "Semantic integrity"):

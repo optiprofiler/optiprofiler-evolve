@@ -25,6 +25,23 @@ def _payload(verdict: str = "approve", findings: list[dict] | None = None) -> di
 
 
 class ReviewParserTests(unittest.TestCase):
+    def test_quarantine_quote_must_match_the_claimed_source_not_reversed_diff(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "candidate").mkdir()
+            (root / "candidate/solver.py").write_text("def solver(fun, x0):\n    return fun(x0)\n")
+            evidence = {"path": "candidate/solver.py", "line": 2,
+                        "detail": "claims no objective calls", "quote": "return x0"}
+            report = root / "review.json"
+            payload = _payload("quarantine", [{"category": "suspicious_shortcuts",
+                "severity": "high", "summary": "unsupported claim", "evidence": [evidence]}])
+            report.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(ValueError, "evidence-backed"):
+                parse_review(report, root, require_source_quote=True)
+            evidence["quote"] = "return fun(x0)"
+            report.write_text(json.dumps(payload))
+            self.assertEqual(parse_review(report, root, require_source_quote=True).verdict, "quarantine")
+
     def test_reviewer_prioritizes_source_diff_over_full_transcript_replay(self) -> None:
         request = IntegrityReviewRequest(
             candidate_id="candidate",
@@ -50,6 +67,9 @@ class ReviewParserTests(unittest.TestCase):
             " ".join(prompt.split()),
         )
         self.assertIn("Write `review.json` as soon", prompt)
+        self.assertIn("create the file `review.json` in your working directory", prompt)
+        self.assertIn("JSON in the final chat response is not a submitted review", prompt)
+        self.assertIn("Verify that the file exists and parses as JSON", prompt)
 
     def test_approve_may_have_no_findings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

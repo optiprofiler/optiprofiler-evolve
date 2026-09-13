@@ -13,6 +13,7 @@ at least one review call.
 | Claude Code quick start | `run.py` | `experiment.yaml` | `OPTIPROFILER_EVOLVE_MODEL`, `ANTHROPIC_API_KEY` |
 | Claude-compatible provider | `run_claude_compatible.py` | `experiment-claude-compatible.yaml` | `OPTIPROFILER_EVOLVE_MODEL`, `OPTIPROFILER_EVOLVE_ANTHROPIC_BASE_URL`, `OPTIPROFILER_EVOLVE_API_KEY` |
 | Codex quick start | `run_codex.py` | `experiment-codex.yaml` | `OPTIPROFILER_EVOLVE_CODEX_MODEL`, `OPENAI_API_KEY` |
+| Codex subscription over Harbor (owner-trusted) | `run_codex_subscription.py` | `experiment-codex-subscription.yaml` | Host `codex login`; see [subscription boundary](../docs/harbor-backend.md#codex-subscription-login) |
 | Codex Responses-compatible provider | `run_codex_compatible.py` | `experiment-codex-compatible.yaml` | `OPTIPROFILER_EVOLVE_CODEX_MODEL`, `OPTIPROFILER_EVOLVE_OPENAI_BASE_URL`, `OPTIPROFILER_EVOLVE_API_KEY` |
 | Multi-file solver repository | `run_repository.py` | `experiment.yaml` | Same as Claude quick start |
 | Full research harness | `run.py` | `experiment-research.yaml` | Same as Claude quick start; edit `run.py` to point at this config |

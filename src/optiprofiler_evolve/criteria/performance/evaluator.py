@@ -254,13 +254,15 @@ class DockerOptiProfilerEvaluator:
             runtime_path = Path(request_dir) / "numeric_runtime.py"
             runtime_path.write_bytes(Path(__file__).with_name("numeric_runtime.py").read_bytes())
             command = self.command(candidate, output_dir, container_name, request_path)
+            log, returncode = "", 125
             try:
                 session = NumericEvaluationSession(
                     candidate, self.interface, self.config, runtime_path
                 )
                 completed = session.run(command, container_name)
                 (output_dir / "numeric_calls.json").write_text(
-                    json.dumps({"schema": "numeric_calls/1", "calls": session.records}, indent=2)
+                    json.dumps({"schema": "numeric_calls/1", "calls": session.records,
+                                "cleanup": session.cleanup_records}, indent=2)
                     + "\n", encoding="utf-8",
                 )
                 log = completed.stdout
@@ -272,13 +274,12 @@ class DockerOptiProfilerEvaluator:
                 log += "\n[controller] evaluator timed out\n"
                 returncode = 124
             finally:
-                subprocess.run(
-                    ["docker", "rm", "-f", container_name],
-                    text=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
+                from .numeric_host import remove_numeric_container
+                cleanup = remove_numeric_container(container_name)
+                (output_dir / "numeric_cleanup.json").write_text(json.dumps(cleanup, indent=2))
+                if cleanup["status"] != "removed":
+                    returncode = 125
+                    log += "\n[controller] numeric container cleanup unconfirmed\n"
         log = _redact_problem_names(log, self.data)
         (output_dir / "evaluator.log").write_text(log, encoding="utf-8")
         result_path = output_dir / "result.json"

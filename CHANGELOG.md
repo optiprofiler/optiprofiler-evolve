@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Stabilization follow-up
+
+- Add explicit, double-opt-in Codex subscription authentication over the existing
+  Docker/Harbor worker boundary. Preserve each Harbor launch receipt on retries.
+- Require source-matching quotes for agent reviewer findings and provide a
+  canonical parent-to-candidate diff to avoid reversed-diff false rejections.
+- Clarify executable ablation and strategy-transfer output contracts. Required
+  final explanations can be repaired in a bounded, isolated metadata-only job;
+  failed delivery is explicit and never deletes the selected solver.
+- Align the JSON Schema with performance-disabled assessment configurations.
+- Preserve native CLI token accounting without inventing API-call counts or
+  subscription costs. Associate propagated oracle errors with their exact callback.
+- Bound Docker numeric cleanup and verify asynchronous removal before declaring
+  failure. Reject obvious worker/scorer image reuse as the numeric solver image.
+
 ### Breaking changes and migration
 
 - Replace top-level `evaluation` with `execution`. Performance options move to

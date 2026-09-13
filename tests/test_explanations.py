@@ -2,15 +2,112 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from optiprofiler_evolve.agents.explanations import capture_solver_explanation
 from optiprofiler_evolve.observability.attempts import explanation_memory
 
 
 class SolverExplanationTests(unittest.TestCase):
+    def test_final_explanation_repair_preserves_controller_cancellation(self):
+        from optiprofiler_evolve.errors import RunCancelled
+        from optiprofiler_evolve.models import FinalistResult
+        from optiprofiler_evolve.phases.report import ReportContext, ReportPhase
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            solver = root / "final_solver"
+            solver.mkdir()
+            (solver / "solver.py").write_text("def solver(fun, x0):\n    return x0\n")
+            def cancelled(_):
+                raise RunCancelled("owner stopped run")
+            with self.assertRaises(RunCancelled):
+                ReportPhase(require_explanation=True)._ensure_explanation(ReportContext(
+                    run_dir=root, options={}, artifacts={}, emit=lambda *a, **k: None,
+                    services=SimpleNamespace(run_trusted_agent=cancelled),
+                    final_result=FinalistResult("candidate", 0, 0.5, 0.5, 0.5, root),
+                    final_solver=solver))
+
+    def test_explainer_cannot_deliver_explanation_for_modified_solver_copy(self):
+        from optiprofiler_evolve.models import FinalistResult
+        from optiprofiler_evolve.phases.report import ReportContext, ReportPhase
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            solver = root / "final_solver"
+            solver.mkdir()
+            code = "def solver(fun, x0):\n    return x0\n"
+            (solver / "solver.py").write_text(code)
+            def changed(job):
+                workspace = root / "author"
+                shutil.copytree(job.inputs["candidate"], workspace / "candidate")
+                (workspace / "candidate/solver.py").write_text(code + "# changed\n")
+                return SimpleNamespace(workspace=workspace)
+            delivery = ReportPhase(require_explanation=True)._ensure_explanation(ReportContext(
+                run_dir=root, options={}, artifacts={}, emit=lambda *a, **k: None,
+                services=SimpleNamespace(run_trusted_agent=changed),
+                final_result=FinalistResult("candidate", 0, 0.5, 0.5, 0.5, root), final_solver=solver))
+            self.assertEqual(delivery["explanation_status"], "invalid")
+            self.assertIn("changed its solver copy", delivery["explanation_error"])
+            self.assertEqual((solver / "solver.py").read_text(), code)
+
+    def test_final_report_repairs_missing_explanation_without_changing_solver(self):
+        from optiprofiler_evolve.models import FinalistResult
+        from optiprofiler_evolve.phases.report import ReportContext, ReportPhase
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            solver = root / "final_solver"
+            solver.mkdir()
+            code = "def solver(fun, x0):\n    return x0\n"
+            (solver / "solver.py").write_text(code)
+            (root / "candidates/seed").mkdir(parents=True)
+            (root / "candidates/seed/solver.py").write_text(code)
+            jobs = []
+            def run_job(job):
+                jobs.append(job)
+                workspace = root / "author"
+                shutil.copytree(job.inputs["candidate"], workspace / "candidate")
+                meta = workspace / "candidate/.optiprofiler_evolve"
+                meta.mkdir()
+                (meta / "solver_explanation.json").write_text(json.dumps({
+                    "schema": "solver_explanation/1", "summary": "Return the starting point.",
+                    "pseudocode": ["Return x0."], "mechanisms": [{"name": "identity",
+                    "description": "No objective calls.", "code_bindings": [{"file": "solver.py", "lines": [1, 2]}]}]}))
+                return SimpleNamespace(workspace=workspace, success=True)
+            best = FinalistResult("candidate-1", 0, 0.5, 0.5, 0.5, root)
+            result = ReportPhase(require_explanation=True).run(ReportContext(
+                run_dir=root, options={}, artifacts={}, emit=lambda *a, **k: None,
+                services=SimpleNamespace(run_trusted_agent=run_job),
+                final_result=best, final_solver=solver))
+            self.assertEqual(result.status, "succeeded")
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual((solver / "solver.py").read_text(), code)
+            self.assertIn("Pseudocode", (root / "FINAL_SOLVER_EXPLANATION.md").read_text())
+            self.assertEqual(json.loads((root / "final_delivery.json").read_text())["explanation_status"], "complete")
+
+    def test_required_explanation_failure_does_not_claim_delivery_or_delete_code(self):
+        from optiprofiler_evolve.models import FinalistResult
+        from optiprofiler_evolve.phases.report import ReportContext, ReportPhase
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            solver = root / "final_solver"
+            solver.mkdir()
+            code = "def solver(fun, x0):\n    return x0\n"
+            (solver / "solver.py").write_text(code)
+            (root / "candidates/seed").mkdir(parents=True)
+            (root / "candidates/seed/solver.py").write_text(code)
+            def failed(_):
+                raise RuntimeError("provider unavailable")
+            result = ReportPhase(require_explanation=True).run(ReportContext(
+                run_dir=root, options={}, artifacts={}, emit=lambda *a, **k: None,
+                services=SimpleNamespace(run_trusted_agent=failed),
+                final_result=FinalistResult("candidate", 0, 0.5, 0.5, 0.5, root), final_solver=solver))
+            self.assertEqual(result.status, "failed")
+            self.assertEqual((solver / "solver.py").read_text(), code)
+            self.assertIn("provider unavailable", (root / "final_delivery.json").read_text())
+
     def test_unsafe_explanation_is_rejected_without_removing_evidence(self):
         for kind in ("link", "parent_link", "dangling_link", "fifo", "oversized"):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:

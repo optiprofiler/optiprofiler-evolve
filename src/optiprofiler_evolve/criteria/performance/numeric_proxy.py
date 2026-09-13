@@ -34,15 +34,16 @@ class NumericSolver:
                 write_frame(stream, {"args": [
                     {"oracle": True} if callable(arg) else pack(arg) for arg in args
                 ]})
-                last_exception: Exception | None = None
+                oracle_errors: dict[str, Exception] = {}
                 while True:
                     message = read_frame(stream)
                     kind = message.get("kind")
                     if kind == "return":
                         return None if message.get("value") is None else unpack(message["value"])
                     if kind == "error":
-                        if last_exception is not None:
-                            raise last_exception
+                        error_id = message.get("oracle_error_id")
+                        if isinstance(error_id, str) and error_id in oracle_errors:
+                            raise oracle_errors[error_id]
                         raise RuntimeError("Isolated solver failed.")
                     index = message.get("index")
                     if (kind != "oracle" or type(index) is not int
@@ -55,8 +56,10 @@ class NumericSolver:
                     try:
                         value = args[index](x)
                     except Exception as exc:
-                        last_exception = exc
-                        write_frame(stream, {"kind": "exception", "type": type(exc).__name__})
+                        error_id = uuid.uuid4().hex
+                        oracle_errors[error_id] = exc
+                        write_frame(stream, {"kind": "exception", "type": type(exc).__name__,
+                                             "oracle_error_id": error_id})
                     else:
                         write_frame(stream, {"kind": "value", "value": pack(value)})
 

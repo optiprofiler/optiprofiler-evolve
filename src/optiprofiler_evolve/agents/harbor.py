@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from dataclasses import asdict
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 from optiprofiler_evolve.agents.container_spec import worker_container_spec
 from optiprofiler_evolve.agents.docker_runtime import DockerInvocationRuntime
@@ -44,8 +46,15 @@ class HarborInvocationRuntime(DockerInvocationRuntime):
             selected_values=selected_values, labels=self._labels("worker"),
         )
         root = self.trace_dir / "harbor"
-        root.mkdir(mode=0o700)
+        # Preserve the first invocation's evidence when an owner retries a trace.
+        if root.exists():
+            root = Path(tempfile.mkdtemp(prefix="harbor-retry-", dir=self.trace_dir))
+        else:
+            root.mkdir(mode=0o700)
         request = root / "launch.json"
-        request.write_text(json.dumps({"container": asdict(spec), "harness": list(harness)}))
+        request.write_text(json.dumps({"container": asdict(spec),
+                                       "harness": spec.prepare_harness(harness),
+                                       "allow_direct": not self.gateway_enabled
+                                       and self.sandbox.allow_direct_network}))
         request.chmod(0o600)
         return [sys.executable, "-m", "optiprofiler_evolve.agents._harbor_runner", str(request)]

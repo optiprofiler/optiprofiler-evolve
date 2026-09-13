@@ -594,6 +594,11 @@ with a concrete reason grounded in source.diff.
 For every strategy, create an executable leave-one-out variant by either:
 1. copying finalist/ to variants/<strategy_id>/ and removing only that strategy; or
 2. writing a unified removal patch at toggles/<strategy_id>.patch against finalist/.
+For a removal patch the JSON toggle must be
+{{"kind":"removal_patch","ref":"toggles/<strategy_id>.patch"}}.
+Do not group several separable mechanisms into one whole-solver strategy. Replacing
+the entire solver by return-x0 is a baseline control, not a leave-one-strategy-out
+ablation. Keep the rest of the finalist unchanged and syntax-check each variant.
 
 When a strategy can be expressed as a conflict-aware patch from seed/, optionally add
 portable/<strategy_id>.patch and declare it as portable_patch. Do not fabricate a patch.
@@ -606,4 +611,6 @@ Write strategy_cards.json with:
 If a strategy cannot be toggled safely, keep the card with toggle:null; it will remain
 Unverified and cannot be transferred to another island. The controller, not you, assigns
 Observed/Inferred/Unverified after real ablations.
+Before finishing, parse strategy_cards.json and check that every non-null toggle.ref
+exists relative to the workspace root. Write the JSON file, not just a chat reply.
 """

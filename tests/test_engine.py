@@ -93,6 +93,7 @@ class ReviewingRunner:
                         {
                             "path": "candidate/solver.py",
                             "line": 1,
+                            "quote": "def solver(fun, x0):",
                             "detail": "candidate contains a fixed case branch",
                         }
                     ],

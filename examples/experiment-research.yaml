@@ -92,6 +92,9 @@ workflow:
     options:
       reference: prima_newuoa
   - name: report
+    options:
+      require_explanation: true
+      repair_attempts: 1
   attempt_steps:
   - name: mutate
   - name: static_audit

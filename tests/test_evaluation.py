@@ -147,7 +147,8 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
             completed = types.SimpleNamespace(returncode=1, stdout="expected test failure")
             with (
                 patch("optiprofiler_evolve.criteria.performance.numeric_host.NumericEvaluationSession.run", return_value=completed),
-                patch("optiprofiler_evolve.criteria.performance.evaluator.subprocess.run", return_value=completed),
+                patch("optiprofiler_evolve.criteria.performance.evaluator.subprocess.run",
+                      return_value=subprocess.CompletedProcess(["docker", "rm"], 0, "", "")),
             ):
                 result = evaluator.evaluate(candidate, "public", root / "output")
             self.assertFalse(result.success)

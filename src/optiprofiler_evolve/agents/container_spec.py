@@ -31,6 +31,14 @@ class WorkerContainerSpec:
     environment: Mapping[str, str]
     labels: Mapping[str, str]
 
+    def prepare_harness(self, harness: Sequence[str]) -> list[str]:
+        if "CODEX_AUTH_JSON_PATH" not in self.environment:
+            return list(harness)
+        return ["sh", "-ec", 'export CODEX_HOME=/tmp/home/.codex; '
+                'mkdir -p "$CODEX_HOME"; '
+                'cp /run/ope-codex-auth.json "$CODEX_HOME/auth.json"; '
+                'chmod 600 "$CODEX_HOME/auth.json"; exec "$@"', "subscription", *harness]
+
     def docker_argv(self, harness: Sequence[str]) -> list[str]:
         command = [
             "docker", "run", "--interactive", "--name", self.name, "--init",
@@ -47,7 +55,7 @@ class WorkerContainerSpec:
         for key, value in self.environment.items():
             # Auth and broker capabilities travel through process env, not argv.
             command.extend(["--env", f"{key}={value}" if key in {"HOME", "PATH"} else key])
-        return [*command, self.image, *harness]
+        return [*command, self.image, *self.prepare_harness(harness)]
 
     def compose(self) -> dict:
         return {
@@ -75,6 +83,16 @@ def worker_container_spec(
     broker: BrokerConnection, network: str, container_name: str,
     selected_values: Mapping[str, str], labels: Mapping[str, str],
 ) -> WorkerContainerSpec:
+    values = dict(selected_values)
+    auth_mounts = ()
+    if "CODEX_AUTH_JSON_PATH" in values:
+        auth = Path(values["CODEX_AUTH_JSON_PATH"]).expanduser().resolve(strict=True)
+        if not auth.is_file():
+            raise ValueError("CODEX_AUTH_JSON_PATH must point to a regular login file.")
+        if any(key in values for key in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_FORCE_AUTH_JSON")):
+            raise ValueError("Subscription authentication cannot be mixed with API routing or FORCE_AUTH.")
+        values["CODEX_AUTH_JSON_PATH"] = "/run/ope-codex-auth.json"
+        auth_mounts = (WorkerMount(str(auth), "/run/ope-codex-auth.json", True),)
     environment = {
         "HOME": "/tmp/home",
         "PATH": "/opt/optiprofiler-evolve/tools:/tmp/home/.local/bin:"
@@ -82,7 +100,7 @@ def worker_container_spec(
         "OPTIPROFILER_EVOLVE_BROKER_DIR": broker.directory,
         "OPTIPROFILER_EVOLVE_BROKER_TOKEN": broker.token,
         "OPTIPROFILER_EVOLVE_WORKSPACE": "/workspace",
-        **selected_values,
+        **values,
     }
     return WorkerContainerSpec(
         image=sandbox.worker_image, name=container_name, network=network,
@@ -93,6 +111,6 @@ def worker_container_spec(
             WorkerMount(str(tools_dir.resolve()), "/opt/optiprofiler-evolve/tools", True),
             WorkerMount(str(broker.host_directory.resolve()), broker.directory),
             WorkerMount(str(broker.host_artifacts_directory.resolve()), broker.artifacts_directory, True),
-        ),
+        ) + auth_mounts,
         environment=environment, labels=dict(labels),
     )

@@ -71,6 +71,7 @@ def main() -> int:
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
     reader = sys.stdin.buffer
     initial = read_frame(reader)
+    oracle_errors: list[tuple[Exception, str | None]] = []
 
     def oracle(index: int):
         def call(x):
@@ -80,7 +81,9 @@ def main() -> int:
                 cls = getattr(builtins, reply.get("type", ""), RuntimeError)
                 if not isinstance(cls, type) or not issubclass(cls, Exception):
                     cls = RuntimeError
-                raise cls("Objective or constraint evaluation failed.")
+                error = cls("Objective or constraint evaluation failed.")
+                oracle_errors.append((error, reply.get("oracle_error_id")))
+                raise error
             if reply.get("kind") != "value":
                 raise RuntimeError("Invalid oracle reply.")
             return unpack(reply["value"])
@@ -107,11 +110,15 @@ def main() -> int:
         value = solver(*args)
         write_frame(protocol, {"kind": "return", "value": None if value is None else pack(value)})
         return 0
-    except Exception:
+    except Exception as exc:
         # Private error details stay in the candidate log, not the scorer state.
         import traceback
         traceback.print_exc(file=sys.stderr)
-        write_frame(protocol, {"kind": "error", "error": "Solver raised an exception."})
+        # Only the same exception object preserves oracle provenance. A solver
+        # catching a callback failure then crashing later must not replay it.
+        error_id = next((token for error, token in oracle_errors if error is exc), None)
+        write_frame(protocol, {"kind": "error", "error": "Solver raised an exception.",
+                               "oracle_error_id": error_id})
         return 1
 
 

@@ -146,7 +146,7 @@ class DockerInvocationRuntime:
 
             self._create_network(
                 self.worker_network,
-                internal=not self.workers.tools.network,
+                internal=not (self.workers.tools.network or "CODEX_AUTH_JSON_PATH" in self.selected_values),
                 kind="worker-network",
             )
             return self.original_worker, dict(self.selected_values)

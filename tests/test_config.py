@@ -33,6 +33,14 @@ def minimal_config() -> dict:
 
 class ConfigTests(unittest.TestCase):
 
+    def test_numeric_solver_cannot_reuse_the_worker_or_scorer_image_name(self):
+        for image in ("scorer:test", "optiprofiler-evolve-worker:latest"):
+            with self.subTest(image=image):
+                raw = minimal_config()
+                raw["execution"].update(backend="docker", docker_image="scorer:test", solver_image=image)
+                with self.assertRaisesRegex(ValueError, "separate numeric-only image"):
+                    load_config(raw)
+
     def test_empty_pool_is_rejected_before_resolving_the_reviewer(self) -> None:
         raw = minimal_config()
         raw["workers"]["pool"] = []

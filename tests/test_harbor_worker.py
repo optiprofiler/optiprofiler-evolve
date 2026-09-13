@@ -39,6 +39,33 @@ def harbor_config() -> dict:
 
 
 class HarborConfigurationTests(unittest.TestCase):
+    def test_subscription_mount_is_read_only_and_retry_preserves_launch_evidence(self):
+        from optiprofiler_evolve.agents.harbor import HarborInvocationRuntime
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            auth = root / "auth.json"
+            auth.write_text('{"fake": "test-only"}')
+            (root / "invocation.json").write_text('{"trace_id":"subscription-retry","run_id":"test"}')
+            raw = harbor_config()
+            raw["workers"].update({"allow_direct_provider": True,
+                "pool": [{"harness": "codex", "model": "fake", "env": {"CODEX_AUTH_JSON_PATH": str(auth)}}]})
+            raw["sandbox"]["allow_direct_network"] = True
+            config = load_config(raw)
+            runtime = HarborInvocationRuntime(worker=config.workers.pool[0], workers=config.workers,
+                sandbox=config.sandbox, selected_values=dict(config.workers.pool[0].env), trace_dir=root)
+            args = dict(workspace=root, tools_dir=root,
+                broker=BrokerConnection("/broker", "/artifacts", "fake", root, root),
+                harness=["codex", "exec"], selected_values=dict(config.workers.pool[0].env))
+            first = Path(runtime.worker_command(**args)[-1])
+            before = first.read_bytes()
+            second = Path(runtime.worker_command(**args)[-1])
+            self.assertNotEqual(first, second)
+            self.assertEqual(first.read_bytes(), before)
+            launch = json.loads(before)
+            mount = next(m for m in launch["container"]["mounts"] if m["target"] == "/run/ope-codex-auth.json")
+            self.assertTrue(mount["readonly"])
+            self.assertNotIn("test-only", before.decode())
+
     def test_harbor_refuses_to_map_a_root_controller_into_the_worker(self) -> None:
         from optiprofiler_evolve.agents.harbor import HarborWorkerAdapter
 
@@ -53,12 +80,23 @@ class HarborConfigurationTests(unittest.TestCase):
         self.assertIsNotNone(config.workers.pool[0].provider_gateway)
         self.assertNotIn("synthetic-secret", str(config.redacted_dict()))
 
-    def test_harbor_never_falls_back_to_unsafe_local_or_direct_network(self) -> None:
+    def test_harbor_never_falls_back_to_unsafe_local_or_implicit_direct_network(self) -> None:
         raw = harbor_config()
         raw["sandbox"]["backend"] = "unsafe_local"
         raw["workers"]["pool"][0].pop("provider_gateway")
         with self.assertRaisesRegex(ValueError, "Harbor requires"):
             load_config(raw)
+
+    def test_harbor_subscription_requires_explicit_path_and_direct_opt_in(self) -> None:
+        raw = harbor_config()
+        raw["workers"]["pool"] = [{"harness": "codex", "model": "gpt-5.3-codex-spark",
+                                  "env": {"CODEX_AUTH_JSON_PATH": "/owner/auth.json"}}]
+        with self.assertRaises(ValueError):
+            load_config(raw)
+        raw["workers"]["allow_direct_provider"] = True
+        raw["sandbox"]["allow_direct_network"] = True
+        self.assertEqual(load_config(raw).workers.adapter, "harbor")
+        raw["workers"]["pool"][0]["env"] = {}
         raw["sandbox"]["backend"] = "docker"
         raw["workers"]["allow_direct_provider"] = True
         raw["sandbox"]["allow_direct_network"] = True

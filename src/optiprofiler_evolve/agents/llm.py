@@ -123,7 +123,7 @@ class LLMClient:
                 scope=gateway_scope,
                 data={
                     "outcome": gateway.outcome if gateway is not None else "unavailable",
-                    "request_count": gateway.request_count if gateway is not None else 0,
+                    "request_count": gateway.request_count if gateway is not None else None,
                 },
             )
         outcome = replace(

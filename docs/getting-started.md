@@ -9,7 +9,7 @@ small to support a performance claim.
 Requirements:
 
 - Python 3.11 or newer;
-- Docker Engine 28 or newer, with permission to run local containers;
+- Docker Engine (tested with 27.5.1 and 29.5.2), with permission to run local containers;
 - access to either Claude Code or Codex through a supported model provider.
 
 Create an environment and install the package in editable mode:

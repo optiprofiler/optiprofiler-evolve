@@ -109,7 +109,51 @@
   "required": [
     "workers"
   ],
+  "allOf": [{
+    "$comment": "Docker scorer image is required only when an effective profile uses performance. A disabled base criterion cannot be re-enabled by a profile.",
+    "if": {
+      "allOf": [
+        {"properties": {"execution": {"properties": {"backend": {"const": "docker"}}}}},
+        {"not": {
+          "required": ["assessment"],
+          "properties": {"assessment": {
+            "required": ["criteria"],
+            "properties": {"criteria": {"anyOf": [
+              {"not": {"required": ["performance"]}},
+              {"required": ["performance"], "properties": {"performance": {
+                "required": ["enabled"], "properties": {"enabled": {"const": false}}
+              }}}
+            ]}}
+          }}
+        }},
+        {"not": {
+          "required": ["assessment"],
+          "properties": {"assessment": {
+            "required": ["profiles"], "properties": {"profiles": {
+              "required": ["smoke", "public", "validation", "hidden"],
+              "properties": {
+                "smoke": {"$ref": "#/$defs/performance_disabled_profile"},
+                "public": {"$ref": "#/$defs/performance_disabled_profile"},
+                "validation": {"$ref": "#/$defs/performance_disabled_profile"},
+                "hidden": {"$ref": "#/$defs/performance_disabled_profile"}
+              }
+            }}
+          }}
+        }}
+      ]
+    },
+    "then": {
+      "required": ["execution"], "properties": {"execution": {
+        "required": ["docker_image"], "properties": {"docker_image": {"type": "string", "minLength": 1}}
+      }}
+    }
+  }],
   "$defs": {
+    "performance_disabled_profile": {
+      "required": ["performance"], "properties": {"performance": {
+        "required": ["enabled"], "properties": {"enabled": {"const": false}}
+      }}
+    },
     "DataConfig": {
       "type": "object",
       "additionalProperties": false,
@@ -745,29 +789,7 @@
           "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",
           "default": "optiprofiler"
         }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "backend": {
-                "const": "docker"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "docker_image"
-            ],
-            "properties": {
-              "docker_image": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          }
-        }
-      ]
+      }
     },
     "criterion": {
       "type": "object",
