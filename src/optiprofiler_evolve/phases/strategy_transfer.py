@@ -13,6 +13,7 @@ from optiprofiler_evolve.agents.explanations import (
 )
 from optiprofiler_evolve.controller.contracts import VariantHandle, VariantRequest
 from optiprofiler_evolve.files import read_json_object, write_json
+from optiprofiler_evolve.observability.reports import stage_assessment
 from optiprofiler_evolve.phases._research import (
     STRATEGY_TRANSFER_SCHEMA,
     _require_public_performance,
@@ -114,6 +115,9 @@ class StrategyTransferPhase:
                         "donor_strategy_ids": [],
                         "status": "skipped",
                         "reason": "no controller-supported strategy from another island",
+                        "base": {"candidate_id": base_id, "tree_hash": tree_hash(base_path),
+                                 "validation": _validation_evidence(context.run_dir, base_id),
+                                 "retained": True},
                         "winner_candidate_id": base_id,
                         "winner_solver": str(winner_solver),
                         "attempts": [],
@@ -216,6 +220,18 @@ class StrategyTransferPhase:
             candidate_ids = [base_id, *handles]
             selected = context.services.select_by_validation(candidate_ids, 1)
             winner = selected[0] if selected else base_id
+            # "succeeded" above only means a variant was built and scored; say which
+            # tree the island actually kept and on what controller-only evidence.
+            for entry in attempts:
+                if entry["variant_id"] in handles:
+                    entry["validation"] = _validation_evidence(context.run_dir, entry["variant_id"])
+                entry["retained"] = entry["variant_id"] == winner
+            base_record = {
+                "candidate_id": base_id,
+                "tree_hash": tree_hash(base_path),
+                "validation": _validation_evidence(context.run_dir, base_id),
+                "retained": winner == base_id,
+            }
             winner_path = base_path
             if winner in handles:
                 handle, public_score = handles[winner]
@@ -237,6 +253,9 @@ class StrategyTransferPhase:
                     "base_candidate_id": base_id,
                     "donor_strategy_ids": [str(card["strategy_id"]) for card in donors],
                     "status": "succeeded" if handles else "no_valid_transfer",
+                    "base": base_record,
+                    "selection": {"policy": "controller_validation_top1",
+                                  "problem_set": "validation", "candidates": candidate_ids},
                     "winner_candidate_id": winner,
                     "winner_solver": str(winner_solver),
                     "attempts": attempts,
@@ -360,4 +379,18 @@ def _normalize_transfer_manifest(
         "applied_strategy_ids": applied,
         "rejected_strategy_ids": rejected,
         "summary": str(payload.get("summary", ""))[:4000],
+    }
+
+
+def _validation_evidence(run_dir: Path, candidate_id: str) -> dict[str, Any]:
+    """Controller-only validation outcome for one tree; ``None`` fields mean not assessed."""
+    assessment = stage_assessment(run_dir, candidate_id, "validation") or {}
+    results = assessment.get("results", {})
+    review = results.get("integrity") or {}
+    return {
+        "assessed_tree_hash": assessment.get("tree_hash"),
+        "performance_score": (results.get("performance") or {}).get("score"),
+        "assessment_score": assessment.get("total"),
+        "accepted": assessment.get("accepted"),
+        "review_decision": {key: review.get(key) for key in ("status", "score", "error")},
     }

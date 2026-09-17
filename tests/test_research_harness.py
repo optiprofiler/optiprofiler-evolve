@@ -304,6 +304,17 @@ class NonzeroAfterOutputResearchRunner(FullResearchPathRunner):
         return result
 
 
+class RegressingIntegratorRunner(FullResearchPathRunner):
+    """An integrator whose evaluated variant is worse than the island's own solver."""
+
+    def __call__(self, **kwargs: object) -> WorkerOutcome:
+        result = super().__call__(**kwargs)
+        if "ROLE: strategy-integrator" in str(kwargs["prompt"]):
+            solver = kwargs["workspace"] / "candidate" / "solver.py"
+            solver.write_text("def solver(fun, x0):\n    return x0\n# regressed\n")
+        return result
+
+
 def research_config() -> dict:
     raw = minimal_config()
     raw["workflow"] = {
@@ -520,6 +531,46 @@ class ResearchHarnessTests(unittest.TestCase):
             self.assertIn("Adapt one island-specific search decision", final_explanation)
             self.assertIn("measure progress -> apply adaptive decision", final_explanation)
 
+    def test_transfer_record_separates_an_evaluated_variant_from_the_retained_tree(self) -> None:
+        """The real pilot: both variants were scored, yet both islands kept their base."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "solver.py").write_text(
+                "def solver(fun, x0):\n    return x0\n# strategy-0-slot\n# strategy-1-slot\n"
+                "# inert-0-slot\n# inert-1-slot\n")
+            raw = research_config()
+            raw["workflow"]["phases"] = [
+                {"name": "strategy_transfer"} if item["name"] == "recombine" else item
+                for item in raw["workflow"]["phases"]
+            ]
+            EvolutionRun(
+                initial=source, interface=InterfaceSpec.parse("solver.py:solver"),
+                runtime="python", editable=("solver.py",), config=load_config(raw),
+                run_dir=root / "run", worker_adapter=RunnerAdapter(RegressingIntegratorRunner()),
+                evaluator_factory=research_evaluator_factory,
+            ).run()
+            transfer = json.loads((root / "run/research/strategy_transfer.json").read_text())
+            self.assertEqual(len(transfer["islands"]), 2)
+            for item in transfer["islands"]:
+                (attempt,) = item["attempts"]
+                base = item["base"]
+                # "succeeded" still only means built and scored (older readers keep working).
+                self.assertEqual(attempt["status"], "succeeded")
+                self.assertEqual((attempt["retained"], base["retained"]), (False, True))
+                self.assertEqual(item["winner_candidate_id"], base["candidate_id"])
+                self.assertEqual(item["selection"]["problem_set"], "validation")
+                self.assertEqual(item["selection"]["candidates"],
+                                 [base["candidate_id"], attempt["variant_id"]])
+                self.assertEqual(attempt["validation"]["assessed_tree_hash"], attempt["tree_hash"])
+                self.assertEqual(base["validation"]["assessed_tree_hash"], base["tree_hash"])
+                self.assertLess(attempt["validation"]["performance_score"],
+                                base["validation"]["performance_score"])
+                for side in (attempt, base):
+                    self.assertIn("status", side["validation"]["review_decision"])
+                self.assertEqual(tree_hash(Path(item["winner_solver"])), base["tree_hash"])
+
     def test_strategy_transfer_still_materializes_each_island_winner_without_a_donor(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -556,6 +607,7 @@ class ResearchHarnessTests(unittest.TestCase):
             )
             self.assertEqual(transfer["status"], "skipped")
             self.assertEqual(len(transfer["islands"]), 1)
+            self.assertTrue(transfer["islands"][0]["base"]["retained"])
             winner = Path(transfer["islands"][0]["winner_solver"])
             self.assertTrue((winner / "solver.py").is_file())
 
@@ -668,6 +720,17 @@ class ResearchHarnessTests(unittest.TestCase):
                 self.assertTrue(matrix["entries"])
                 self.assertTrue(matrix["entries"][0]["base_artifact_dirs"])
                 self.assertTrue(matrix["entries"][0]["ablated_artifact_dirs"])
+                # Scope and pairing are recorded; no gate or score depends on them.
+                self.assertEqual(matrix["screen_scope"]["problem_set"], matrix["evaluation_mode"])
+                self.assertEqual(matrix["screen_scope"]["n_repeats"], matrix["n_repeats"])
+                self.assertIn("not evidence of a general effect",
+                              matrix["screen_scope"]["interpretation"])
+                for entry in matrix["entries"]:
+                    paired = entry["paired_conditions"]
+                    self.assertTrue(paired["identical"], paired)
+                    self.assertEqual({item["mode"] for item in (*paired["base"], *paired["ablated"])},
+                                     {"smoke"})
+                    self.assertIn("ablated_public_scores", entry)  # legacy field kept
             self.assertTrue(all(item["dropped_strategy_ids"] == [] for item in bundles))
             recombination = json.loads(
                 (root / "run" / "research" / "recombination.json").read_text(encoding="utf-8")

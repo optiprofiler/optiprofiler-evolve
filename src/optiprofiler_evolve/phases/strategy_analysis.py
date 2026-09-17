@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from collections.abc import Mapping
 from pathlib import Path
@@ -251,6 +252,18 @@ class StrategyAnalysisPhase:
                     "comparison": "fresh_repeated_evaluations_on_both_sides",
                     "evaluation_mode": self.evaluation_mode,
                     "single_measurement": self.n_repeats == 1,
+                    # The legacy ``*_public_scores`` entry fields hold scores measured under
+                    # ``evaluation_mode``; with "smoke" they are smoke-set scores and are not
+                    # comparable with ``recorded_base_public_score``.
+                    "screen_scope": {
+                        "problem_set": self.evaluation_mode,
+                        "n_repeats": self.n_repeats,
+                        "interpretation": (
+                            "local screen of this finalist on this problem set and budget; "
+                            "not evidence of a general effect. Repeats estimate stochastic "
+                            "variation only and add nothing for a deterministic pair."
+                        ),
+                    },
                     "entries": matrix,
                     "status": "populated" if matrix else analysis_status,
                     "reason": analysis_reason,
@@ -366,6 +379,7 @@ class StrategyAnalysisPhase:
                 "evaluation_mode": self.evaluation_mode,
                 "measured_base_public_scores": [result.score for result in base_results],
                 "ablated_public_scores": [result.score for result in ablated_results],
+                "paired_conditions": _paired_conditions(base_results, ablated_results),
                 "base_artifact_dirs": [str(result.output_dir) for result in base_results],
                 "ablated_artifact_dirs": [str(result.output_dir) for result in ablated_results],
                 "mean_effect_when_present": effect,
@@ -614,3 +628,27 @@ Observed/Inferred/Unverified after real ablations.
 Before finishing, parse strategy_cards.json and check that every non-null toggle.ref
 exists relative to the workspace root. Write the JSON file, not just a chat reply.
 """
+
+
+def _paired_conditions(base_results: list[Any], ablated_results: list[Any]) -> dict[str, Any]:
+    """Evidence that both sides of an ablation ran the same problems under the same budget.
+
+    The assessment signature digests the criterion options (including the evaluation
+    budget), the profile and the input fingerprint, so equal signatures mean equal conditions.
+    """
+    def conditions(result: Any) -> dict[str, Any]:
+        try:
+            signature = read_json_object(Path(result.output_dir) / "assessment.json").get("signature")
+        except (OSError, ValueError):
+            signature = None
+        return {"mode": result.mode, "problem_count": result.problem_count,
+                "assessment_signature": signature}
+
+    base = [conditions(result) for result in base_results]
+    ablated = [conditions(result) for result in ablated_results]
+    distinct = {json.dumps(item, sort_keys=True) for item in (*base, *ablated)}
+    return {
+        "base": base,
+        "ablated": ablated,
+        "identical": len(distinct) == 1 and all(item["assessment_signature"] for item in base),
+    }
