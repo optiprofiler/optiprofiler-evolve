@@ -71,8 +71,7 @@ def prepare_trace(
 ) -> TracePaths:
     """Create private controller inputs before an agent adapter starts."""
 
-    root.parent.mkdir(parents=True, exist_ok=True)
-    _harden_trace_parents(root.parent)
+    _make_private_parents(root.parent)
     root.mkdir(parents=True, exist_ok=False, mode=0o700)
     _set_private_mode(root, 0o700)
     input_dir = root / "input"
@@ -835,13 +834,21 @@ def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
     process.wait()
 
 
-def _harden_trace_parents(directory: Path) -> None:
+def _make_private_parents(directory: Path) -> None:
+    """Create missing trace parents as private; never change a directory found in place.
+
+    Having created a directory is the only ownership evidence used here. A name such as
+    ``traces`` proves nothing, and a pre-existing ancestor may be a run directory, a
+    shared temporary directory, or the filesystem root.
+    """
+    missing = []
     current = directory
-    while True:
-        _set_private_mode(current, 0o700)
-        if current.name == "traces" or current.parent == current:
-            return
+    while not current.exists() and not current.is_symlink():
+        missing.append(current)
         current = current.parent
+    directory.mkdir(parents=True, exist_ok=True)
+    for created in missing:
+        _set_private_mode(created, 0o700)
 
 
 def trace_roots(run_dir: Path) -> tuple[Path, ...]:

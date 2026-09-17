@@ -220,11 +220,14 @@ class GatewayAuditLog:
                 self._count += 1
                 return
             try:
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    self.path.parent.chmod(0o700)
-                except OSError:
-                    pass
+                # Privatize only a directory made for this log, never a shared parent
+                # such as the one holding ``--audit-log /tmp/gateway.jsonl``.
+                if not self.path.parent.is_dir():
+                    self.path.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        self.path.parent.chmod(0o700)
+                    except OSError:
+                        pass
                 encoded = (json.dumps(payload, sort_keys=True) + "\n").encode("utf-8")
                 descriptor = os.open(
                     self.path,
