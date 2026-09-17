@@ -18,3 +18,8 @@ RUN apt-get update \
 RUN useradd --create-home --uid 10001 worker
 USER worker
 WORKDIR /workspace
+
+# Record which source a campaign image was built from; "unknown" for ad-hoc local builds.
+ARG SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/optiprofiler/optiprofiler-evolve" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}"

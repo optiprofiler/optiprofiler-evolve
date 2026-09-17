@@ -193,6 +193,14 @@ Usage records keep unknown exact totals as `null`. Their `lower_bounds` mapping
 retains known token/cost subtotals when a stream or audit record is incomplete;
 these values must not be presented as the final bill.
 
+`outcome.json` also carries `model_evidence` (`native_model_evidence/1`): the model
+names the native stream itself reported. `invocation.json.model` is only the requested
+model. For Claude Code, `source: result_model_usage` lists every key of the terminal
+`modelUsage` record, which includes helper calls, and sets `complete: true`. A stream
+that ended before its terminal record falls back to `assistant_messages` (main-loop
+replies only, `complete: false`); `none` means the stream named no model. The package
+records this evidence and enforces no model policy.
+
 For direct Codex/Claude CLI invocations, native terminal usage records supply
 token totals when present. A CLI turn is not counted as one API call. Subscription
 cost and request counts remain `null` unless the provider actually reports them;

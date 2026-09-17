@@ -155,6 +155,15 @@ source hash and the actual explanation status, so a placeholder is never
 mistaken for a complete deliverable. The explanation is machine-validated agent
 authorship, not a mathematical correctness proof or a human review endorsement.
 
+Each captured explanation records `code_identity`: the tree hash of the snapshot it
+was captured with and whether any solver file was modified after the explanation
+was written. Worker prose is reused for the champion only when that hash equals the
+delivered tree and no later edit happened; a legacy record without `code_identity`,
+another snapshot, or a later edit all lead to the bounded explainer above (or, when
+no explanation is required, to a stated reason instead of the prose). Superseded
+prose is kept as `explanations/<id>.superseded.json`. This is association with a
+snapshot; it does not verify that the prose is accurate.
+
 The final run contains:
 
 ```text
@@ -180,6 +189,17 @@ research/roles/<role>/<job>/
 research/transcripts/<role>/
 research/variants/
 ```
+
+An ablation matrix is a local screen. `screen_scope` records the problem set and
+repeat count; each entry's `paired_conditions` records mode, problem count and
+assessment signature for both sides and whether they are identical. With
+`evaluation_mode: smoke`, the legacy `*_public_scores` fields hold smoke-set scores,
+which are not comparable with `recorded_base_public_score`. Repeats estimate
+stochastic variation and add nothing for a deterministic solver and feature.
+In `strategy_transfer.json` an attempt's `status: succeeded` means the variant was
+built and scored. `retained`, the island's `base` record and both sides'
+controller-only `validation` evidence (score, reviewer decision, assessed tree
+hash) say which tree the island kept and why.
 
 All machine-readable contracts carry schema strings. Agent workspaces contain
 only copied, sanitized inputs. The controller remains the sole writer of candidate

@@ -4,6 +4,33 @@
 
 ### Stabilization follow-up
 
+- Fix a host-damaging permission bug: trace preparation set every ancestor of a
+  trace directory to `0700` up to a directory named `traces` or the filesystem
+  root, and the gateway audit log privatized the parent of any `--audit-log`
+  path. Only directories the run itself creates are now made private. Pytest runs
+  refuse to re-permission the temp root, the checkout, `$HOME` or their ancestors.
+- Forward the declared problem selection (`ptype`, dimension and constraint
+  ranges) to OptiProfiler as label metadata. Exact problem names were already
+  frozen, so evaluated problems and scores are unchanged; artifact directories
+  and `report.txt` no longer claim OptiProfiler's default `1`--`2` dimension range.
+- Report the validation audit and the hidden stage separately in `FINAL_REPORT.md`,
+  with skip reasons, and state integrity-review coverage of the delivered solver
+  only when the reviewed tree hash equals the delivered tree hash.
+- Record the code snapshot an explanation was captured for, and whether code was
+  edited after it was written. The final explanation reuses worker prose only for
+  the byte-identical delivered tree with no later edit; otherwise the existing
+  bounded explainer runs against the frozen solver and the superseded prose is
+  kept. A snapshot hash is association, not proof that prose is accurate, and a
+  timeout or missing intermediate explanation still never rejects a solver.
+- Record `model_evidence` in each trace `outcome.json`: the models the native CLI
+  stream reports, beside the merely requested model. No model policy is enforced.
+- Add an optional Claude subscription login file (`CLAUDE_CREDENTIALS_JSON_PATH`)
+  with the same read-only mount as the Codex path; API-key workers keep `--bare`.
+- Add retention, base/variant validation evidence and the reviewer decision to
+  `strategy_transfer.json`, and screen scope plus paired evaluation conditions to
+  ablation matrices. Additive fields only; thresholds and scoring are unchanged.
+- Add optional `org.opencontainers.image.revision` build labels to all images.
+
 - Add explicit, double-opt-in Codex subscription authentication over the existing
   Docker/Harbor worker boundary. Preserve each Harbor launch receipt on retries.
 - Require source-matching quotes for agent reviewer findings and provide a

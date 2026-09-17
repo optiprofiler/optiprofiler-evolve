@@ -70,6 +70,52 @@ In standalone Harbor, the corresponding option is
 `--ae CODEX_AUTH_JSON_PATH=$HOME/.codex/auth.json`. Evolve runs its own native CLI
 adapter over Harbor environments; it does not call `harbor run` internally.
 
+## Claude subscription login
+
+A Claude Code worker can use an owner login file the same way. Name the file
+explicitly; Evolve never searches a home directory for credentials:
+
+```yaml
+workers:
+  adapter: harbor
+  allow_direct_provider: true
+  pool:
+    - harness: claude
+      model: <model id>
+      env:
+        CLAUDE_CREDENTIALS_JSON_PATH: ${HOME}/.config/ope-claude/credentials.json
+        # Claude Code starts helper calls on its own small/fast model unless told otherwise.
+        ANTHROPIC_SMALL_FAST_MODEL: <model id>
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: <model id>
+        CLAUDE_CODE_SUBAGENT_MODEL: <model id>
+sandbox:
+  backend: docker
+  allow_direct_network: true
+```
+
+The same trust statement as the Codex mode applies. Only the *path* enters the
+worker environment, so `launch.json`, the Compose file and `container_inspect.json`
+hold no credential. The file is mounted read-only and copied to the invocation's
+temporary `CLAUDE_CONFIG_DIR`. Do not pass a token through `env`: environment
+values are persisted in that launch evidence. The path cannot be combined with
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`,
+`CLAUDE_CODE_OAUTH_TOKEN` or a Codex login.
+
+Claude Code's `--bare` mode never reads an OAuth login, so only this worker runs
+with `--setting-sources user --strict-mcp-config` instead. Its user settings
+directory is an empty temporary home, and project settings are excluded because a
+candidate tree can carry a `.claude/` directory into a later worker's workspace.
+API-key and gateway workers keep `--bare` unchanged.
+
+A copied login is valid only while its access token is. A refresh performed inside
+a worker is discarded with the container and may invalidate the login it was copied
+from, so check the expiry against the whole run before launching and copy a fresh
+file per run. Each trace `outcome.json` records `model_evidence`: the models the
+native stream reported (`result_model_usage`, which includes helper calls, or
+`assistant_messages` when a stream ended early). Treat the requested `model` as
+configuration and `model_evidence` as the observation; enforcing a model policy is
+left to the experiment, not to the package.
+
 ## Ownership
 
 ```text

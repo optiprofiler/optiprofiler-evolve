@@ -30,6 +30,11 @@ docker build -f docker/solver/Dockerfile -t optiprofiler-evolve-solver:latest .
 docker build -f docker/gateway/Dockerfile -t optiprofiler-evolve-gateway:latest .
 ```
 
+For a recorded campaign, add `--build-arg SOURCE_REVISION="$(git rev-parse HEAD)"` to each
+build. It sets the `org.opencontainers.image.revision` label, which
+`docker image inspect` reports with the image digest. The label is optional provenance:
+images built without it are still accepted.
+
 Confirm that all four images are usable before spending model tokens:
 
 ```bash
