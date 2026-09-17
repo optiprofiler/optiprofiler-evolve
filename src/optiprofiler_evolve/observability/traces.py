@@ -554,6 +554,16 @@ def record_derived_trace_error(paths: TracePaths, error: str) -> None:
     _write_private_json_atomic(paths.outcome, payload)
 
 
+def record_model_evidence(paths: TracePaths, evidence: Mapping[str, object]) -> None:
+    """Attach what the native stream reports beside the merely requested model."""
+
+    if not paths.outcome.is_file():
+        return
+    payload = _read_json_object(paths.outcome)
+    payload["model_evidence"] = dict(evidence)
+    _write_private_json_atomic(paths.outcome, payload)
+
+
 def record_transport_failure(paths: TracePaths, error: str) -> None:
     """Attach a provider-transport failure without changing raw stream evidence."""
 

@@ -18,13 +18,14 @@ from optiprofiler_evolve.observability.traces import (
     prepare_trace,
     record_controller_failure,
     record_derived_trace_error,
+    record_model_evidence,
     record_sanitized_command,
     record_transport_failure,
     render_transcript,
     run_captured_process,
     trace_paths,
 )
-from optiprofiler_evolve.observability.usage import read_native_usage
+from optiprofiler_evolve.observability.usage import read_native_models, read_native_usage
 
 
 def run_agent(
@@ -156,6 +157,10 @@ def run_agent(
                 f"[controller] readable transcript unavailable: {message}\n",
                 encoding="utf-8",
             )
+        try:
+            record_model_evidence(paths, read_native_models(paths.stdout, worker.harness))
+        except (OSError, ValueError) as exc:
+            record_derived_trace_error(paths, f"model evidence: {type(exc).__name__}: {exc}")
         return WorkerOutcome(
             completed.returncode,
             transcript,

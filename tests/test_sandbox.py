@@ -248,6 +248,34 @@ class SandboxCommandTests(unittest.TestCase):
             self.assertIn("prompt=probe", transcript)
             self.assertIn("diagnostic", transcript)
 
+    def test_trace_outcome_records_the_model_the_stream_reports_not_the_requested_one(self) -> None:
+        worker = WorkerConfig(harness="claude", model="requested-model")
+        workers = WorkersConfig(pool=(worker,), timeout_seconds=5,
+                                tools=ToolConfig(network=False, web_search=False))
+        stream = ('{"type":"assistant","message":{"model":"actual-model"}}\n'
+                  '{"type":"result","modelUsage":{"actual-model":{},"helper-model":{}}}\n')
+        command = [sys.executable, "-c", f"import sys; sys.stdin.read(); sys.stdout.write({stream!r})"]
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "optiprofiler_evolve.agents.sandbox.build_harness_command", return_value=command
+        ):
+            root = Path(directory)
+            (root / "workspace").mkdir()
+            result = run_agent(
+                worker=worker, workers=workers, sandbox=SandboxConfig(backend="unsafe_local"),
+                workspace=root / "workspace", tools_dir=root / "tools",
+                broker=BrokerConnection(str(root / "broker"), str(root / "artifacts"), "token",
+                                        root / "broker", root / "artifacts"),
+                prompt="probe", transcript=root / "transcript.jsonl", trace_dir=root / "trace",
+                trace_context={"join": {"attempt_id": "test"}},
+            )
+            assert result.trace_outcome is not None
+            outcome = json.loads(result.trace_outcome.read_text(encoding="utf-8"))
+            invocation = json.loads((root / "trace" / "invocation.json").read_text(encoding="utf-8"))
+        self.assertEqual(invocation["model"], "requested-model")
+        self.assertEqual(outcome["model_evidence"]["observed_models"], ["actual-model", "helper-model"])
+        self.assertEqual(outcome["model_evidence"]["source"], "result_model_usage")
+        self.assertTrue(outcome["complete"])
+
     def test_docker_boundary_is_hardened_and_secret_values_are_not_in_argv(self) -> None:
         worker = WorkerConfig(
             harness="codex",

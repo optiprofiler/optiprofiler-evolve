@@ -28,6 +28,28 @@ class UsageAccountingTests(unittest.TestCase):
             self.assertIsNone(usage.input_tokens)
             self.assertEqual(usage.lower_bounds["input_tokens"], 100)
 
+    def test_native_model_evidence_reports_observed_models_not_the_requested_name(self):
+        from optiprofiler_evolve.observability.usage import read_native_models
+        assistant = '{"type":"assistant","message":{"model":"model-main","content":[]}}\n'
+        notice = '{"type":"assistant","message":{"model":"<synthetic>","content":[]}}\n'
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / "stdout"
+            # The terminal record also names a helper model no assistant message showed.
+            trace.write_text(assistant + notice + '{"type":"result","modelUsage":'
+                             '{"model-main":{"inputTokens":1},"model-helper":{"inputTokens":1}}}\n')
+            self.assertEqual(read_native_models(trace, "claude"), {
+                "schema": "native_model_evidence/1", "source": "result_model_usage",
+                "observed_models": ["model-helper", "model-main"], "complete": True})
+            # A stream cut before its terminal record is partial evidence, never complete.
+            trace.write_text(assistant + '{"type":"result","modelUs')
+            self.assertEqual(read_native_models(trace, "claude"), {
+                "schema": "native_model_evidence/1", "source": "assistant_messages",
+                "observed_models": ["model-main"], "complete": False})
+            for harness, path in (("codex", trace), ("claude", Path(directory) / "absent")):
+                evidence = read_native_models(path, harness)
+                self.assertEqual((evidence["source"], evidence["observed_models"],
+                                  evidence["complete"]), ("none", [], False))
+
     def test_aggregate_keeps_missing_values_null_and_marks_incomplete(self) -> None:
         first = UsageRecord.from_values(
             source="provider_gateway",

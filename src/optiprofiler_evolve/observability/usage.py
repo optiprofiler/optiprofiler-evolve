@@ -45,6 +45,42 @@ def read_native_usage(path: Path, harness: str, *, complete: bool = True) -> Usa
                        **{key: getattr(totals, key) for key in _NUMERIC_FIELDS})
 
 
+def read_native_models(path: Path, harness: str) -> dict[str, object]:
+    """Report the models a native CLI stream says it used; never the requested name.
+
+    ``result_model_usage`` is the CLI's own terminal accounting and includes helper
+    calls. ``assistant_messages`` only covers main-loop replies, so it is a fallback
+    for streams cut short before their terminal record and is never ``complete``.
+    """
+    terminal: set[str] = set()
+    messages: set[str] = set()
+    try:
+        with path.open(encoding="utf-8") as stream:
+            for line in stream:
+                try:
+                    event = json.loads(line)
+                    if harness != "claude" or not isinstance(event, dict):
+                        continue
+                    if event.get("type") == "result" and isinstance(event.get("modelUsage"), dict):
+                        terminal.update(str(name) for name in event["modelUsage"])
+                    elif event.get("type") == "assistant":
+                        model = event.get("message", {}).get("model")
+                        # The CLI labels locally generated notices "<synthetic>".
+                        if isinstance(model, str) and model and model != "<synthetic>":
+                            messages.add(model)
+                except (ValueError, TypeError, AttributeError):
+                    continue
+    except (OSError, UnicodeError):
+        pass
+    source = "result_model_usage" if terminal else "assistant_messages" if messages else "none"
+    return {
+        "schema": "native_model_evidence/1",
+        "source": source,
+        "observed_models": sorted(terminal | messages),
+        "complete": bool(terminal),
+    }
+
+
 def aggregate_usage(records: Iterable[UsageRecord]) -> UsageRecord:
     """Sum only fields known for every record; never coerce missing values to zero."""
 
