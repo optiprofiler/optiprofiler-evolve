@@ -12,6 +12,35 @@ from optiprofiler_evolve.config import SandboxConfig
 
 
 @dataclass(frozen=True)
+class _SubscriptionLogin:
+    """An owner login file: mounted read-only, copied to the invocation's tmpfs home."""
+
+    mount: str
+    home_variable: str
+    home: str
+    file_name: str
+    conflicts: tuple[str, ...]
+
+
+# Only a path ever enters the environment, so launch/compose/inspect evidence holds no secret.
+SUBSCRIPTION_LOGINS = {
+    "CODEX_AUTH_JSON_PATH": _SubscriptionLogin(
+        "/run/ope-codex-auth.json", "CODEX_HOME", "/tmp/home/.codex", "auth.json",
+        ("OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_FORCE_AUTH_JSON")),
+    "CLAUDE_CREDENTIALS_JSON_PATH": _SubscriptionLogin(
+        "/run/ope-claude-credentials.json", "CLAUDE_CONFIG_DIR", "/tmp/home/.claude",
+        ".credentials.json",
+        ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+         "CLAUDE_CODE_OAUTH_TOKEN")),
+}
+
+
+def subscription_login(names) -> str | None:
+    """Name the subscription login variable among worker environment names, if any."""
+    return next((key for key in SUBSCRIPTION_LOGINS if key in names), None)
+
+
+@dataclass(frozen=True)
 class WorkerMount:
     source: str
     target: str
@@ -32,12 +61,15 @@ class WorkerContainerSpec:
     labels: Mapping[str, str]
 
     def prepare_harness(self, harness: Sequence[str]) -> list[str]:
-        if "CODEX_AUTH_JSON_PATH" not in self.environment:
+        key = subscription_login(self.environment)
+        if key is None:
             return list(harness)
-        return ["sh", "-ec", 'export CODEX_HOME=/tmp/home/.codex; '
-                'mkdir -p "$CODEX_HOME"; '
-                'cp /run/ope-codex-auth.json "$CODEX_HOME/auth.json"; '
-                'chmod 600 "$CODEX_HOME/auth.json"; exec "$@"', "subscription", *harness]
+        login = SUBSCRIPTION_LOGINS[key]
+        return ["sh", "-ec", f'export {login.home_variable}={login.home}; '
+                f'mkdir -p "${login.home_variable}"; '
+                f'cp {login.mount} "${login.home_variable}/{login.file_name}"; '
+                f'chmod 600 "${login.home_variable}/{login.file_name}"; exec "$@"',
+                "subscription", *harness]
 
     def docker_argv(self, harness: Sequence[str]) -> list[str]:
         command = [
@@ -85,14 +117,18 @@ def worker_container_spec(
 ) -> WorkerContainerSpec:
     values = dict(selected_values)
     auth_mounts = ()
-    if "CODEX_AUTH_JSON_PATH" in values:
-        auth = Path(values["CODEX_AUTH_JSON_PATH"]).expanduser().resolve(strict=True)
+    key = subscription_login(values)
+    if key is not None:
+        login = SUBSCRIPTION_LOGINS[key]
+        auth = Path(values[key]).expanduser().resolve(strict=True)
         if not auth.is_file():
-            raise ValueError("CODEX_AUTH_JSON_PATH must point to a regular login file.")
-        if any(key in values for key in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_FORCE_AUTH_JSON")):
+            raise ValueError(f"{key} must point to a regular login file.")
+        if any(name in values for name in login.conflicts) or sum(
+            name in values for name in SUBSCRIPTION_LOGINS
+        ) > 1:
             raise ValueError("Subscription authentication cannot be mixed with API routing or FORCE_AUTH.")
-        values["CODEX_AUTH_JSON_PATH"] = "/run/ope-codex-auth.json"
-        auth_mounts = (WorkerMount(str(auth), "/run/ope-codex-auth.json", True),)
+        values[key] = login.mount
+        auth_mounts = (WorkerMount(str(auth), login.mount, True),)
     environment = {
         "HOME": "/tmp/home",
         "PATH": "/opt/optiprofiler-evolve/tools:/tmp/home/.local/bin:"

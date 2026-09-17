@@ -43,6 +43,29 @@ class HarnessCommandTests(unittest.TestCase):
         no_shell_tools = no_shell[no_shell.index("--tools") + 1].split(",")
         self.assertNotIn("Bash", no_shell_tools)
 
+    def test_claude_subscription_login_replaces_bare_mode_only_for_that_worker(self) -> None:
+        api_key = WorkerConfig(harness="claude", model="m", env={"ANTHROPIC_API_KEY": "k"})
+        login = WorkerConfig(harness="claude", model="m",
+                             env={"CLAUDE_CREDENTIALS_JSON_PATH": "/owner/login.json"})
+        passed = WorkerConfig(harness="claude", model="m",
+                              pass_env=("CLAUDE_CREDENTIALS_JSON_PATH",))
+        codex_named = WorkerConfig(harness="claude", model="m",
+                                   env={"CODEX_AUTH_JSON_PATH": "/owner/auth.json"})
+        build = lambda worker: build_harness_command(  # noqa: E731
+            worker, WorkersConfig(pool=(worker,)), ToolConfig(), Path("/workspace"))
+        for worker in (api_key, codex_named):
+            self.assertIn("--bare", build(worker))
+            self.assertNotIn("--setting-sources", build(worker))
+        for worker in (login, passed):
+            command = build(worker)
+            # Bare mode never reads an OAuth login; project/local settings stay excluded.
+            self.assertNotIn("--bare", command)
+            self.assertEqual(command[command.index("--setting-sources") + 1], "user")
+            self.assertIn("--strict-mcp-config", command)
+            self.assertEqual(command[command.index("--model") + 1], "m")
+            self.assertNotIn("--fallback-model", command)
+            self.assertNotIn("/owner/login.json", command)
+
     def test_codex_search_flag_follows_config(self) -> None:
         worker = WorkerConfig(harness="codex", model="test-model")
         workers = WorkersConfig(pool=(worker,))

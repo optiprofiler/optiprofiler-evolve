@@ -24,6 +24,11 @@ _T = TypeVar("_T")
 _K = TypeVar("_K")
 _V = TypeVar("_V")
 ASSESSMENT_PROFILES = ("smoke", "public", "validation", "hidden")
+# Owner login files a harness may receive as a read-only mount instead of a gateway.
+SUBSCRIPTION_LOGIN_ENV = {
+    "codex": "CODEX_AUTH_JSON_PATH",
+    "claude": "CLAUDE_CREDENTIALS_JSON_PATH",
+}
 
 
 class FrozenDict(Mapping[_K, _V], Generic[_K, _V]):
@@ -374,6 +379,11 @@ class WorkerConfig:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "env", freeze_value(self.env))
+
+    @property
+    def uses_subscription_login(self) -> bool:
+        """Whether this worker names its own harness's owner login file."""
+        return SUBSCRIPTION_LOGIN_ENV.get(self.harness) in {*self.env, *self.pass_env}
 
     def validate(self) -> None:
         if self.harness not in {"codex", "claude"}:
@@ -859,14 +869,13 @@ class EvolveConfig:
         self.sandbox.validate()
         self.workflow.validate()
         gateway_workers = [worker for worker in workers if worker.provider_gateway is not None]
-        subscription_workers = [worker for worker in workers if worker.harness == "codex"
-                                and "CODEX_AUTH_JSON_PATH" in {*worker.env, *worker.pass_env}
+        subscription_workers = [worker for worker in workers if worker.uses_subscription_login
                                 and worker.provider_gateway is None]
         if self.workers.adapter == "harbor" and (
             self.sandbox.backend != "docker"
             or len(gateway_workers) + len(subscription_workers) != len(workers)
         ):
-            raise ValueError("Harbor requires Docker and either a gateway or explicit Codex subscription path.")
+            raise ValueError("Harbor requires Docker and either a gateway or an explicit subscription login path.")
         if gateway_workers and self.workers.adapter not in {"cli", "harbor"}:
             raise ValueError(
                 "provider_gateway requires workers.adapter='cli' or 'harbor'; custom "

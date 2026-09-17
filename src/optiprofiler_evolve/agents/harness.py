@@ -56,7 +56,11 @@ def build_harness_command(
             "--permission-mode",
             "bypassPermissions",
             "--no-session-persistence",
-            "--bare",
+            # Bare mode never reads an OAuth login. A subscription worker instead loads only
+            # user settings (an empty tmpfs home), so files a candidate tree carries into
+            # /workspace/.claude cannot select a model, hooks, or MCP servers.
+            *(("--setting-sources", "user", "--strict-mcp-config")
+              if worker.uses_subscription_login else ("--bare",)),
             "--verbose",
             "--output-format",
             "stream-json",

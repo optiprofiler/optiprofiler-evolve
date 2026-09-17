@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from optiprofiler_evolve.agents.broker import BrokerConnection
-from optiprofiler_evolve.agents.container_spec import worker_container_spec
+from optiprofiler_evolve.agents.container_spec import subscription_login, worker_container_spec
 from optiprofiler_evolve.agents.provider_transport import (
     ProviderTransportPlan,
     prepare_provider_transport,
@@ -146,7 +146,7 @@ class DockerInvocationRuntime:
 
             self._create_network(
                 self.worker_network,
-                internal=not (self.workers.tools.network or "CODEX_AUTH_JSON_PATH" in self.selected_values),
+                internal=not (self.workers.tools.network or subscription_login(self.selected_values)),
                 kind="worker-network",
             )
             return self.original_worker, dict(self.selected_values)

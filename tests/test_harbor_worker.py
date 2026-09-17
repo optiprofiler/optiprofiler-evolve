@@ -66,6 +66,51 @@ class HarborConfigurationTests(unittest.TestCase):
             self.assertTrue(mount["readonly"])
             self.assertNotIn("test-only", before.decode())
 
+    def test_claude_subscription_login_is_a_read_only_file_never_an_environment_secret(self):
+        from optiprofiler_evolve.agents.harbor import HarborInvocationRuntime
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            login = root / "credentials.json"
+            login.write_text('{"claudeAiOauth": {"accessToken": "test-only-secret"}}')
+            (root / "invocation.json").write_text('{"trace_id":"claude-login","run_id":"test"}')
+            raw = harbor_config()
+            pool = [{"harness": "claude", "model": "fake",
+                     "env": {"CLAUDE_CREDENTIALS_JSON_PATH": str(login)}}]
+            raw["workers"].update({"pool": pool})
+            with self.assertRaises(ValueError):  # direct provider access stays an explicit opt-in
+                load_config(raw)
+            raw["workers"]["allow_direct_provider"] = True
+            raw["sandbox"]["allow_direct_network"] = True
+            config = load_config(raw)
+            values = dict(config.workers.pool[0].env)
+            runtime = HarborInvocationRuntime(worker=config.workers.pool[0], workers=config.workers,
+                sandbox=config.sandbox, selected_values=values, trace_dir=root)
+            launch_bytes = Path(runtime.worker_command(
+                workspace=root, tools_dir=root,
+                broker=BrokerConnection("/broker", "/artifacts", "fake", root, root),
+                harness=["claude", "--print"], selected_values=values)[-1]).read_bytes()
+            launch = json.loads(launch_bytes)
+            mount = next(m for m in launch["container"]["mounts"]
+                         if m["target"] == "/run/ope-claude-credentials.json")
+            self.assertEqual((mount["source"], mount["readonly"]), (str(login), True))
+            self.assertEqual(launch["container"]["environment"]["CLAUDE_CREDENTIALS_JSON_PATH"],
+                             "/run/ope-claude-credentials.json")
+            self.assertNotIn(b"test-only-secret", launch_bytes)
+            wrapper = launch["harness"]
+            self.assertEqual(wrapper[:2], ["sh", "-ec"])
+            self.assertIn("CLAUDE_CONFIG_DIR=/tmp/home/.claude", wrapper[2])
+            self.assertIn('"$CLAUDE_CONFIG_DIR/.credentials.json"', wrapper[2])
+            self.assertEqual(wrapper[-2:], ["claude", "--print"])
+            self.assertTrue(launch["allow_direct"])
+            for conflict in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN",
+                             "CODEX_AUTH_JSON_PATH"):
+                mixed = {**values, conflict: str(login)}
+                with self.subTest(conflict=conflict), self.assertRaisesRegex(ValueError, "mixed"):
+                    runtime.worker_command(
+                        workspace=root, tools_dir=root,
+                        broker=BrokerConnection("/broker", "/artifacts", "fake", root, root),
+                        harness=["claude"], selected_values=mixed)
+
     def test_harbor_refuses_to_map_a_root_controller_into_the_worker(self) -> None:
         from optiprofiler_evolve.agents.harbor import HarborWorkerAdapter
 
