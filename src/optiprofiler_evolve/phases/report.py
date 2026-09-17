@@ -9,6 +9,7 @@ from optiprofiler_evolve.agents.contracts import AgentJob
 from optiprofiler_evolve.agents.explanations import (
     capture_solver_explanation,
     explanation_instructions,
+    explanation_provenance,
 )
 from optiprofiler_evolve.errors import RunCancelled
 from optiprofiler_evolve.files import read_json_object
@@ -53,9 +54,12 @@ class ReportPhase:
             except ValueError as exc:
                 status = {"status": "invalid", "error": str(exc)}
         frozen_hash = tree_hash(context.final_solver)
+        # Reuse worker prose only when it was captured for exactly the delivered snapshot.
+        # A timeout or a missing intermediate explanation never affects solver selection.
+        valid, evidence = explanation_provenance(status, frozen_hash)
         # An optional report remains a pure projection. Explicitly requiring a
         # deliverable enables bounded metadata repair, never solver re-selection.
-        if status.get("status") != "complete" and self.require_explanation:
+        if not valid and self.require_explanation:
             for index in range(self.repair_attempts):
                 attempt = context.run_dir / "explanations" / f"final-repair-{index + 1}.json"
                 try:
@@ -64,7 +68,7 @@ class ReportPhase:
                         prompt=("Explain the frozen solver in candidate/. Do not edit its code. "
                                 "Do not run benchmarks or make performance claims not supported by evidence. "
                                 "Describe mechanisms, concise pseudocode, assumptions and limitations. "
-                                f"Previous explanation error: {status.get('error', 'missing explanation')}.\n"
+                                f"Previous explanation error: {status.get('error') or evidence}.\n"
                                 + explanation_instructions("candidate")),
                         inputs={"candidate": context.final_solver},
                         expected_outputs=("candidate/.optiprofiler_evolve/solver_explanation.json",),
@@ -72,23 +76,30 @@ class ReportPhase:
                         trace_links={"candidate_id": context.final_result.candidate_id},
                     ))
                     capture_solver_explanation(result.workspace / "candidate", attempt,
-                                               attempt_id=context.final_result.candidate_id)
+                                               attempt_id=context.final_result.candidate_id,
+                                               origin="final-explainer")
                     status = read_json_object(attempt)
                     if tree_hash(result.workspace / "candidate") != frozen_hash:
                         raise ValueError("Explainer changed its solver copy; explanation rejected.")
-                    if status.get("status") == "complete":
+                    valid, evidence = explanation_provenance(status, frozen_hash)
+                    if valid:
+                        if destination.is_file():
+                            # Keep the superseded worker prose as evidence, not as the deliverable.
+                            destination.replace(destination.with_suffix(".superseded.json"))
                         _write_json(destination, status)
                         break
                 except RunCancelled:
                     raise
                 except Exception as exc:
                     status = {"status": "invalid", "error": f"{type(exc).__name__}: {exc}"}
+                    valid, evidence = explanation_provenance(status, frozen_hash)
                     _write_json(attempt, status)
         if tree_hash(context.final_solver) != frozen_hash:
             raise ValueError("Final solver changed during report generation.")
         delivery = {"schema": "final_delivery/1", "candidate_id": context.final_result.candidate_id,
                     "solver_tree_hash": frozen_hash, "explanation_status": status.get("status"),
                     "explanation_error": status.get("error"),
+                    "explanation_provenance": {"valid": valid, "evidence": evidence},
                     "explanation_required": self.require_explanation}
         _write_json(context.run_dir / "final_delivery.json", delivery)
         return delivery
@@ -108,7 +119,7 @@ class ReportPhase:
             context.final_solver,
             explanation,
         )
-        complete = delivery["explanation_status"] == "complete" or not self.require_explanation
+        complete = delivery["explanation_provenance"]["valid"] or not self.require_explanation
         return PhaseResult(status="succeeded" if complete else "failed",
                            error=None if complete else "Final explanation is incomplete; solver is preserved.",
                            artifacts={"report": context.run_dir / "FINAL_REPORT.md"})

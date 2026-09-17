@@ -7,7 +7,7 @@ from pathlib import Path
 
 from optiprofiler_evolve.files import read_json_object
 from optiprofiler_evolve.models import FinalistResult
-from optiprofiler_evolve.solver import source_diff
+from optiprofiler_evolve.solver import source_diff, tree_hash
 
 
 def _score(value: float | None) -> str:
@@ -83,15 +83,72 @@ def write_final_report(
             f"- [`{path.relative_to(run_dir).as_posix()}`]({path.relative_to(run_dir).as_posix()})"
             for path in research_artifacts
         )
-    assessment_path = run_dir / "controller" / "final_evaluations" / best.candidate_id / "assessment.json"
-    if assessment_path.is_file():
-        assessment = read_json_object(assessment_path)
-        lines.extend(["", "## Quality assessment", "", "| Standard | Status | Score | Weight |",
-                      "|---|---|---:|---:|"])
+    lines.extend(_staged_quality(run_dir, best.candidate_id, tree_hash(final_solver)))
+    (run_dir / "FINAL_REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _delivery(run_dir: Path) -> Mapping[str, object]:
+    try:
+        return read_json_object(run_dir / "final_delivery.json")
+    except (OSError, ValueError):
+        return {}
+
+
+def stage_assessment(run_dir: Path, candidate_id: str, stage: str) -> Mapping[str, object] | None:
+    """Read the controller assessment a candidate or research variant received at one stage."""
+    roots = (
+        ("final_evaluations",) if stage == "hidden"
+        else ("evaluations", "research_evaluations")
+    )
+    for root in roots:
+        path = run_dir / "controller" / root / candidate_id
+        path = path / "assessment.json" if stage == "hidden" else path / stage / "assessment.json"
+        if path.is_file():
+            try:
+                return read_json_object(path)
+            except ValueError:
+                return None
+    return None
+
+
+def _staged_quality(run_dir: Path, candidate_id: str, delivered_hash: str) -> list[str]:
+    """Keep the stage where a criterion ran apart from the stage that only scored."""
+
+    stages = (
+        ("validation", "Validation audit (champion selection stage)"),
+        ("hidden", "Hidden performance (final stage; criteria disabled here are not re-run)"),
+    )
+    lines: list[str] = []
+    reports = {stage: stage_assessment(run_dir, candidate_id, stage) for stage, _ in stages}
+    if any(reports.values()):
+        lines.extend(["", "## Quality assessment"])
+    for stage, title in stages:
+        assessment = reports[stage]
+        if assessment is None:
+            continue
+        lines.extend(["", f"### {title}", "", f"- Assessed tree hash: `{assessment.get('tree_hash')}`",
+                      "", "| Standard | Status | Score | Weight | Note |", "|---|---|---:|---:|---|"])
         for name, item in assessment["results"].items():
             weight = assessment["criteria"][name]["weight"]
-            lines.append(f"| {name} | {item['status']} | {_score(item['score'])} | {weight} |")
-    (run_dir / "FINAL_REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            lines.append(f"| {name} | {item['status']} | {_score(item['score'])} | {weight} | "
+                         f"{item.get('error') or ''} |")
+    if not any(reports.values()):
+        return lines
+    review = (reports["validation"] or {}).get("results", {}).get("integrity") or {}
+    reviewed_hash = (reports["validation"] or {}).get("tree_hash")
+    lines.extend(["", "### Integrity review coverage of the delivered solver", "",
+                  f"- Delivered solver tree hash: `{delivered_hash}`"])
+    if review.get("status") == "succeeded" and reviewed_hash == delivered_hash:
+        lines.append("- ESTABLISHED at the validation stage: the independently reviewed tree "
+                     "is byte-identical to the delivered tree. The hidden stage did not re-run review.")
+    else:
+        reason = (
+            f"validation integrity status is `{review.get('status', 'absent')}`"
+            if review.get("status") != "succeeded"
+            else f"reviewed tree `{reviewed_hash}` differs from the delivered tree"
+        )
+        lines.append(f"- NOT ESTABLISHED for the delivered tree: {reason}.")
+    return lines
 
 
 def write_final_solver_explanation(
@@ -101,7 +158,10 @@ def write_final_solver_explanation(
 ) -> Path:
     source = run_dir / "explanations" / f"{best.candidate_id}.json"
     payload: Mapping[str, object] = {}
-    if source.is_file():
+    provenance = _delivery(run_dir).get("explanation_provenance")
+    if not isinstance(provenance, Mapping):
+        provenance = {"valid": False, "evidence": "the report stage recorded no explanation provenance"}
+    if source.is_file() and provenance.get("valid") is True:
         try:
             loaded = read_json_object(source)
             if loaded.get("status") == "complete":
@@ -123,6 +183,11 @@ def write_final_solver_explanation(
         "",
     ]
     if payload:
+        lines.extend([
+            "## Explanation Provenance", "",
+            f"- Delivered solver tree hash: `{tree_hash(final_solver)}`",
+            f"- Evidence level: {provenance.get('evidence')}.", "",
+        ])
         lines.extend(["## Summary", "", str(payload.get("summary", "")), ""])
         pseudocode = payload.get("pseudocode", [])
         if isinstance(pseudocode, list) and pseudocode:
@@ -164,6 +229,9 @@ def write_final_solver_explanation(
                 "",
                 "The winning candidate has no complete worker-authored explanation. "
                 "Review the source diff and verified strategy artifacts before reuse.",
+                "",
+                f"- Delivered solver tree hash: `{tree_hash(final_solver)}`",
+                f"- Reason: {provenance.get('evidence')}.",
                 "",
             ]
         )

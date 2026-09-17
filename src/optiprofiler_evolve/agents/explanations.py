@@ -21,6 +21,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from optiprofiler_evolve.files import read_regular_bytes, write_json
+from optiprofiler_evolve.solver import source_files, tree_hash
 
 EXPLANATION_SCHEMA = "solver_explanation/1"
 WORKER_EXPLANATION = Path(".optiprofiler_evolve/solver_explanation.json")
@@ -47,10 +48,12 @@ def capture_solver_explanation(
     destination: Path,
     *,
     attempt_id: str,
+    origin: str = "worker",
 ) -> Path:
     """Capture one worker explanation and remove it from candidate source."""
 
     source = workspace / WORKER_EXPLANATION
+    edited_later = _code_edited_after(workspace, source)
     metadata_root = source.parent
     try:
         metadata = metadata_root.lstat()
@@ -76,11 +79,42 @@ def capture_solver_explanation(
                 "schema": EXPLANATION_SCHEMA, "attempt_id": attempt_id,
                 "status": "invalid", "error": f"{type(exc).__name__}: {exc}",
             }
-    write_json(destination, payload)
     if metadata is not None:
         shutil.rmtree(metadata_root)
+    # Association with a snapshot, never proof that the prose describes it accurately.
+    payload["code_identity"] = {
+        "origin": origin,
+        "captured_tree_hash": tree_hash(workspace),
+        "code_edited_after_explanation": edited_later,
+    }
+    write_json(destination, payload)
     return destination
 
+
+def explanation_provenance(payload: Mapping[str, Any], delivered_tree_hash: str) -> tuple[bool, str]:
+    """Say whether captured prose may describe a delivered tree, and at what evidence level."""
+
+    if payload.get("status") != "complete":
+        return False, f"explanation status is {payload.get('status', 'missing')!r}"
+    identity = payload.get("code_identity")
+    if not isinstance(identity, Mapping):
+        return False, "legacy capture recorded no code snapshot for this explanation"
+    if identity.get("captured_tree_hash") != delivered_tree_hash:
+        return False, "explanation was captured for a different code snapshot than the delivered solver"
+    if identity.get("code_edited_after_explanation") is not False:
+        return False, "solver code was edited after the explanation was written"
+    return True, (
+        f"{identity.get('origin', 'worker')}-authored for the snapshot whose tree hash equals the "
+        "delivered solver, with no later code edit; the prose itself is not machine-verified"
+    )
+
+
+def _code_edited_after(workspace: Path, explanation: Path) -> bool | None:
+    try:
+        written = explanation.lstat().st_mtime_ns
+    except OSError:
+        return None
+    return any(path.lstat().st_mtime_ns > written for path in source_files(workspace))
 
 
 
