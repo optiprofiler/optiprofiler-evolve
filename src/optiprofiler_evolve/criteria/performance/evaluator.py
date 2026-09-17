@@ -25,6 +25,13 @@ from optiprofiler_evolve.data import DataPlan
 from optiprofiler_evolve.models import EvaluationResult
 from optiprofiler_evolve.solver import InterfaceSpec, validate_interface
 
+# OptiProfiler problem options that describe a selection. Exact names are already frozen
+# in the data plan, so forwarding them changes labels and report metadata only.
+_DECLARED_SELECTION_OPTIONS = frozenset({
+    "ptype", "mindim", "maxdim", "minb", "maxb", "minlcon", "maxlcon",
+    "minnlcon", "maxnlcon", "mincon", "maxcon",
+})
+
 
 class PythonOptiProfilerEvaluator:
     """Run candidate and immutable reference together in OptiProfiler benchmark."""
@@ -123,6 +130,10 @@ class PythonOptiProfilerEvaluator:
             opaque_root = Path(temporary)
             opaque_library = _write_opaque_problem_library(self.data, problems, opaque_root)
             protected = {
+                # The proxy selector ignores these; they only keep OptiProfiler's artifact
+                # labels and report header on the declared selection, not its 1--2 default.
+                **{key: value for key, value in self.data.selection.items()
+                   if key in _DECLARED_SELECTION_OPTIONS},
                 "plibs": [opaque_library],
                 "problem_names": [self.data.opaque_name(name) for name in problems],
                 "solver_names": ["candidate", "reference"],
@@ -429,7 +440,9 @@ def _scoped_data_manifest(data: DataPlan, mode: str) -> dict[str, Any]:
     aliases = {name: data.opaque_name(name) for name in problems}
     return {
         "library": data.library,
-        "selection": {},
+        # Names stay scoped below; only label metadata of the declared selection crosses.
+        "selection": {key: value for key, value in data.selection.items()
+                      if key in _DECLARED_SELECTION_OPTIONS},
         "universe": list(problems),
         "public": list(problems),
         "validation": list(problems) if mode == "validation" else [],

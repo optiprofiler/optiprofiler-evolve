@@ -112,6 +112,67 @@ class OptiProfilerEvaluationTests(unittest.TestCase):
                 if path.suffix in {".json", ".log", ".md", ".txt"}:
                     self.assertNotIn("ROSENBR", path.read_text(encoding="utf-8"))
 
+    def test_declared_selection_labels_artifacts_without_changing_ids_or_scores(self) -> None:
+        # BEALE has 2 variables and BROWNDEN 4: a declared 1--10 selection must not be
+        # reported as OptiProfiler's default 1--2 range, and labels must stay metadata.
+        problems = ("BEALE", "BROWNDEN")
+        aliases = {"BEALE": "P_OPAQUE_A", "BROWNDEN": "P_OPAQUE_B"}
+        observed = {}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "candidate").mkdir()
+            (root / "candidate" / "solver.py").write_text(
+                "def solver(fun, x0):\n    fun(x0)\n    x = x0 + 0.01\n"
+                "    return x if fun(x) < fun(x0) else x0\n",
+                encoding="utf-8",
+            )
+            (root / "reference").mkdir()
+            (root / "reference" / "solver.py").write_text(
+                "def solver(fun, x0):\n    fun(x0)\n    return x0\n", encoding="utf-8"
+            )
+            for label, selection in (
+                ("undeclared", {}),
+                ("declared", {"ptype": "u", "mindim": 1, "maxdim": 10}),
+            ):
+                data = DataPlan(
+                    library="s2mpj", selection=selection, universe=problems, public=problems,
+                    validation=(), hidden=(), smoke=problems[:1], split_seed=0,
+                    split_fingerprint="test", aliases=aliases,
+                )
+                evaluator = PythonOptiProfilerEvaluator(
+                    reference=root / "reference",
+                    interface=InterfaceSpec.parse("solver.py:solver"),
+                    data=data,
+                    config=EvaluationConfig(
+                        backend="unsafe_local", feedback_mode="full_artifacts",
+                        benchmark={"score_only": False, "n_jobs": 1, "max_eval_factor": 5},
+                    ),
+                )
+                output = root / label
+                result = evaluator.evaluate(root / "candidate", "public", output)
+                self.assertTrue(result.success, result.error)
+                report = next(output.rglob("test_log/report.txt")).read_text(encoding="utf-8")
+                rows = sorted(
+                    (line.split()[0], line.split()[2]) for line in report.splitlines()
+                    if line.startswith("P_OPAQUE_")
+                )
+                observed[label] = {
+                    "scores": (result.score, result.candidate_score, result.reference_score),
+                    "rows": rows,
+                    "report": report,
+                    "stamps": sorted(
+                        path.name.rsplit("_", 2)[0] for path in output.rglob("candidate_reference_*")
+                        if path.is_dir()
+                    ),
+                }
+        declared, undeclared = observed["declared"], observed["undeclared"]
+        self.assertEqual(declared["rows"], [("P_OPAQUE_A", "2"), ("P_OPAQUE_B", "4")])
+        self.assertEqual(declared["rows"], undeclared["rows"])
+        self.assertEqual(declared["scores"], undeclared["scores"])
+        self.assertEqual(declared["stamps"], ["candidate_reference_u_1_10_plain"])
+        self.assertRegex(declared["report"], r"Problem maxdim:\s+10\b")
+        self.assertEqual(undeclared["stamps"], ["candidate_reference_u_1_2_plain"])
+
 
 class DockerEvaluationBoundaryTests(unittest.TestCase):
     def test_nested_frozen_config_serializes_at_docker_request_boundary(self) -> None:
@@ -266,6 +327,19 @@ class DockerEvaluationBoundaryTests(unittest.TestCase):
         self.assertNotIn("VALIDATION", serialized)
         self.assertNotIn("HIDDEN", serialized)
         self.assertEqual(_problems_for_mode(data, "public_score"), ("PUBLIC",))
+
+    def test_scoped_request_forwards_only_declared_label_options(self) -> None:
+        data = DataPlan(
+            library="s2mpj",
+            selection={"ptype": "u", "mindim": 1, "maxdim": 10, "excludelist": ["HIDDEN"],
+                       "problem_names": ["HIDDEN"]},
+            universe=("PUBLIC", "HIDDEN"), public=("PUBLIC",), validation=(),
+            hidden=("HIDDEN",), smoke=("PUBLIC",), split_seed=0, split_fingerprint="test",
+            aliases={"PUBLIC": "P_PUBLIC", "HIDDEN": "P_HIDDEN"},
+        )
+        manifest = _scoped_data_manifest(data, "public")
+        self.assertEqual(manifest["selection"], {"ptype": "u", "mindim": 1, "maxdim": 10})
+        self.assertNotIn("HIDDEN", json.dumps(manifest))
 
 
 class DockerRequestStagingTests(unittest.TestCase):
